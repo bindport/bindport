@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "bindport"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description = "Proxy-neutral local development port registry and runner."
+
+[dependencies]
+bindport-adapters.workspace = true
+bindport-core.workspace = true
+bindport-registry.workspace = true
+bindport-runner.workspace = true
