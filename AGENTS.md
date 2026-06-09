@@ -62,13 +62,16 @@ Don't mutate state outside the working tree without being told to.
 ---
 
 ## Project Commands
-- Build: Not configured yet.
-- Test: Not configured yet.
-- Lint: Not configured yet.
-- Type check: Not configured yet.
-- Dev server: Not configured yet.
+- Build: `cargo build --release --locked`
+- Test: `cargo test --all-targets`
+- Lint: `cargo clippy --all-targets -- -D warnings`
+- Format check: `cargo fmt --all -- --check`
+- Type check: `cargo check --all-targets`
+- Full local CI: `mise run ci`
+- Dev server: Not configured yet; the dashboard does not exist.
 
-When real project commands are added, update this section with the exact commands agents should run.
+Do not claim `bindport -- <command>` works until the runner is implemented and
+verified against a child-process fixture.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.

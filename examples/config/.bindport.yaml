@@ -1,0 +1,27 @@
+project: example-app
+default_range: 29000-29999
+skip_ports:
+  - 29000
+  - 29070
+  - 29118
+  - 29167
+  - 29168
+  - 29169
+  - 29900
+  - 29901
+  - 29920
+  - 29999
+identity:
+  strategy: git-worktree
+services:
+  - name: web
+    command: next dev
+    env:
+      PORT: "{port}"
+    hostname: "{branch}.{project}.localhost"
+    health_url: "http://127.0.0.1:{port}/"
+proxy:
+  traefik:
+    enabled: true
+    directory: /path/to/traefik/dynamic/bindport
+    entrypoint: websecure
