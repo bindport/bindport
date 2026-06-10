@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "bindport-registry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description = "BindPort local registry primitives."
+
+[dependencies]
+bindport-core.workspace = true

@@ -1,0 +1,63 @@
+[settings]
+lockfile = true
+
+[tools]
+# `default` rustup profile is NOT used; mise installs minimal. rustfmt and
+# clippy are needed by local checks and CI.
+rust = { version = "1.96.0", components = "rustfmt,clippy" }
+"cargo:cargo-audit" = "0.22.1"
+actionlint = "1.7.12"
+gitleaks = "8.30.1"
+trivy = "0.70.0"
+# actionlint shells out to shellcheck for `run:` blocks. Pin it so local
+# workflow linting matches CI.
+shellcheck = "0.11.0"
+
+[tasks.fmt]
+description = "Check Rust formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks.clippy]
+description = "Run Rust lints"
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run all Rust tests"
+run = "cargo test --all-targets"
+
+[tasks.check]
+description = "Run fast Rust type checks"
+run = "cargo check --all-targets"
+
+[tasks.build]
+description = "Build the release binary"
+run = "cargo build --release --locked"
+
+[tasks.workflow-lint]
+description = "Lint GitHub Actions workflows"
+run = "actionlint"
+
+[tasks.audit]
+description = "Scan Rust dependencies for security advisories"
+run = "cargo audit"
+
+[tasks.secret-scan]
+description = "Scan committed history for leaked secrets"
+run = "gitleaks detect --source . --redact --no-banner"
+
+[tasks.security-scan]
+description = "Scan the filesystem for high-severity vulnerabilities and misconfigurations"
+run = "trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --exit-code 1 --skip-dirs target --skip-dirs .git --no-progress ."
+
+[tasks.ci]
+description = "Run the main local CI checks"
+depends = [
+    "fmt",
+    "clippy",
+    "workflow-lint",
+    "audit",
+    "secret-scan",
+    "security-scan",
+    "test",
+    "build",
+]

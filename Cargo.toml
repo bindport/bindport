@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+
+[workspace]
+members = [
+    "crates/bindport",
+    "crates/bindport-adapters",
+    "crates/bindport-core",
+    "crates/bindport-registry",
+    "crates/bindport-runner",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+authors = ["Michael Stutz <michaeljstutz@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/bindport/bindport"
+readme = "README.md"
+
+[workspace.dependencies]
+bindport-adapters = { path = "crates/bindport-adapters" }
+bindport-core = { path = "crates/bindport-core" }
+bindport-registry = { path = "crates/bindport-registry" }
+bindport-runner = { path = "crates/bindport-runner" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
