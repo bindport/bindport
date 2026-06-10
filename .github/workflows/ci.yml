@@ -53,6 +53,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: mise run secret-scan
 
+      - name: Scan filesystem security posture
+        if: ${{ !cancelled() }}
+        run: mise run security-scan
+
       - name: Test
         run: mise run test
 

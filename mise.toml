@@ -8,6 +8,7 @@ rust = { version = "1.96.0", components = "rustfmt,clippy" }
 "cargo:cargo-audit" = "0.22.1"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
+trivy = "0.70.0"
 # actionlint shells out to shellcheck for `run:` blocks. Pin it so local
 # workflow linting matches CI.
 shellcheck = "0.11.0"
@@ -44,6 +45,10 @@ run = "cargo audit"
 description = "Scan committed history for leaked secrets"
 run = "gitleaks detect --source . --redact --no-banner"
 
+[tasks.security-scan]
+description = "Scan the filesystem for high-severity vulnerabilities and misconfigurations"
+run = "trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --exit-code 1 --skip-dirs target --skip-dirs .git --no-progress ."
+
 [tasks.ci]
 description = "Run the main local CI checks"
 depends = [
@@ -52,6 +57,7 @@ depends = [
     "workflow-lint",
     "audit",
     "secret-scan",
+    "security-scan",
     "test",
     "build",
 ]
