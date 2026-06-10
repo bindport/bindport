@@ -15,24 +15,33 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
 
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
-- Minimal CLI placeholders for `--help`, `--version`, `status`, and `doctor`.
+- Minimal CLI support for `--help`, `--version`, `status`, `doctor`, and
+  one-shot `bindport -- <command>` command wrapping.
 - MIT license, security policy, third-party notices stub, CI/audit workflows,
   and local `mise` tasks.
 - npm wrapper package skeleton.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
-The planned first working UX is:
+The first runner slice is available:
 
 ```sh
-bindport -- next dev
+cargo run -p bindport -- -- next dev
 ```
 
-That command is not implemented yet. During bootstrap, use Cargo directly:
+It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
+`29000-29999`, injects `PORT=<assigned>`, inherits child stdio, and exits with
+the child process exit code. This bootstrap runner is probe-then-spawn, so
+another process can still claim the port before the child binds. Registry
+persistence, config discovery, sticky leases, allocation retry, and signal
+forwarding are still future v0.1 work.
+
+During bootstrap, use Cargo directly:
 
 ```sh
 cargo run -p bindport -- --help
 cargo run -p bindport -- doctor
 cargo run -p bindport -- status --json
+cargo run -p bindport -- -- sh -c 'echo "$PORT"'
 ```
 
 ## Project Commands
