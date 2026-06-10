@@ -11,3 +11,4 @@ readme.workspace = true
 description = "BindPort command runner primitives."
 
 [dependencies]
+bindport-core.workspace = true

@@ -70,8 +70,10 @@ Don't mutate state outside the working tree without being told to.
 - Full local CI: `mise run ci`
 - Dev server: Not configured yet; the dashboard does not exist.
 
-Do not claim `bindport -- <command>` works until the runner is implemented and
-verified against a child-process fixture.
+`bindport -- <command>` currently performs one-shot port selection and child
+process wrapping only. Do not claim registry persistence, config discovery,
+sticky leases, or signal forwarding work until those slices are implemented and
+verified.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.

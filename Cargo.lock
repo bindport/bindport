@@ -30,3 +30,6 @@ dependencies = [
 [[package]]
 name = "bindport-runner"
 version = "0.0.0"
+dependencies = [
+ "bindport-core",
+]
