@@ -12,3 +12,6 @@ description = "BindPort local registry primitives."
 
 [dependencies]
 bindport-core.workspace = true
+libc.workspace = true
+rusqlite.workspace = true
+serde.workspace = true

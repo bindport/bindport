@@ -23,6 +23,10 @@ bindport-adapters = { path = "crates/bindport-adapters" }
 bindport-core = { path = "crates/bindport-core" }
 bindport-registry = { path = "crates/bindport-registry" }
 bindport-runner = { path = "crates/bindport-runner" }
+libc = "0.2.178"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "=1.0.133"
 
 [profile.release]
 lto = "thin"
