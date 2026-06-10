@@ -64,6 +64,11 @@ Starter config examples live in [examples/config](examples/config):
 TOML is the reference format. When equivalent config files exist, discovery
 should prefer TOML, then JSON, then YAML.
 
+## Documentation
+
+- [Release](docs/release.md): bootstrap release policy, package-name timing, and
+  future npm/Cargo publish shape.
+
 ## License
 
 BindPort is licensed under the MIT License. See [LICENSE](./LICENSE).
