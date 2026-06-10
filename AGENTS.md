@@ -70,9 +70,10 @@ Don't mutate state outside the working tree without being told to.
 - Full local CI: `mise run ci`
 - Dev server: Not configured yet; the dashboard does not exist.
 
-`bindport -- <command>` currently performs one-shot port selection and child
-process wrapping only. Do not claim registry persistence, config discovery,
-sticky leases, or signal forwarding work until those slices are implemented and
+`bindport -- <command>` currently performs one-shot port selection, child
+process wrapping, and basic SQLite lease/run recording. Do not claim full
+identity resolution, config discovery, sticky leases, signal forwarding, or
+process staleness detection work until those slices are implemented and
 verified.
 
 ## AI Artifacts

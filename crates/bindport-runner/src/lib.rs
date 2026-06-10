@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener},
-    process::{Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
 };
 
 use bindport_core::PortRange;
@@ -41,6 +41,33 @@ impl fmt::Display for RunnerError {
 }
 
 impl std::error::Error for RunnerError {}
+
+pub struct RunningChild {
+    child: Child,
+    port: u16,
+    program: String,
+}
+
+impl RunningChild {
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.child.kill()
+    }
+
+    pub fn wait(&mut self) -> Result<ExitStatus, RunnerError> {
+        self.child.wait().map_err(|source| RunnerError::Wait {
+            command: self.program.clone(),
+            source,
+        })
+    }
+}
 
 /// Scans the configured TCP loopback range and returns the first available port.
 ///
@@ -91,10 +118,20 @@ pub fn run_child(
     range: PortRange,
     skip_ports: &[u16],
 ) -> Result<ExitStatus, RunnerError> {
+    let mut child = spawn_child(command, range, skip_ports)?;
+
+    child.wait()
+}
+
+pub fn spawn_child(
+    command: &[String],
+    range: PortRange,
+    skip_ports: &[u16],
+) -> Result<RunningChild, RunnerError> {
     let (program, args) = command.split_first().ok_or(RunnerError::NoCommand)?;
     let port = allocate_port(range, skip_ports)?;
 
-    let mut child = Command::new(program)
+    let child = Command::new(program)
         .args(args)
         .env(PORT_ENV_VAR, port.to_string())
         .stdin(Stdio::inherit())
@@ -106,9 +143,10 @@ pub fn run_child(
             source,
         })?;
 
-    child.wait().map_err(|source| RunnerError::Wait {
-        command: program.clone(),
-        source,
+    Ok(RunningChild {
+        child,
+        port,
+        program: program.clone(),
     })
 }
 

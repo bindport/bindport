@@ -15,3 +15,4 @@ bindport-adapters.workspace = true
 bindport-core.workspace = true
 bindport-registry.workspace = true
 bindport-runner.workspace = true
+serde_json.workspace = true

@@ -17,6 +17,7 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
   crates.
 - Minimal CLI support for `--help`, `--version`, `status`, `doctor`, and
   one-shot `bindport -- <command>` command wrapping.
+- Basic SQLite-backed lease/run recording with `bindport status --json`.
 - MIT license, security policy, third-party notices stub, CI/audit workflows,
   and local `mise` tasks.
 - npm wrapper package skeleton.
@@ -31,8 +32,8 @@ cargo run -p bindport -- -- next dev
 It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
 `29000-29999`, injects `PORT=<assigned>`, inherits child stdio, and exits with
 the child process exit code. This bootstrap runner is probe-then-spawn, so
-another process can still claim the port before the child binds. Registry
-persistence, config discovery, sticky leases, allocation retry, and signal
+another process can still claim the port before the child binds. Full identity
+resolution, config discovery, sticky lease reuse, allocation retry, and signal
 forwarding are still future v0.1 work.
 
 During bootstrap, use Cargo directly:

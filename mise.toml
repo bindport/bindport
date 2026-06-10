@@ -41,6 +41,10 @@ run = "actionlint"
 description = "Scan Rust dependencies for security advisories"
 run = "cargo audit"
 
+[tasks.dependency-guard]
+description = "Check for banned dependency substitutions"
+run = "if cargo tree --locked -p zmij >/dev/null 2>&1; then echo 'banned dependency present: zmij' >&2; exit 1; fi; cargo tree --locked -p ryu >/dev/null"
+
 [tasks.secret-scan]
 description = "Scan committed history for leaked secrets"
 run = "gitleaks detect --source . --redact --no-banner"
@@ -56,6 +60,7 @@ depends = [
     "clippy",
     "workflow-lint",
     "audit",
+    "dependency-guard",
     "secret-scan",
     "security-scan",
     "test",
