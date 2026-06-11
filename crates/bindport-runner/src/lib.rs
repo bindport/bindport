@@ -8,6 +8,8 @@ use std::{
 };
 
 #[cfg(unix)]
+use std::os::unix::process::CommandExt;
+#[cfg(unix)]
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use bindport_core::PortRange;
@@ -167,14 +169,16 @@ pub fn spawn_child(
     let mut signal_forwarding =
         prepare_signal_forwarding().map_err(|source| RunnerError::SignalForwarding { source })?;
 
-    let child = match Command::new(program)
+    let mut process = Command::new(program);
+    process
         .args(args)
         .env(PORT_ENV_VAR, port.to_string())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-    {
+        .stderr(Stdio::inherit());
+    prepare_child_signal_mask(&mut process, &signal_forwarding);
+
+    let child = match process.spawn() {
         Ok(child) => child,
         Err(source) => {
             if let Err(source) = signal_forwarding.deactivate() {
@@ -187,7 +191,17 @@ pub fn spawn_child(
             });
         }
     };
-    activate_signal_forwarding_for_pid(child.id());
+    let child = match signal_forwarding.activate_for_pid(child.id()) {
+        Ok(()) => child,
+        Err(source) => {
+            let mut child = child;
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = signal_forwarding.deactivate();
+
+            return Err(RunnerError::SignalForwarding { source });
+        }
+    };
 
     Ok(RunningChild {
         child,
@@ -200,6 +214,7 @@ pub fn spawn_child(
 #[cfg(unix)]
 struct SignalForwardingState {
     saved_handlers: Option<SavedSignalHandlers>,
+    saved_signal_mask: Option<libc::sigset_t>,
 }
 
 #[cfg(not(unix))]
@@ -213,11 +228,28 @@ struct SavedSignalHandlers {
 
 #[cfg(unix)]
 impl SignalForwardingState {
+    fn activate_for_pid(&mut self, pid: u32) -> io::Result<()> {
+        FORWARDED_CHILD_PID.store(pid as i32, Ordering::SeqCst);
+        self.restore_signal_mask()
+    }
+
     fn deactivate(&mut self) -> io::Result<()> {
         FORWARDED_CHILD_PID.store(0, Ordering::SeqCst);
+        let signal_mask = self.restore_signal_mask();
 
-        if let Some(saved_handlers) = self.saved_handlers.take() {
-            restore_signal_forwarding_handlers(&saved_handlers)?;
+        let handlers = if let Some(saved_handlers) = self.saved_handlers.take() {
+            restore_signal_forwarding_handlers(&saved_handlers)
+        } else {
+            Ok(())
+        };
+
+        signal_mask.and(handlers)
+    }
+
+    fn restore_signal_mask(&mut self) -> io::Result<()> {
+        if let Some(saved_signal_mask) = self.saved_signal_mask.as_ref() {
+            restore_signal_mask(saved_signal_mask)?;
+            self.saved_signal_mask = None;
         }
 
         Ok(())
@@ -226,6 +258,10 @@ impl SignalForwardingState {
 
 #[cfg(not(unix))]
 impl SignalForwardingState {
+    fn activate_for_pid(&mut self, _pid: u32) -> io::Result<()> {
+        Ok(())
+    }
+
     fn deactivate(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -234,13 +270,22 @@ impl SignalForwardingState {
 #[cfg(unix)]
 fn prepare_signal_forwarding() -> io::Result<SignalForwardingState> {
     reserve_signal_forwarding()?;
+    let saved_signal_mask = match block_signal_forwarding_signals() {
+        Ok(saved_signal_mask) => saved_signal_mask,
+        Err(error) => {
+            FORWARDED_CHILD_PID.store(0, Ordering::SeqCst);
+            return Err(error);
+        }
+    };
 
     match install_signal_forwarding_handlers() {
         Ok(saved_handlers) => Ok(SignalForwardingState {
             saved_handlers: Some(saved_handlers),
+            saved_signal_mask: Some(saved_signal_mask),
         }),
         Err(error) => {
             FORWARDED_CHILD_PID.store(0, Ordering::SeqCst);
+            let _ = restore_signal_mask(&saved_signal_mask);
             Err(error)
         }
     }
@@ -250,6 +295,18 @@ fn prepare_signal_forwarding() -> io::Result<SignalForwardingState> {
 fn prepare_signal_forwarding() -> io::Result<SignalForwardingState> {
     Ok(SignalForwardingState)
 }
+
+#[cfg(unix)]
+fn prepare_child_signal_mask(command: &mut Command, signal_forwarding: &SignalForwardingState) {
+    if let Some(saved_signal_mask) = signal_forwarding.saved_signal_mask {
+        unsafe {
+            command.pre_exec(move || restore_signal_mask(&saved_signal_mask));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn prepare_child_signal_mask(_command: &mut Command, _signal_forwarding: &SignalForwardingState) {}
 
 #[cfg(unix)]
 fn reserve_signal_forwarding() -> io::Result<()> {
@@ -265,14 +322,6 @@ fn reserve_signal_forwarding() -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn activate_signal_forwarding_for_pid(pid: u32) {
-    FORWARDED_CHILD_PID.store(pid as i32, Ordering::SeqCst);
-}
-
-#[cfg(not(unix))]
-fn activate_signal_forwarding_for_pid(_pid: u32) {}
-
-#[cfg(unix)]
 fn install_signal_forwarding_handlers() -> io::Result<SavedSignalHandlers> {
     let sigint = install_signal_forwarding_handler(libc::SIGINT)?;
 
@@ -283,6 +332,39 @@ fn install_signal_forwarding_handlers() -> io::Result<SavedSignalHandlers> {
             Err(error)
         }
     }
+}
+
+#[cfg(unix)]
+fn block_signal_forwarding_signals() -> io::Result<libc::sigset_t> {
+    let mut mask = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+    let mut previous = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+
+    if unsafe { libc::sigemptyset(&mut mask) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::sigaddset(&mut mask, libc::SIGINT) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::sigaddset(&mut mask, libc::SIGTERM) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let result = unsafe { libc::sigprocmask(libc::SIG_BLOCK, &mask, &mut previous) };
+    if result == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(previous)
+}
+
+#[cfg(unix)]
+fn restore_signal_mask(mask: &libc::sigset_t) -> io::Result<()> {
+    let result = unsafe { libc::sigprocmask(libc::SIG_SETMASK, mask, std::ptr::null_mut()) };
+    if result == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -371,6 +453,7 @@ mod tests {
     fn signal_forwarding_rejects_concurrent_children_and_restores_handlers() {
         let before_int = current_signal_action(libc::SIGINT);
         let before_term = current_signal_action(libc::SIGTERM);
+        let before_mask = current_signal_mask();
         let command = vec!["sleep".to_string(), "5".to_string()];
         let range = PortRange {
             start: 29_000,
@@ -396,6 +479,8 @@ mod tests {
 
         assert_signal_action_matches(libc::SIGINT, &before_int);
         assert_signal_action_matches(libc::SIGTERM, &before_term);
+        assert_signal_mask_matches(libc::SIGINT, &before_mask);
+        assert_signal_mask_matches(libc::SIGTERM, &before_mask);
     }
 
     #[cfg(unix)]
@@ -410,5 +495,22 @@ mod tests {
     fn assert_signal_action_matches(signal: libc::c_int, expected: &libc::sigaction) {
         let actual = current_signal_action(signal);
         assert_eq!(actual.sa_sigaction, expected.sa_sigaction);
+    }
+
+    #[cfg(unix)]
+    fn current_signal_mask() -> libc::sigset_t {
+        let mut mask = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+        let result = unsafe { libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &mut mask) };
+        assert_eq!(result, 0, "read signal mask");
+        mask
+    }
+
+    #[cfg(unix)]
+    fn assert_signal_mask_matches(signal: libc::c_int, expected: &libc::sigset_t) {
+        let actual = current_signal_mask();
+        let actual_member = unsafe { libc::sigismember(&actual, signal) };
+        let expected_member = unsafe { libc::sigismember(expected, signal) };
+
+        assert_eq!(actual_member, expected_member);
     }
 }

@@ -183,7 +183,7 @@ fn forwards_sigterm_to_wrapped_child_and_records_exit() {
             "--",
             "sh",
             "-c",
-            "printf '%s\n' $$ > \"$1\"; printf 'ready\n'; trap 'printf forwarded > \"$2\"; exit 42' TERM INT; while :; do sleep 1; done",
+            "printf '%s\n' $$ > \"$1\"; trap 'printf forwarded > \"$2\"; exit 42' TERM INT; printf 'ready\n'; while :; do sleep 1; done",
             "sh",
             &child_pid_path_arg,
             &marker_path_arg,
