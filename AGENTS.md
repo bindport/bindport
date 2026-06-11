@@ -71,10 +71,11 @@ Don't mutate state outside the working tree without being told to.
 - Dev server: Not configured yet; the dashboard does not exist.
 
 `bindport -- <command>` currently performs one-shot port selection, child
-process wrapping, optional config discovery, Unix SIGINT/SIGTERM forwarding, and
-basic SQLite lease/run recording. Do not claim full identity resolution, sticky
-leases, allocation retry, or process staleness detection work until those slices
-are implemented and verified.
+process wrapping, optional config discovery, basic project/service and git
+identity resolution, Unix SIGINT/SIGTERM forwarding, and basic SQLite lease/run
+recording. Do not claim package metadata inference, sticky leases, allocation
+retry, or full process conflict diagnostics work until those slices are
+implemented and verified.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.

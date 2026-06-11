@@ -12,8 +12,10 @@ use std::os::unix::process::ExitStatusExt;
 
 use bindport_adapters::AdapterKind;
 use bindport_core::{
-    APPLIED_CONFIG_KEYS, ConfigError, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE,
-    LoadedConfig, PortRange, SERVICE_NAME, default_fallback_config, discover_config,
+    APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, ConfigError,
+    DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE, IdentitySources, LoadedConfig,
+    PortRange, SERVICE_NAME, ServiceIdentity, default_fallback_config, detect_git_identity,
+    discover_config, resolve_identity,
 };
 use bindport_registry::{
     REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, default_registry_path,
@@ -49,15 +51,8 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
         }
         Some("doctor") => print_doctor(),
         Some("init") => init_fallback_config(),
-        Some("--") => run_wrapped_command(&args[1..]),
-        Some("run") => {
-            if args.get(1).map(String::as_str) == Some("--") {
-                run_wrapped_command(&args[2..])
-            } else {
-                eprintln!("usage: bindport run -- <command>");
-                ExitCode::FAILURE
-            }
-        }
+        Some("--") => run_wrapped_command(&args[1..], RunOptions::default()),
+        Some("run") => run_subcommand(&args[1..]),
         Some(command) => {
             eprintln!("unknown bindport command: {command}");
             eprintln!("run `bindport --help` for available bootstrap commands");
@@ -66,8 +61,31 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
     }
 }
 
-fn run_wrapped_command(command: &[String]) -> ExitCode {
-    match run_wrapped_command_result(command) {
+#[derive(Debug, Default)]
+struct RunOptions {
+    service: Option<String>,
+}
+
+fn run_subcommand(args: &[String]) -> ExitCode {
+    match args {
+        [separator, command @ ..] if separator == "--" => {
+            run_wrapped_command(command, RunOptions::default())
+        }
+        [service, separator, command @ ..] if separator == "--" => run_wrapped_command(
+            command,
+            RunOptions {
+                service: Some(service.clone()),
+            },
+        ),
+        _ => {
+            eprintln!("usage: bindport run [service] -- <command>");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_wrapped_command(command: &[String], options: RunOptions) -> ExitCode {
+    match run_wrapped_command_result(command, &options) {
         Ok(exit_code) => exit_code,
         Err(RunCommandError::Runner(error)) => {
             print_runner_error(&error);
@@ -80,13 +98,17 @@ fn run_wrapped_command(command: &[String]) -> ExitCode {
     }
 }
 
-fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunCommandError> {
+fn run_wrapped_command_result(
+    command: &[String],
+    options: &RunOptions,
+) -> Result<ExitCode, RunCommandError> {
     if command.is_empty() {
         return Err(RunnerError::NoCommand.into());
     }
 
     let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
     let config = resolve_config(&cwd)?;
+    let identity = resolve_run_identity(&cwd, command, options, &config);
     let mut registry = open_optional_registry();
     let mut skip_ports = config.skip_ports.clone();
 
@@ -107,8 +129,9 @@ fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunCommand
 
     let mut child = spawn_child(command, config.port_range, &skip_ports)?;
     let run = RunStart {
-        project: config.project_name(&cwd),
-        service: infer_service_name(command),
+        project: identity.project.clone(),
+        service: identity.service.clone(),
+        identity: Some(identity),
         host: String::from("127.0.0.1"),
         port: child.port(),
         pid: child.pid(),
@@ -166,16 +189,6 @@ struct ResolvedConfig {
     skip_ports: Vec<u16>,
 }
 
-impl ResolvedConfig {
-    fn project_name(&self, cwd: &Path) -> String {
-        self.loaded
-            .as_ref()
-            .and_then(|loaded| loaded.config.project.as_deref())
-            .map(str::to_owned)
-            .unwrap_or_else(|| infer_project_name(cwd))
-    }
-}
-
 fn resolve_config(cwd: &Path) -> Result<ResolvedConfig, ConfigError> {
     let fallback_path = fallback_config_path().ok();
     let loaded = discover_config(cwd, fallback_path.as_deref())?;
@@ -194,6 +207,35 @@ fn resolve_config(cwd: &Path) -> Result<ResolvedConfig, ConfigError> {
         fallback_path,
         port_range,
         skip_ports,
+    })
+}
+
+fn resolve_run_identity(
+    cwd: &Path,
+    command: &[String],
+    options: &RunOptions,
+    config: &ResolvedConfig,
+) -> ServiceIdentity {
+    let env_project = env::var(BINDPORT_PROJECT_ENV).ok();
+    let env_service = env::var(BINDPORT_SERVICE_ENV).ok();
+    let config_project = config
+        .loaded
+        .as_ref()
+        .and_then(|loaded| loaded.config.project.as_deref());
+    let config_service = config
+        .loaded
+        .as_ref()
+        .and_then(|loaded| loaded.config.service.as_deref());
+
+    resolve_identity(IdentitySources {
+        cwd,
+        command,
+        cli_project: None,
+        cli_service: options.service.as_deref(),
+        env_project: env_project.as_deref(),
+        env_service: env_service.as_deref(),
+        config_project,
+        config_service,
     })
 }
 
@@ -287,8 +329,22 @@ fn print_doctor() -> ExitCode {
         }
     }
 
+    print_git_diagnostics(&cwd);
+
     println!("first proxy adapter: {}", AdapterKind::Traefik.as_str());
     ExitCode::SUCCESS
+}
+
+fn print_git_diagnostics(cwd: &Path) {
+    match detect_git_identity(cwd) {
+        Some(git) => {
+            println!("git worktree: {}", git.worktree_path.display());
+            println!("git branch: {}", git.branch);
+            println!("git branch label: {}", git.branch_label);
+            println!("git commit: {}", git.commit);
+        }
+        None => println!("git worktree: none"),
+    }
 }
 
 fn print_config_diagnostics(config: &ResolvedConfig) {
@@ -415,30 +471,13 @@ fn registry_disabled_warning() {
     );
 }
 
-fn infer_project_name(cwd: &Path) -> String {
-    cwd.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("unknown")
-        .to_owned()
-}
-
-fn infer_service_name(command: &[String]) -> String {
-    command
-        .first()
-        .and_then(|program| Path::new(program).file_stem())
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("command")
-        .to_owned()
-}
-
 fn print_help() {
     println!("BindPort - proxy-neutral local development port registry");
     println!();
     println!("Usage:");
     println!("  bindport -- <command>        Run a command with an assigned PORT");
-    println!("  bindport run -- <command>    Run a command with an assigned PORT");
+    println!("  bindport run [service] -- <command>");
+    println!("                                  Run a command with an optional service name");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport doctor              Show bootstrap diagnostics");
     println!("  bindport init                Create optional fallback config");
