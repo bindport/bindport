@@ -9,7 +9,10 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE};
+use bindport_core::{
+    BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS,
+    FALLBACK_CONFIG_FILE,
+};
 use bindport_registry::REGISTRY_PATH_ENV;
 use serde_json::Value;
 
@@ -20,6 +23,8 @@ fn bindport() -> Command {
 fn bindport_with_registry(registry_path: &Path) -> Command {
     let mut command = bindport();
     command.env(REGISTRY_PATH_ENV, registry_path);
+    command.env_remove(BINDPORT_PROJECT_ENV);
+    command.env_remove(BINDPORT_SERVICE_ENV);
     command
 }
 
@@ -92,6 +97,44 @@ fn run_subcommand_accepts_dash_dash_separator() {
 
     assert!(output.status.success());
     assert!(!output.stdout.is_empty());
+}
+
+#[test]
+fn run_subcommand_service_argument_overrides_env_and_config() {
+    let registry_path = temp_registry_path("identity-precedence");
+    let root = temp_test_dir("identity-precedence-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"config-project\"\nservice = \"config-service\"\ndefault_range = \"29120-29120\"\n",
+    )
+    .expect("write config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .env(BINDPORT_PROJECT_ENV, "env-project")
+        .env(BINDPORT_SERVICE_ENV, "env-service")
+        .args([
+            "run",
+            "cli-service",
+            "--",
+            "sh",
+            "-c",
+            "printf '%s' \"$PORT\"",
+        ])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"29120");
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["services"][0]["project"], "env-project");
+    assert_eq!(status["services"][0]["service"], "cli-service");
 }
 
 #[test]
@@ -200,6 +243,46 @@ fn parent_project_config_sets_port_range_and_project() {
 }
 
 #[test]
+fn status_json_reports_git_identity() {
+    let registry_path = temp_registry_path("git-identity-registry");
+    let root = temp_test_dir("git-identity-root");
+    init_git_repo(&root, "feature/tree");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let service = &status["services"][0];
+
+    assert_eq!(
+        service["project"],
+        root.file_name().unwrap().to_str().unwrap()
+    );
+    assert_eq!(service["branch"], "feature/tree");
+    assert_eq!(service["branch_label"], "feature-tree");
+    assert_eq!(
+        service["worktree_path"],
+        root.canonicalize().unwrap().display().to_string()
+    );
+    assert!(service["commit"].as_str().expect("commit").len() >= 7);
+    assert!(
+        service["identity_key"]
+            .as_str()
+            .expect("identity key")
+            .contains("feature-tree")
+    );
+}
+
+#[test]
 fn toml_config_wins_over_json_in_same_directory() {
     let registry_path = temp_registry_path("config-precedence-registry");
     let root = temp_test_dir("config-precedence-root");
@@ -265,7 +348,7 @@ fn doctor_reports_unknown_config_keys() {
     let stdout = String::from_utf8(output.stdout).expect("stdout");
 
     assert!(stdout.contains("ignored unknown top-level keys: defaultrange, proxy"));
-    assert!(stdout.contains("config applied keys: project, default_range, skip_ports"));
+    assert!(stdout.contains("config applied keys: project, service, default_range, skip_ports"));
 }
 
 #[test]
@@ -372,4 +455,30 @@ fn temp_path(name: &str) -> PathBuf {
         .as_nanos();
 
     std::env::temp_dir().join(format!("bindport-{name}-{}-{now}", std::process::id()))
+}
+
+fn init_git_repo(root: &Path, branch: &str) {
+    run_git(root, ["init"]);
+    run_git(root, ["config", "user.email", "bindport@example.invalid"]);
+    run_git(root, ["config", "user.name", "BindPort Test"]);
+    run_git(root, ["config", "commit.gpgsign", "false"]);
+    fs::write(root.join("README.md"), "test\n").expect("write git fixture");
+    run_git(root, ["add", "README.md"]);
+    run_git(root, ["commit", "-m", "initial"]);
+    run_git(root, ["checkout", "-B", branch]);
+}
+
+fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .output()
+        .expect("run git");
+
+    assert!(
+        output.status.success(),
+        "git failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

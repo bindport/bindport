@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bindport_core::SERVICE_NAME;
+use bindport_core::{SERVICE_NAME, ServiceIdentity};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
@@ -108,6 +108,7 @@ pub struct Registry {
 pub struct RunStart {
     pub project: String,
     pub service: String,
+    pub identity: Option<ServiceIdentity>,
     pub host: String,
     pub port: u16,
     pub pid: u32,
@@ -137,6 +138,13 @@ pub struct StatusService {
     pub port: u16,
     pub host: String,
     pub url: String,
+    pub worktree_path: Option<String>,
+    pub worktree_hash: Option<String>,
+    pub git_common_dir: Option<String>,
+    pub branch: Option<String>,
+    pub branch_label: Option<String>,
+    pub commit: Option<String>,
+    pub identity_key: Option<String>,
     pub pid: Option<u32>,
     pub command: String,
     pub cwd: String,
@@ -240,13 +248,39 @@ impl Registry {
     pub fn record_run_started(&mut self, run: &RunStart) -> Result<StartedRun, RegistryError> {
         let now = utc_now(&self.connection)?;
         let cwd = run.cwd.display().to_string();
+        let identity = run.identity.as_ref();
+        let git = identity.and_then(|identity| identity.git.as_ref());
+        let worktree_path = git.map(|git| git.worktree_path.display().to_string());
+        let worktree_hash = git.map(|git| git.worktree_hash.as_str());
+        let git_common_dir = git.map(|git| git.git_common_dir.display().to_string());
+        let branch = git.map(|git| git.branch.as_str());
+        let branch_label = git.map(|git| git.branch_label.as_str());
+        let git_commit = git.map(|git| git.commit.as_str());
+        let identity_key = identity.map(|identity| identity.identity_key.as_str());
         let transaction = self.connection.transaction()?;
 
         transaction.execute(
             "INSERT INTO leases (
-                project, service, port, host, state, allocated_at, last_seen_at
-             ) VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?5)",
-            params![run.project, run.service, run.port, run.host, now],
+                project, service, worktree_path, worktree_hash, git_common_dir,
+                branch, branch_label, git_commit, identity_key, port, host, state,
+                allocated_at, last_seen_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12, ?12
+             )",
+            params![
+                run.project,
+                run.service,
+                worktree_path,
+                worktree_hash,
+                git_common_dir,
+                branch,
+                branch_label,
+                git_commit,
+                identity_key,
+                run.port,
+                run.host,
+                now
+            ],
         )?;
         let lease_id = transaction.last_insert_rowid();
 
@@ -313,6 +347,13 @@ impl Registry {
                 id INTEGER PRIMARY KEY,
                 project TEXT NOT NULL,
                 service TEXT NOT NULL,
+                worktree_path TEXT,
+                worktree_hash TEXT,
+                git_common_dir TEXT,
+                branch TEXT,
+                branch_label TEXT,
+                git_commit TEXT,
+                identity_key TEXT,
                 port INTEGER NOT NULL,
                 host TEXT NOT NULL,
                 state TEXT NOT NULL,
@@ -338,11 +379,49 @@ impl Registry {
             CREATE INDEX IF NOT EXISTS runs_lease_id_idx
             ON runs(lease_id);
 
-            PRAGMA user_version = 1;
+            ",
+        )?;
+        self.ensure_lease_identity_columns()?;
+        self.connection.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS leases_identity_key_idx
+            ON leases(identity_key);
+
+            PRAGMA user_version = 2;
             ",
         )?;
 
         Ok(())
+    }
+
+    fn ensure_lease_identity_columns(&self) -> Result<(), RegistryError> {
+        let existing = self.lease_columns()?;
+
+        for (column, definition) in [
+            ("worktree_path", "TEXT"),
+            ("worktree_hash", "TEXT"),
+            ("git_common_dir", "TEXT"),
+            ("branch", "TEXT"),
+            ("branch_label", "TEXT"),
+            ("git_commit", "TEXT"),
+            ("identity_key", "TEXT"),
+        ] {
+            if !existing.iter().any(|existing| existing == column) {
+                self.connection.execute(
+                    &format!("ALTER TABLE leases ADD COLUMN {column} {definition}"),
+                    [],
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn lease_columns(&self) -> Result<Vec<String>, RegistryError> {
+        let mut statement = self.connection.prepare("PRAGMA table_info(leases)")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     fn active_runs(&self) -> Result<Vec<ActiveRun>, RegistryError> {
@@ -372,6 +451,13 @@ impl Registry {
                 leases.state,
                 leases.port,
                 leases.host,
+                leases.worktree_path,
+                leases.worktree_hash,
+                leases.git_common_dir,
+                leases.branch,
+                leases.branch_label,
+                leases.git_commit,
+                leases.identity_key,
                 runs.pid,
                 runs.command,
                 runs.cwd,
@@ -393,12 +479,19 @@ impl Registry {
                 port,
                 url: format!("http://{host}:{port}"),
                 host,
-                pid: row.get(5)?,
-                command: row.get(6)?,
-                cwd: row.get(7)?,
-                started_at: row.get(8)?,
-                exited_at: row.get(9)?,
-                exit_code: row.get(10)?,
+                worktree_path: row.get(5)?,
+                worktree_hash: row.get(6)?,
+                git_common_dir: row.get(7)?,
+                branch: row.get(8)?,
+                branch_label: row.get(9)?,
+                commit: row.get(10)?,
+                identity_key: row.get(11)?,
+                pid: row.get(12)?,
+                command: row.get(13)?,
+                cwd: row.get(14)?,
+                started_at: row.get(15)?,
+                exited_at: row.get(16)?,
+                exit_code: row.get(17)?,
                 health: String::from("unknown"),
             })
         })?;
@@ -478,6 +571,7 @@ mod tests {
             .record_run_started(&RunStart {
                 project: String::from("bindport"),
                 service: String::from("next"),
+                identity: None,
                 host: String::from("127.0.0.1"),
                 port: 29_123,
                 pid: 12_345,
@@ -501,12 +595,63 @@ mod tests {
     }
 
     #[test]
+    fn registry_records_identity_fields_for_status() {
+        let mut registry = Registry::open(temp_registry_path("identity")).expect("registry");
+        let identity = ServiceIdentity {
+            project: String::from("bindport"),
+            service: String::from("web"),
+            git: Some(bindport_core::GitIdentity {
+                worktree_path: PathBuf::from("/tmp/bindport-worktree"),
+                worktree_hash: String::from("abc123"),
+                git_common_dir: PathBuf::from("/tmp/bindport-worktree/.git"),
+                branch: String::from("feature/tree"),
+                branch_label: String::from("feature-tree"),
+                commit: String::from("1234567"),
+            }),
+            identity_key: String::from("bindport:web:abc123:feature-tree"),
+        };
+        let started = registry
+            .record_run_started(&RunStart {
+                project: identity.project.clone(),
+                service: identity.service.clone(),
+                identity: Some(identity),
+                host: String::from("127.0.0.1"),
+                port: 29_124,
+                pid: 12_346,
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport-worktree"),
+            })
+            .expect("record start");
+
+        registry
+            .record_run_finished(started, Some(0))
+            .expect("record finish");
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        let service = &snapshot.services[0];
+
+        assert_eq!(
+            service.worktree_path.as_deref(),
+            Some("/tmp/bindport-worktree")
+        );
+        assert_eq!(service.worktree_hash.as_deref(), Some("abc123"));
+        assert_eq!(service.branch.as_deref(), Some("feature/tree"));
+        assert_eq!(service.branch_label.as_deref(), Some("feature-tree"));
+        assert_eq!(service.commit.as_deref(), Some("1234567"));
+        assert_eq!(
+            service.identity_key.as_deref(),
+            Some("bindport:web:abc123:feature-tree")
+        );
+    }
+
+    #[test]
     fn active_ports_reports_active_and_reserved_leases() {
         let mut registry = Registry::open(temp_registry_path("active")).expect("registry");
         registry
             .record_run_started(&RunStart {
                 project: String::from("bindport"),
                 service: String::from("web"),
+                identity: None,
                 host: String::from("127.0.0.1"),
                 port: 29_500,
                 pid: std::process::id(),
@@ -526,6 +671,7 @@ mod tests {
             .record_run_started(&RunStart {
                 project: String::from("bindport"),
                 service: String::from("web"),
+                identity: None,
                 host: String::from("127.0.0.1"),
                 port: 29_500,
                 pid: 2_000_000_000,

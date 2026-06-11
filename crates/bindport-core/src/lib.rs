@@ -3,6 +3,7 @@
 use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use serde::Deserialize;
@@ -19,7 +20,9 @@ pub const DEFAULT_SKIP_PORTS: &[u16] = &[
 ];
 pub const CONFIG_FILENAMES: &[&str] = &[".bindport.toml", ".bindport.json", ".bindport.yaml"];
 pub const FALLBACK_CONFIG_FILE: &str = "config.toml";
-pub const APPLIED_CONFIG_KEYS: &[&str] = &["project", "default_range", "skip_ports"];
+pub const APPLIED_CONFIG_KEYS: &[&str] = &["project", "service", "default_range", "skip_ports"];
+pub const BINDPORT_PROJECT_ENV: &str = "BINDPORT_PROJECT";
+pub const BINDPORT_SERVICE_ENV: &str = "BINDPORT_SERVICE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRange {
@@ -53,8 +56,39 @@ pub fn is_default_skip_port(port: u16) -> bool {
 #[serde(default)]
 pub struct BindPortConfig {
     pub project: Option<String>,
+    pub service: Option<String>,
     pub default_range: Option<String>,
     pub skip_ports: Option<Vec<u16>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitIdentity {
+    pub worktree_path: PathBuf,
+    pub worktree_hash: String,
+    pub git_common_dir: PathBuf,
+    pub branch: String,
+    pub branch_label: String,
+    pub commit: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceIdentity {
+    pub project: String,
+    pub service: String,
+    pub git: Option<GitIdentity>,
+    pub identity_key: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IdentitySources<'a> {
+    pub cwd: &'a Path,
+    pub command: &'a [String],
+    pub cli_project: Option<&'a str>,
+    pub cli_service: Option<&'a str>,
+    pub env_project: Option<&'a str>,
+    pub env_service: Option<&'a str>,
+    pub config_project: Option<&'a str>,
+    pub config_service: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,6 +311,169 @@ pub fn parse_config(format: ConfigFormat, contents: &str) -> Result<BindPortConf
     }
 }
 
+pub fn resolve_identity(sources: IdentitySources<'_>) -> ServiceIdentity {
+    let git = detect_git_identity(sources.cwd);
+    let project = first_non_empty([
+        sources.cli_project,
+        sources.env_project,
+        sources.config_project,
+    ])
+    .map(str::to_owned)
+    .unwrap_or_else(|| infer_project_name(sources.cwd, git.as_ref()));
+    let service = first_non_empty([
+        sources.cli_service,
+        sources.env_service,
+        sources.config_service,
+    ])
+    .map(str::to_owned)
+    .unwrap_or_else(|| infer_service_name(sources.command));
+    let identity_key = identity_key(&project, &service, sources.cwd, git.as_ref());
+
+    ServiceIdentity {
+        project,
+        service,
+        git,
+        identity_key,
+    }
+}
+
+pub fn detect_git_identity(cwd: &Path) -> Option<GitIdentity> {
+    let worktree_path = git_output(cwd, ["rev-parse", "--show-toplevel"])?;
+    let worktree_path = absolute_path(cwd, PathBuf::from(worktree_path));
+    let git_common_dir = git_output(cwd, ["rev-parse", "--git-common-dir"])?;
+    let git_common_dir = absolute_path(cwd, PathBuf::from(git_common_dir));
+    let commit = git_output(cwd, ["rev-parse", "--short", "HEAD"])?;
+    let branch = git_output(cwd, ["branch", "--show-current"])
+        .filter(|branch| !branch.is_empty())
+        .unwrap_or_else(|| format!("detached-{commit}"));
+    let branch_label = normalize_branch_label(&branch);
+    let worktree_hash = stable_path_hash(&worktree_path);
+
+    Some(GitIdentity {
+        worktree_path,
+        worktree_hash,
+        git_common_dir,
+        branch,
+        branch_label,
+        commit,
+    })
+}
+
+pub fn normalize_branch_label(branch: &str) -> String {
+    let mut label = String::new();
+    let mut previous_was_separator = false;
+
+    for character in branch.chars() {
+        if character.is_ascii_alphanumeric() {
+            label.push(character.to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator && !label.is_empty() {
+            label.push('-');
+            previous_was_separator = true;
+        }
+    }
+
+    while label.ends_with('-') {
+        label.pop();
+    }
+
+    if label.is_empty() {
+        String::from("branch")
+    } else {
+        label
+    }
+}
+
+fn git_output<const N: usize>(cwd: &Path, args: [&str; N]) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-c")
+        .arg("core.fsmonitor=")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
+
+fn absolute_path(cwd: &Path, path: PathBuf) -> PathBuf {
+    let path = if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    };
+
+    path.canonicalize().unwrap_or(path)
+}
+
+fn first_non_empty<const N: usize>(values: [Option<&str>; N]) -> Option<&str> {
+    values
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+}
+
+fn infer_project_name(cwd: &Path, git: Option<&GitIdentity>) -> String {
+    git.map(|git| git.worktree_path.as_path())
+        .unwrap_or(cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
+fn infer_service_name(command: &[String]) -> String {
+    command
+        .first()
+        .and_then(|program| Path::new(program).file_stem())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("command")
+        .to_owned()
+}
+
+fn identity_key(project: &str, service: &str, cwd: &Path, git: Option<&GitIdentity>) -> String {
+    let (path_hash, branch_label) = git
+        .map(|git| (git.worktree_hash.as_str(), git.branch_label.as_str()))
+        .unwrap_or_else(|| ("no-git", "no-branch"));
+    let path_hash = if path_hash == "no-git" {
+        stable_path_hash(&absolute_path(cwd, cwd.to_path_buf()))
+    } else {
+        path_hash.to_owned()
+    };
+
+    format!("{project}:{service}:{path_hash}:{branch_label}")
+}
+
+fn stable_path_hash(path: &Path) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    let path = path.to_string_lossy();
+
+    for byte in path.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    format!("{hash:016x}")
+}
+
 fn unknown_top_level_config_keys(
     format: ConfigFormat,
     contents: &str,
@@ -360,6 +557,10 @@ pub fn default_fallback_config() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn default_range_matches_roadmap() {
@@ -425,6 +626,79 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_branch_labels_for_hostnames() {
+        assert_eq!(normalize_branch_label("feature/tree"), "feature-tree");
+        assert_eq!(
+            normalize_branch_label("BUGFIX/JIRA-123_widget"),
+            "bugfix-jira-123-widget"
+        );
+        assert_eq!(normalize_branch_label("!!!"), "branch");
+    }
+
+    #[test]
+    fn identity_sources_follow_precedence() {
+        let cwd = Path::new("/tmp/bindport");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd,
+            command: &command,
+            cli_project: None,
+            cli_service: Some("cli-service"),
+            env_project: Some("env-project"),
+            env_service: Some("env-service"),
+            config_project: Some("config-project"),
+            config_service: Some("config-service"),
+        });
+
+        assert_eq!(identity.project, "env-project");
+        assert_eq!(identity.service, "cli-service");
+    }
+
+    #[test]
+    fn config_identity_beats_inference() {
+        let cwd = Path::new("/tmp/bindport");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: Some("config-project"),
+            config_service: Some("config-service"),
+        });
+
+        assert_eq!(identity.project, "config-project");
+        assert_eq!(identity.service, "config-service");
+    }
+
+    #[test]
+    fn detects_git_worktree_branch_and_commit() {
+        let root = temp_test_dir("git-identity");
+        git(&root, ["init"]);
+        git(&root, ["config", "user.email", "bindport@example.invalid"]);
+        git(&root, ["config", "user.name", "BindPort Test"]);
+        git(&root, ["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("README.md"), "test\n").expect("write fixture");
+        git(&root, ["add", "README.md"]);
+        git(&root, ["commit", "-m", "initial"]);
+        git(&root, ["checkout", "-B", "feature/tree"]);
+        let nested = root.join("apps").join("web");
+        fs::create_dir_all(&nested).expect("nested dir");
+
+        let identity = detect_git_identity(&nested).expect("git identity");
+
+        assert_eq!(identity.worktree_path, root.canonicalize().expect("root"));
+        assert_eq!(identity.branch, "feature/tree");
+        assert_eq!(identity.branch_label, "feature-tree");
+        assert!(!identity.commit.is_empty());
+        assert!(!identity.worktree_hash.is_empty());
+    }
+
+    #[test]
     fn parses_port_range() {
         assert_eq!(
             parse_port_range("29100-29199").expect("range"),
@@ -437,5 +711,32 @@ mod tests {
             parse_port_range("29199-29100"),
             Err(PortRangeParseError::Empty(_))
         ));
+    }
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("bindport-core-{name}-{}-{now}", std::process::id()));
+
+        fs::create_dir_all(&path).expect("temp dir");
+        path
+    }
+
+    fn git<const N: usize>(cwd: &Path, args: [&str; N]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .expect("run git");
+
+        assert!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

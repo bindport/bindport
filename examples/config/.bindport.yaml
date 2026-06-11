@@ -1,4 +1,5 @@
 project: example-app
+service: web
 default_range: 29000-29999
 skip_ports:
   - 29000
