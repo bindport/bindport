@@ -30,11 +30,11 @@ cargo run -p bindport -- -- next dev
 ```
 
 It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
-`29000-29999`, injects `PORT=<assigned>`, inherits child stdio, and exits with
-the child process exit code. This bootstrap runner is probe-then-spawn, so
-another process can still claim the port before the child binds. Full identity
-resolution, config discovery, sticky lease reuse, allocation retry, and signal
-forwarding are still future v0.1 work.
+`29000-29999`, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
+SIGINT/SIGTERM to the child, and exits with the child process exit code. This
+bootstrap runner is probe-then-spawn, so another process can still claim the port
+before the child binds. Full identity resolution, config discovery, sticky lease
+reuse, and allocation retry are still future v0.1 work.
 
 During bootstrap, use Cargo directly:
 

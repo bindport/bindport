@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
+    fs,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Child, Command, ExitStatus, Stdio},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS};
@@ -27,6 +30,28 @@ fn bindport_without_registry_path() -> Command {
     command.env_remove("HOME");
     command.env_remove("APPDATA");
     command
+}
+
+#[cfg(unix)]
+fn send_signal(pid: u32, signal: libc::c_int) {
+    let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+    assert_eq!(result, 0, "send signal to process {pid}");
+}
+
+fn wait_for_child(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if let Some(status) = child.try_wait().expect("poll child status") {
+            return Some(status);
+        }
+
+        if Instant::now() >= deadline {
+            return None;
+        }
+
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[test]
@@ -142,6 +167,72 @@ fn runner_continues_when_registry_path_is_unavailable() {
 
     assert!(DEFAULT_PORT_RANGE.contains(port));
     assert!(stderr.contains("running without registry recording"));
+}
+
+#[cfg(unix)]
+#[test]
+fn forwards_sigterm_to_wrapped_child_and_records_exit() {
+    let registry_path = temp_registry_path("signal-registry");
+    let child_pid_path = temp_registry_path("signal-child-pid");
+    let marker_path = temp_registry_path("signal-marker");
+    let child_pid_path_arg = child_pid_path.display().to_string();
+    let marker_path_arg = marker_path.display().to_string();
+
+    let mut bindport = bindport_with_registry(&registry_path)
+        .args([
+            "--",
+            "sh",
+            "-c",
+            "printf '%s\n' $$ > \"$1\"; printf 'ready\n'; trap 'printf forwarded > \"$2\"; exit 42' TERM INT; while :; do sleep 1; done",
+            "sh",
+            &child_pid_path_arg,
+            &marker_path_arg,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run bindport");
+
+    let stdout = bindport.stdout.take().expect("stdout pipe");
+    let mut stdout = BufReader::new(stdout);
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).expect("read readiness line");
+    assert_eq!(ready, "ready\n");
+
+    let child_pid = fs::read_to_string(&child_pid_path)
+        .expect("child pid file")
+        .trim()
+        .parse::<u32>()
+        .expect("child pid");
+
+    send_signal(bindport.id(), libc::SIGTERM);
+
+    let status = match wait_for_child(&mut bindport, Duration::from_secs(5)) {
+        Some(status) => status,
+        None => {
+            send_signal(child_pid, libc::SIGKILL);
+            let _ = bindport.kill();
+            panic!("bindport did not exit after SIGTERM");
+        }
+    };
+
+    assert_eq!(status.code(), Some(42));
+    assert_eq!(
+        fs::read_to_string(&marker_path).expect("marker"),
+        "forwarded"
+    );
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+
+    assert!(status_output.status.success());
+
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    assert_eq!(status["services"][0]["state"], "stopped");
+    assert_eq!(status["services"][0]["exit_code"], 42);
+    assert_eq!(status["runs"][0]["exit_code"], 42);
 }
 
 fn temp_registry_path(name: &str) -> PathBuf {

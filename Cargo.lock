@@ -22,6 +22,7 @@ dependencies = [
  "bindport-core",
  "bindport-registry",
  "bindport-runner",
+ "libc",
  "serde_json",
 ]
 
@@ -48,6 +49,7 @@ name = "bindport-runner"
 version = "0.0.0"
 dependencies = [
  "bindport-core",
+ "libc",
 ]
 
 [[package]]
