@@ -319,12 +319,14 @@ pub fn parse_config(format: ConfigFormat, contents: &str) -> Result<BindPortConf
 
 pub fn resolve_identity(sources: IdentitySources<'_>) -> ServiceIdentity {
     let git = detect_git_identity(sources.cwd);
+    let package = package_inference(sources.cwd, git.as_ref());
     let project = first_non_empty([
         sources.cli_project,
         sources.env_project,
         sources.config_project,
     ])
     .map(str::to_owned)
+    .or_else(|| package.project_name())
     .unwrap_or_else(|| infer_project_name(sources.cwd, git.as_ref()));
     let service = first_non_empty([
         sources.cli_service,
@@ -332,6 +334,7 @@ pub fn resolve_identity(sources: IdentitySources<'_>) -> ServiceIdentity {
         sources.config_service,
     ])
     .map(str::to_owned)
+    .or_else(|| package.service_name())
     .unwrap_or_else(|| infer_service_name(sources.command));
     let identity_key = identity_key(&project, &service, sources.cwd, git.as_ref());
 
@@ -453,6 +456,90 @@ fn infer_service_name(command: &[String]) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or("command")
         .to_owned()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackageInference {
+    root: Option<PackageMetadata>,
+    nearest: Option<PackageMetadata>,
+}
+
+impl PackageInference {
+    fn project_name(&self) -> Option<String> {
+        self.root
+            .as_ref()
+            .or(self.nearest.as_ref())
+            .map(|package| package.identity_name.clone())
+    }
+
+    fn service_name(&self) -> Option<String> {
+        self.nearest
+            .as_ref()
+            .map(|package| package.identity_name.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackageMetadata {
+    identity_name: String,
+}
+
+fn package_inference(cwd: &Path, git: Option<&GitIdentity>) -> PackageInference {
+    let root = git.and_then(|git| read_package_metadata(&git.worktree_path));
+    let nearest = nearest_package_metadata(cwd, git.map(|git| git.worktree_path.as_path()));
+
+    PackageInference { root, nearest }
+}
+
+fn nearest_package_metadata(cwd: &Path, boundary: Option<&Path>) -> Option<PackageMetadata> {
+    let cwd = absolute_path(cwd, cwd.to_path_buf());
+
+    for directory in cwd.ancestors() {
+        if let Some(boundary) = boundary
+            && !directory.starts_with(boundary)
+        {
+            break;
+        }
+
+        if let Some(package) = read_package_metadata(directory) {
+            return Some(package);
+        }
+
+        if Some(directory) == boundary {
+            break;
+        }
+    }
+
+    None
+}
+
+fn read_package_metadata(directory: &Path) -> Option<PackageMetadata> {
+    let contents = fs::read_to_string(directory.join("package.json")).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&contents).ok()?;
+    let name = value.get("name")?.as_str()?;
+    let identity_name = package_identity_name(name)?;
+
+    Some(PackageMetadata { identity_name })
+}
+
+fn package_identity_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let name = if let Some(scoped) = name.strip_prefix('@') {
+        scoped.split_once('/').map(|(_, package)| package)?
+    } else {
+        name
+    };
+    let name = name.trim();
+
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_owned())
+    }
 }
 
 fn identity_key(project: &str, service: &str, cwd: &Path, git: Option<&GitIdentity>) -> String {
@@ -700,6 +787,111 @@ mod tests {
 
         assert_eq!(identity.project, "config-project");
         assert_eq!(identity.service, "config-service");
+    }
+
+    #[test]
+    fn package_metadata_infers_standalone_identity() {
+        let root = temp_test_dir("package-standalone");
+        fs::write(root.join("package.json"), r#"{"name":"@stutz/hoststamp"}"#)
+            .expect("write package json");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &root,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(identity.project, "hoststamp");
+        assert_eq!(identity.service, "hoststamp");
+    }
+
+    #[test]
+    fn package_metadata_uses_git_root_project_and_nearest_service() {
+        let root = temp_test_dir("package-monorepo");
+        git(&root, ["init"]);
+        git(&root, ["config", "user.email", "bindport@example.invalid"]);
+        git(&root, ["config", "user.name", "BindPort Test"]);
+        git(&root, ["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("package.json"), r#"{"name":"hoststamp"}"#)
+            .expect("write root package json");
+        let service = root.join("apps").join("web");
+        fs::create_dir_all(&service).expect("service dir");
+        fs::write(service.join("package.json"), r#"{"name":"@hoststamp/web"}"#)
+            .expect("write service package json");
+        fs::write(root.join("README.md"), "test\n").expect("write fixture");
+        git(
+            &root,
+            ["add", "README.md", "package.json", "apps/web/package.json"],
+        );
+        git(&root, ["commit", "-m", "initial"]);
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &service,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(identity.project, "hoststamp");
+        assert_eq!(identity.service, "web");
+        assert!(identity.git.is_some());
+    }
+
+    #[test]
+    fn explicit_identity_beats_package_metadata() {
+        let root = temp_test_dir("package-explicit");
+        fs::write(root.join("package.json"), r#"{"name":"package-project"}"#)
+            .expect("write package json");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &root,
+            command: &command,
+            cli_project: None,
+            cli_service: Some("cli-service"),
+            env_project: Some("env-project"),
+            env_service: Some("env-service"),
+            config_project: Some("config-project"),
+            config_service: Some("config-service"),
+        });
+
+        assert_eq!(identity.project, "env-project");
+        assert_eq!(identity.service, "cli-service");
+    }
+
+    #[test]
+    fn invalid_package_metadata_falls_back_to_directory_and_command() {
+        let root = temp_test_dir("package-invalid");
+        fs::write(root.join("package.json"), r#"{"name":""}"#).expect("write package json");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &root,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(
+            identity.project,
+            root.file_name().unwrap().to_str().unwrap()
+        );
+        assert_eq!(identity.service, "next");
     }
 
     #[test]

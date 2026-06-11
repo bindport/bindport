@@ -76,9 +76,8 @@ identity resolution, Unix SIGINT/SIGTERM forwarding, and basic SQLite lease/run
 recording. It reuses the previous free port for the same resolved identity and
 otherwise scans from a stable identity-based offset. `bindport doctor` reports
 obvious registry and OS-listener conflicts, but not full process ownership
-diagnostics. Do not claim package metadata inference, allocation retry, or full
-process conflict diagnostics work until those slices are implemented and
-verified.
+diagnostics. Do not claim allocation retry or full process conflict diagnostics
+work until those slices are implemented and verified.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.
