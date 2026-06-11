@@ -110,7 +110,7 @@ pub struct AllocationHints {
 ///
 /// This bootstrap runner drops the probe listener before spawning the child, so
 /// another process can still claim the port before the child binds. The
-/// registry/lease slice must close that gap.
+/// registry/lease slice must close that gap for strong coordination.
 pub fn allocate_port(range: PortRange, skip_ports: &[u16]) -> Result<u16, RunnerError> {
     allocate_port_with_hints(range, skip_ports, AllocationHints::default())
 }
@@ -120,12 +120,21 @@ pub fn allocate_port_with_hints(
     skip_ports: &[u16],
     hints: AllocationHints,
 ) -> Result<u16, RunnerError> {
+    allocate_port_with_hints_and_availability(range, skip_ports, hints, is_port_available)
+}
+
+fn allocate_port_with_hints_and_availability(
+    range: PortRange,
+    skip_ports: &[u16],
+    hints: AllocationHints,
+    mut is_available: impl FnMut(u16) -> bool,
+) -> Result<u16, RunnerError> {
     let skip_ports = skip_ports.iter().copied().collect::<HashSet<_>>();
 
     if let Some(port) = hints
         .preferred_port
         .filter(|port| range.contains(*port) && !skip_ports.contains(port))
-        && is_port_available(port)
+        && is_available(port)
     {
         return Ok(port);
     }
@@ -149,7 +158,7 @@ pub fn allocate_port_with_hints(
             continue;
         }
 
-        if is_port_available(port) {
+        if is_available(port) {
             return Ok(port);
         }
     }
@@ -470,7 +479,16 @@ mod tests {
             end: 29_001,
         };
 
-        assert_eq!(allocate_port(range, &[29_000]).expect("port"), 29_001);
+        assert_eq!(
+            allocate_port_with_hints_and_availability(
+                range,
+                &[29_000],
+                AllocationHints::default(),
+                |_| true
+            )
+            .expect("port"),
+            29_001
+        );
     }
 
     #[test]
@@ -485,7 +503,7 @@ mod tests {
         };
 
         assert_eq!(
-            allocate_port_with_hints(range, &[], hints).expect("port"),
+            allocate_port_with_hints_and_availability(range, &[], hints, |_| true).expect("port"),
             29_002
         );
     }
@@ -502,7 +520,13 @@ mod tests {
         };
 
         assert_eq!(
-            allocate_port_with_hints(range, &[29_002, 29_003, 29_000], hints).expect("port"),
+            allocate_port_with_hints_and_availability(
+                range,
+                &[29_002, 29_003, 29_000],
+                hints,
+                |_| true
+            )
+            .expect("port"),
             29_001
         );
     }
@@ -514,7 +538,13 @@ mod tests {
             end: 29_000,
         };
 
-        let error = allocate_port(range, &[29_000]).expect_err("range should be exhausted");
+        let error = allocate_port_with_hints_and_availability(
+            range,
+            &[29_000],
+            AllocationHints::default(),
+            |_| true,
+        )
+        .expect_err("range should be exhausted");
         assert!(matches!(error, RunnerError::NoAvailablePort { range: _ }));
     }
 
