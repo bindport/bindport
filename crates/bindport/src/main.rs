@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: MIT
 
-use std::{env, path::Path, process::ExitCode, process::ExitStatus};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+    process::ExitCode,
+    process::ExitStatus,
+};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
 use bindport_adapters::AdapterKind;
-use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, SERVICE_NAME};
+use bindport_core::{
+    APPLIED_CONFIG_KEYS, ConfigError, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE,
+    LoadedConfig, PortRange, SERVICE_NAME, default_fallback_config, discover_config,
+};
 use bindport_registry::{
     REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, default_registry_path,
 };
@@ -39,19 +47,8 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
                 print_status()
             }
         }
-        Some("doctor") => {
-            println!("BindPort bootstrap doctor");
-            match default_registry_path() {
-                Ok(path) => println!("registry: {}", path.display()),
-                Err(error) => println!("registry: unavailable ({error})"),
-            }
-            println!(
-                "default port range: {}-{}",
-                DEFAULT_PORT_RANGE.start, DEFAULT_PORT_RANGE.end
-            );
-            println!("first proxy adapter: {}", AdapterKind::Traefik.as_str());
-            ExitCode::SUCCESS
-        }
+        Some("doctor") => print_doctor(),
+        Some("init") => init_fallback_config(),
         Some("--") => run_wrapped_command(&args[1..]),
         Some("run") => {
             if args.get(1).map(String::as_str) == Some("--") {
@@ -72,20 +69,26 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
 fn run_wrapped_command(command: &[String]) -> ExitCode {
     match run_wrapped_command_result(command) {
         Ok(exit_code) => exit_code,
-        Err(error) => {
+        Err(RunCommandError::Runner(error)) => {
             print_runner_error(&error);
+            ExitCode::FAILURE
+        }
+        Err(RunCommandError::Config(error)) => {
+            print_config_error(&error);
             ExitCode::FAILURE
         }
     }
 }
 
-fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunnerError> {
+fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunCommandError> {
     if command.is_empty() {
-        return Err(RunnerError::NoCommand);
+        return Err(RunnerError::NoCommand.into());
     }
 
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    let config = resolve_config(&cwd)?;
     let mut registry = open_optional_registry();
-    let mut skip_ports = DEFAULT_SKIP_PORTS.to_vec();
+    let mut skip_ports = config.skip_ports.clone();
 
     let mut disable_registry = false;
     if let Some(registry) = registry.as_mut() {
@@ -102,10 +105,9 @@ fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunnerErro
         registry = None;
     }
 
-    let mut child = spawn_child(command, DEFAULT_PORT_RANGE, &skip_ports)?;
-    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    let mut child = spawn_child(command, config.port_range, &skip_ports)?;
     let run = RunStart {
-        project: infer_project_name(&cwd),
+        project: config.project_name(&cwd),
         service: infer_service_name(command),
         host: String::from("127.0.0.1"),
         port: child.port(),
@@ -137,6 +139,73 @@ fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunnerErro
     }
 
     Ok(status_to_exit_code(&status))
+}
+
+#[derive(Debug)]
+enum RunCommandError {
+    Runner(RunnerError),
+    Config(ConfigError),
+}
+
+impl From<RunnerError> for RunCommandError {
+    fn from(error: RunnerError) -> Self {
+        Self::Runner(error)
+    }
+}
+
+impl From<ConfigError> for RunCommandError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(error)
+    }
+}
+
+struct ResolvedConfig {
+    loaded: Option<LoadedConfig>,
+    fallback_path: Option<PathBuf>,
+    port_range: PortRange,
+    skip_ports: Vec<u16>,
+}
+
+impl ResolvedConfig {
+    fn project_name(&self, cwd: &Path) -> String {
+        self.loaded
+            .as_ref()
+            .and_then(|loaded| loaded.config.project.as_deref())
+            .map(str::to_owned)
+            .unwrap_or_else(|| infer_project_name(cwd))
+    }
+}
+
+fn resolve_config(cwd: &Path) -> Result<ResolvedConfig, ConfigError> {
+    let fallback_path = fallback_config_path().ok();
+    let loaded = discover_config(cwd, fallback_path.as_deref())?;
+    let port_range = loaded
+        .as_ref()
+        .map(LoadedConfig::port_range)
+        .transpose()?
+        .unwrap_or(DEFAULT_PORT_RANGE);
+    let skip_ports = loaded
+        .as_ref()
+        .map(LoadedConfig::skip_ports)
+        .unwrap_or_else(|| DEFAULT_SKIP_PORTS.to_vec());
+
+    Ok(ResolvedConfig {
+        loaded,
+        fallback_path,
+        port_range,
+        skip_ports,
+    })
+}
+
+fn fallback_config_path() -> Result<PathBuf, RegistryError> {
+    let registry_path = default_registry_path()?;
+    let path = registry_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.join(FALLBACK_CONFIG_FILE))
+        .unwrap_or_else(|| PathBuf::from(FALLBACK_CONFIG_FILE));
+
+    Ok(path)
 }
 
 fn open_optional_registry() -> Option<Registry> {
@@ -201,6 +270,106 @@ fn print_status() -> ExitCode {
     }
 }
 
+fn print_doctor() -> ExitCode {
+    println!("BindPort bootstrap doctor");
+
+    match default_registry_path() {
+        Ok(path) => println!("registry: {}", path.display()),
+        Err(error) => println!("registry: unavailable ({error})"),
+    }
+
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    match resolve_config(&cwd) {
+        Ok(config) => print_config_diagnostics(&config),
+        Err(error) => {
+            println!("config: invalid ({error})");
+            return ExitCode::FAILURE;
+        }
+    }
+
+    println!("first proxy adapter: {}", AdapterKind::Traefik.as_str());
+    ExitCode::SUCCESS
+}
+
+fn print_config_diagnostics(config: &ResolvedConfig) {
+    match config.loaded.as_ref() {
+        Some(loaded) => println!(
+            "config: {} ({} {})",
+            loaded.path.display(),
+            loaded.source.as_str(),
+            loaded.format.as_str()
+        ),
+        None => match config.fallback_path.as_ref() {
+            Some(path) => println!("config: none (optional fallback: {})", path.display()),
+            None => println!("config: none (optional fallback unavailable)"),
+        },
+    }
+
+    if let Some(loaded) = config.loaded.as_ref()
+        && !loaded.unknown_keys.is_empty()
+    {
+        println!(
+            "config warning: ignored unknown top-level keys: {}",
+            loaded.unknown_keys.join(", ")
+        );
+        println!("config applied keys: {}", APPLIED_CONFIG_KEYS.join(", "));
+    }
+
+    println!(
+        "effective port range: {}-{}",
+        config.port_range.start, config.port_range.end
+    );
+    println!("skip ports: {}", config.skip_ports.len());
+}
+
+fn init_fallback_config() -> ExitCode {
+    match write_fallback_config() {
+        Ok(InitConfigResult::Created(path)) => {
+            println!("created config: {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Ok(InitConfigResult::AlreadyExists(path)) => {
+            println!("config already exists: {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("bindport: failed to initialize fallback config: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+enum InitConfigResult {
+    Created(PathBuf),
+    AlreadyExists(PathBuf),
+}
+
+fn write_fallback_config() -> io::Result<InitConfigResult> {
+    let path = fallback_config_path().map_err(io::Error::other)?;
+
+    if path.is_file() {
+        return Ok(InitConfigResult::AlreadyExists(path));
+    }
+
+    if path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("`{}` exists but is not a file", path.display()),
+        ));
+    }
+
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::write(&path, default_fallback_config())?;
+
+    Ok(InitConfigResult::Created(path))
+}
+
 fn status_to_exit_code(status: &ExitStatus) -> ExitCode {
     match status_registry_exit_code(status) {
         Some(0) => ExitCode::SUCCESS,
@@ -224,6 +393,10 @@ fn signal_exit_code(_status: &ExitStatus) -> Option<i32> {
 }
 
 fn print_runner_error(error: &RunnerError) {
+    eprintln!("bindport: {error}");
+}
+
+fn print_config_error(error: &ConfigError) {
     eprintln!("bindport: {error}");
 }
 
@@ -268,6 +441,7 @@ fn print_help() {
     println!("  bindport run -- <command>    Run a command with an assigned PORT");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport doctor              Show bootstrap diagnostics");
+    println!("  bindport init                Create optional fallback config");
     println!("  bindport --version           Print version");
 }
 

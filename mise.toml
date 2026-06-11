@@ -42,8 +42,8 @@ description = "Scan Rust dependencies for security advisories"
 run = "cargo audit"
 
 [tasks.dependency-guard]
-description = "Check for banned dependency substitutions"
-run = "if cargo tree --locked -p zmij >/dev/null 2>&1; then echo 'banned dependency present: zmij' >&2; exit 1; fi; cargo tree --locked -p ryu >/dev/null"
+description = "Check for banned dependency substitutions and canonical parser crates"
+run = "for package in zmij yaml_serde libyaml-rs; do if cargo tree --locked -p \"$package\" >/dev/null 2>&1; then echo \"banned dependency present: $package\" >&2; exit 1; fi; done; for package in ryu serde_yaml_ng unsafe-libyaml; do if ! cargo tree --locked -p \"$package\" >/dev/null 2>&1; then echo \"required dependency missing: $package\" >&2; exit 1; fi; done"
 
 [tasks.secret-scan]
 description = "Scan committed history for leaked secrets"
