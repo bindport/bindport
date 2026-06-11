@@ -23,6 +23,8 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
   inference, and `bindport run <service> -- ...`, with git branch/worktree
   metadata recorded when available.
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
+- `bindport doctor` diagnostics for config, registry, effective identity,
+  active registry ports, OS listener conflicts, and the next candidate port.
 - MIT license, security policy, third-party notices stub, CI/audit workflows,
   and local `mise` tasks.
 - npm wrapper package skeleton.
