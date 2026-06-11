@@ -20,7 +20,7 @@ use bindport_core::{
 use bindport_registry::{
     REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, default_registry_path,
 };
-use bindport_runner::{RunnerError, spawn_child};
+use bindport_runner::{AllocationHints, RunnerError, spawn_child_with_hints};
 
 fn main() -> ExitCode {
     run(env::args().skip(1))
@@ -111,6 +111,7 @@ fn run_wrapped_command_result(
     let identity = resolve_run_identity(&cwd, command, options, &config);
     let mut registry = open_optional_registry();
     let mut skip_ports = config.skip_ports.clone();
+    let mut previous_port = None;
 
     let mut disable_registry = false;
     if let Some(registry) = registry.as_mut() {
@@ -122,12 +123,27 @@ fn run_wrapped_command_result(
                 disable_registry = true;
             }
         }
+
+        if !disable_registry {
+            match registry.previous_identity_port(&identity.identity_key) {
+                Ok(port) => previous_port = port,
+                Err(error) => {
+                    print_registry_warning("failed to read previous identity port", &error);
+                }
+            }
+        }
     }
     if disable_registry {
         registry = None;
+        previous_port = None;
     }
 
-    let mut child = spawn_child(command, config.port_range, &skip_ports)?;
+    let allocation_hints = AllocationHints {
+        preferred_port: previous_port,
+        scan_start: identity.port_scan_start(config.port_range),
+    };
+    let mut child =
+        spawn_child_with_hints(command, config.port_range, &skip_ports, allocation_hints)?;
     let run = RunStart {
         project: identity.project.clone(),
         service: identity.service.clone(),
