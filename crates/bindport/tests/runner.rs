@@ -386,6 +386,87 @@ fn doctor_reports_unknown_config_keys() {
 }
 
 #[test]
+fn doctor_reports_identity_registry_and_next_candidate() {
+    let registry_path = temp_registry_path("doctor-diagnostics-registry");
+    let root = temp_test_dir("doctor-diagnostics-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-project\"\nservice = \"web\"\ndefault_range = \"29340-29349\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor"])
+        .output()
+        .expect("run bindport doctor");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let candidate = doctor_candidate_port(&stdout);
+
+    assert!(stdout.contains(&format!("registry: {} (ok)", registry_path.display())));
+    assert!(stdout.contains("effective identity: project=doctor-project service=web"));
+    assert!(stdout.contains("identity key: v1:"));
+    assert!(stdout.contains("registry active ports in range: none"));
+    assert!(stdout.contains("previous identity port: none"));
+    assert!(stdout.contains("os listener conflicts in range: "));
+    assert!(stdout.contains("allocation scan start: "));
+    assert!((29_340..=29_349).contains(&candidate));
+}
+
+#[test]
+fn doctor_reports_active_registry_port_conflict() {
+    let registry_path = temp_registry_path("doctor-active-conflict-registry");
+    let root = temp_test_dir("doctor-active-conflict-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-project\"\nservice = \"web\"\ndefault_range = \"29350-29355\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+    reserve_registry_port(&registry_path, 29_350);
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor"])
+        .output()
+        .expect("run bindport doctor");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let candidate = doctor_candidate_port(&stdout);
+
+    assert!(stdout.contains("registry active ports in range: 29350"));
+    assert_ne!(candidate, 29_350);
+    assert!((29_350..=29_355).contains(&candidate));
+}
+
+#[test]
+fn doctor_caps_os_listener_conflict_scan_for_wide_ranges() {
+    let registry_path = temp_registry_path("doctor-wide-range-registry");
+    let root = temp_test_dir("doctor-wide-range-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-project\"\nservice = \"web\"\ndefault_range = \"28500-65535\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor"])
+        .output()
+        .expect("run bindport doctor");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("scanned first 1024 of 37036 ports"));
+}
+
+#[test]
 fn init_creates_fallback_config_next_to_registry() {
     let state_dir = temp_test_dir("init-config-state");
     let registry_path = state_dir.join("registry.sqlite");
@@ -504,6 +585,16 @@ fn run_print_port(registry_path: &Path, cwd: &Path) -> u16 {
         .expect("stdout is utf8")
         .parse::<u16>()
         .expect("stdout is a port number")
+}
+
+fn doctor_candidate_port(stdout: &str) -> u16 {
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("next candidate port: "))
+        .and_then(|value| value.split_whitespace().next())
+        .expect("next candidate port line")
+        .parse::<u16>()
+        .expect("candidate is a port")
 }
 
 fn reserve_registry_port(registry_path: &Path, port: u16) {
