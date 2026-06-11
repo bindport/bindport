@@ -100,15 +100,51 @@ impl Drop for RunningChild {
     }
 }
 
-/// Scans the configured TCP loopback range and returns the first available port.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AllocationHints {
+    pub preferred_port: Option<u16>,
+    pub scan_start: Option<u16>,
+}
+
+/// Scans the configured TCP loopback range and returns an available port.
 ///
 /// This bootstrap runner drops the probe listener before spawning the child, so
 /// another process can still claim the port before the child binds. The
 /// registry/lease slice must close that gap.
 pub fn allocate_port(range: PortRange, skip_ports: &[u16]) -> Result<u16, RunnerError> {
+    allocate_port_with_hints(range, skip_ports, AllocationHints::default())
+}
+
+pub fn allocate_port_with_hints(
+    range: PortRange,
+    skip_ports: &[u16],
+    hints: AllocationHints,
+) -> Result<u16, RunnerError> {
     let skip_ports = skip_ports.iter().copied().collect::<HashSet<_>>();
 
-    for port in range.start..=range.end {
+    if let Some(port) = hints
+        .preferred_port
+        .filter(|port| range.contains(*port) && !skip_ports.contains(port))
+        && is_port_available(port)
+    {
+        return Ok(port);
+    }
+
+    let range_len = range.len();
+    if range_len == 0 {
+        return Err(RunnerError::NoAvailablePort { range });
+    }
+
+    let scan_start = hints
+        .scan_start
+        .filter(|port| range.contains(*port))
+        .unwrap_or(range.start);
+    let scan_start_offset = scan_start as u32 - range.start as u32;
+
+    for offset in 0..range_len {
+        let port = range.start as u32 + ((scan_start_offset + offset) % range_len);
+        let port = u16::try_from(port).expect("port remains within configured range");
+
         if skip_ports.contains(&port) {
             continue;
         }
@@ -163,8 +199,17 @@ pub fn spawn_child(
     range: PortRange,
     skip_ports: &[u16],
 ) -> Result<RunningChild, RunnerError> {
+    spawn_child_with_hints(command, range, skip_ports, AllocationHints::default())
+}
+
+pub fn spawn_child_with_hints(
+    command: &[String],
+    range: PortRange,
+    skip_ports: &[u16],
+    allocation_hints: AllocationHints,
+) -> Result<RunningChild, RunnerError> {
     let (program, args) = command.split_first().ok_or(RunnerError::NoCommand)?;
-    let port = allocate_port(range, skip_ports)?;
+    let port = allocate_port_with_hints(range, skip_ports, allocation_hints)?;
 
     let mut signal_forwarding =
         prepare_signal_forwarding().map_err(|source| RunnerError::SignalForwarding { source })?;
@@ -426,6 +471,40 @@ mod tests {
         };
 
         assert_eq!(allocate_port(range, &[29_000]).expect("port"), 29_001);
+    }
+
+    #[test]
+    fn allocate_port_prefers_available_prior_port() {
+        let range = PortRange {
+            start: 29_000,
+            end: 29_002,
+        };
+        let hints = AllocationHints {
+            preferred_port: Some(29_002),
+            scan_start: None,
+        };
+
+        assert_eq!(
+            allocate_port_with_hints(range, &[], hints).expect("port"),
+            29_002
+        );
+    }
+
+    #[test]
+    fn allocate_port_scans_from_hint_with_wraparound() {
+        let range = PortRange {
+            start: 29_000,
+            end: 29_003,
+        };
+        let hints = AllocationHints {
+            preferred_port: None,
+            scan_start: Some(29_002),
+        };
+
+        assert_eq!(
+            allocate_port_with_hints(range, &[29_002, 29_003, 29_000], hints).expect("port"),
+            29_001
+        );
     }
 
     #[test]

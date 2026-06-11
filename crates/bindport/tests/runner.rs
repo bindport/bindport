@@ -11,9 +11,9 @@ use std::{
 
 use bindport_core::{
     BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS,
-    FALLBACK_CONFIG_FILE,
+    FALLBACK_CONFIG_FILE, ServiceIdentity,
 };
-use bindport_registry::REGISTRY_PATH_ENV;
+use bindport_registry::{REGISTRY_PATH_ENV, Registry, RunStart};
 use serde_json::Value;
 
 fn bindport() -> Command {
@@ -196,6 +196,40 @@ fn status_json_reports_finished_run() {
 }
 
 #[test]
+fn runner_reuses_previous_identity_port_when_available() {
+    let registry_path = temp_registry_path("sticky-registry");
+    let root = temp_test_dir("sticky-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"sticky-project\"\nservice = \"web\"\ndefault_range = \"29300-29301\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    let first_port = run_print_port(&registry_path, &root);
+    let second_port = run_print_port(&registry_path, &root);
+
+    assert_eq!(second_port, first_port);
+}
+
+#[test]
+fn runner_falls_back_when_previous_identity_port_is_active() {
+    let registry_path = temp_registry_path("sticky-occupied-registry");
+    let root = temp_test_dir("sticky-occupied-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"sticky-project\"\nservice = \"web\"\ndefault_range = \"29310-29311\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    let first_port = run_print_port(&registry_path, &root);
+    reserve_registry_port(&registry_path, first_port);
+    let second_port = run_print_port(&registry_path, &root);
+
+    assert_ne!(second_port, first_port);
+    assert!(matches!(second_port, 29_310 | 29_311));
+}
+
+#[test]
 fn runner_continues_when_registry_path_is_unavailable() {
     let output = bindport_without_registry_path()
         .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
@@ -278,7 +312,7 @@ fn status_json_reports_git_identity() {
         service["identity_key"]
             .as_str()
             .expect("identity key")
-            .contains("feature-tree")
+            .starts_with("v1:")
     );
 }
 
@@ -455,6 +489,44 @@ fn temp_path(name: &str) -> PathBuf {
         .as_nanos();
 
     std::env::temp_dir().join(format!("bindport-{name}-{}-{now}", std::process::id()))
+}
+
+fn run_print_port(registry_path: &Path, cwd: &Path) -> u16 {
+    let output = bindport_with_registry(registry_path)
+        .current_dir(cwd)
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+
+    String::from_utf8(output.stdout)
+        .expect("stdout is utf8")
+        .parse::<u16>()
+        .expect("stdout is a port number")
+}
+
+fn reserve_registry_port(registry_path: &Path, port: u16) {
+    let mut registry = Registry::open(registry_path).expect("registry");
+    let identity = ServiceIdentity {
+        project: String::from("busy-project"),
+        service: String::from("busy-service"),
+        git: None,
+        identity_key: String::from("v1:busy"),
+    };
+
+    registry
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port,
+            pid: std::process::id(),
+            command: String::from("busy fixture"),
+            cwd: PathBuf::from("/tmp/bindport-busy-fixture"),
+        })
+        .expect("reserve registry port");
 }
 
 fn init_git_repo(root: &Path, branch: &str) {

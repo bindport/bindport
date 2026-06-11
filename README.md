@@ -35,11 +35,13 @@ cargo run -p bindport -- -- next dev
 ```
 
 It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
-`29000-29999`, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
+`29000-29999`, prefers the previous port for the same project/service/worktree
+identity when it is still free, otherwise scans from a stable identity-based
+offset, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
 SIGINT/SIGTERM to the child, and exits with the child process exit code. This
 bootstrap runner is probe-then-spawn, so another process can still claim the port
-before the child binds. Package metadata inference, sticky lease reuse, and
-allocation retry are still future v0.1 work.
+before the child binds. Package metadata inference and allocation retry are still
+future v0.1 work.
 
 During bootstrap, use Cargo directly:
 

@@ -6,7 +6,7 @@ use std::{
 };
 
 use bindport_core::{SERVICE_NAME, ServiceIdentity};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 pub const DEFAULT_REGISTRY_FILE: &str = "registry.sqlite";
@@ -209,6 +209,30 @@ impl Registry {
         let rows = statement.query_map([], |row| row.get::<_, u16>(0))?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn previous_identity_port(
+        &mut self,
+        identity_key: &str,
+    ) -> Result<Option<u16>, RegistryError> {
+        if identity_key.is_empty() {
+            return Ok(None);
+        }
+
+        self.reconcile_stale_active_leases()?;
+
+        self.connection
+            .query_row(
+                "SELECT port
+                 FROM leases
+                 WHERE identity_key = ?1
+                 ORDER BY last_seen_at DESC, id DESC
+                 LIMIT 1",
+                params![identity_key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn reconcile_stale_active_leases(&mut self) -> Result<usize, RegistryError> {
@@ -608,7 +632,7 @@ mod tests {
                 branch_label: String::from("feature-tree"),
                 commit: String::from("1234567"),
             }),
-            identity_key: String::from("bindport:web:abc123:feature-tree"),
+            identity_key: String::from("v1:identity"),
         };
         let started = registry
             .record_run_started(&RunStart {
@@ -638,9 +662,71 @@ mod tests {
         assert_eq!(service.branch.as_deref(), Some("feature/tree"));
         assert_eq!(service.branch_label.as_deref(), Some("feature-tree"));
         assert_eq!(service.commit.as_deref(), Some("1234567"));
+        assert_eq!(service.identity_key.as_deref(), Some("v1:identity"));
+    }
+
+    #[test]
+    fn previous_identity_port_returns_latest_matching_lease() {
+        let mut registry = Registry::open(temp_registry_path("previous-port")).expect("registry");
+        let first_identity = test_identity("v1:first");
+        let second_identity = test_identity("v1:second");
+        let first = registry
+            .record_run_started(&RunStart {
+                project: first_identity.project.clone(),
+                service: first_identity.service.clone(),
+                identity: Some(first_identity.clone()),
+                host: String::from("127.0.0.1"),
+                port: 29_123,
+                pid: std::process::id(),
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record first start");
+        registry
+            .record_run_finished(first, Some(0))
+            .expect("record first finish");
+        let second = registry
+            .record_run_started(&RunStart {
+                project: first_identity.project.clone(),
+                service: first_identity.service.clone(),
+                identity: Some(first_identity.clone()),
+                host: String::from("127.0.0.1"),
+                port: 29_124,
+                pid: std::process::id(),
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record second start");
+        registry
+            .record_run_finished(second, Some(0))
+            .expect("record second finish");
+        let other = registry
+            .record_run_started(&RunStart {
+                project: second_identity.project.clone(),
+                service: second_identity.service.clone(),
+                identity: Some(second_identity),
+                host: String::from("127.0.0.1"),
+                port: 29_125,
+                pid: std::process::id(),
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record other start");
+        registry
+            .record_run_finished(other, Some(0))
+            .expect("record other finish");
+
         assert_eq!(
-            service.identity_key.as_deref(),
-            Some("bindport:web:abc123:feature-tree")
+            registry
+                .previous_identity_port(&first_identity.identity_key)
+                .expect("previous port"),
+            Some(29_124)
+        );
+        assert_eq!(
+            registry
+                .previous_identity_port("v1:missing")
+                .expect("missing previous port"),
+            None
         );
     }
 
@@ -698,5 +784,14 @@ mod tests {
             "bindport-registry-{name}-{}-{now}.sqlite",
             std::process::id()
         ))
+    }
+
+    fn test_identity(identity_key: &str) -> ServiceIdentity {
+        ServiceIdentity {
+            project: String::from("bindport"),
+            service: String::from("web"),
+            git: None,
+            identity_key: identity_key.to_owned(),
+        }
     }
 }

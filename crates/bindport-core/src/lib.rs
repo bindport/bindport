@@ -79,6 +79,12 @@ pub struct ServiceIdentity {
     pub identity_key: String,
 }
 
+impl ServiceIdentity {
+    pub fn port_scan_start(&self, range: PortRange) -> Option<u16> {
+        stable_port_scan_start(&self.identity_key, range)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct IdentitySources<'a> {
     pub cwd: &'a Path,
@@ -459,19 +465,40 @@ fn identity_key(project: &str, service: &str, cwd: &Path, git: Option<&GitIdenti
         path_hash.to_owned()
     };
 
-    format!("{project}:{service}:{path_hash}:{branch_label}")
+    format!(
+        "v1:p{}:{project}:s{}:{service}:w{path_hash}:b{}:{branch_label}",
+        project.len(),
+        service.len(),
+        branch_label.len()
+    )
+}
+
+pub fn stable_port_scan_start(seed: &str, range: PortRange) -> Option<u16> {
+    if range.is_empty() {
+        return None;
+    }
+
+    let offset = stable_hash(seed.as_bytes()) % u64::from(range.len());
+    let port = range.start as u32 + u32::try_from(offset).expect("range length fits in u32");
+
+    Some(u16::try_from(port).expect("port remains within configured range"))
 }
 
 fn stable_path_hash(path: &Path) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
     let path = path.to_string_lossy();
 
-    for byte in path.as_bytes() {
+    format!("{:016x}", stable_hash(path.as_bytes()))
+}
+
+fn stable_hash(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+
+    for byte in bytes {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
 
-    format!("{hash:016x}")
+    hash
 }
 
 fn unknown_top_level_config_keys(
@@ -673,6 +700,57 @@ mod tests {
 
         assert_eq!(identity.project, "config-project");
         assert_eq!(identity.service, "config-service");
+    }
+
+    #[test]
+    fn identity_key_delimits_project_and_service_values() {
+        let cwd = Path::new("/tmp/bindport");
+        let command = [String::from("next")];
+        let first = resolve_identity(IdentitySources {
+            cwd,
+            command: &command,
+            cli_project: Some("a:b"),
+            cli_service: Some("c"),
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+        let second = resolve_identity(IdentitySources {
+            cwd,
+            command: &command,
+            cli_project: Some("a"),
+            cli_service: Some("b:c"),
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_ne!(first.identity_key, second.identity_key);
+        assert!(first.identity_key.starts_with("v1:"));
+    }
+
+    #[test]
+    fn identity_port_scan_start_is_stable_and_in_range() {
+        let identity = ServiceIdentity {
+            project: String::from("bindport"),
+            service: String::from("web"),
+            git: None,
+            identity_key: String::from("v1:test"),
+        };
+        let range = PortRange {
+            start: 29_100,
+            end: 29_199,
+        };
+        let scan_start = identity.port_scan_start(range).expect("scan start");
+
+        assert!(range.contains(scan_start));
+        assert_eq!(identity.port_scan_start(range), Some(scan_start));
+        assert_eq!(
+            identity.port_scan_start(PortRange { start: 100, end: 0 }),
+            None
+        );
     }
 
     #[test]
