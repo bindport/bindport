@@ -19,9 +19,9 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
   one-shot `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
   `.bindport.yaml`, with a fallback config next to the registry file.
-- Basic project/service identity resolution from environment, config, command
-  inference, and `bindport run <service> -- ...`, with git branch/worktree
-  metadata recorded when available.
+- Basic project/service identity resolution from environment, config,
+  `package.json`, command inference, and `bindport run <service> -- ...`, with
+  git branch/worktree metadata recorded when available.
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
@@ -42,8 +42,7 @@ identity when it is still free, otherwise scans from a stable identity-based
 offset, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
 SIGINT/SIGTERM to the child, and exits with the child process exit code. This
 bootstrap runner is probe-then-spawn, so another process can still claim the port
-before the child binds. Package metadata inference and allocation retry are still
-future v0.1 work.
+before the child binds. Allocation retry is still future v0.1 work.
 
 During bootstrap, use Cargo directly:
 
@@ -98,8 +97,8 @@ sections are visible.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
-`BINDPORT_PROJECT` / `BINDPORT_SERVICE`, then config, then inference from the
-git worktree path and command name.
+`BINDPORT_PROJECT` / `BINDPORT_SERVICE`, then config, then inference from
+`package.json`, the git worktree path, and command name.
 
 ## Documentation
 

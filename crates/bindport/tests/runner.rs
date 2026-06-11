@@ -317,6 +317,32 @@ fn status_json_reports_git_identity() {
 }
 
 #[test]
+fn status_json_reports_package_metadata_identity() {
+    let registry_path = temp_registry_path("package-identity-registry");
+    let root = temp_test_dir("package-identity-root");
+    fs::write(root.join("package.json"), r#"{"name":"@stutz/hoststamp"}"#)
+        .expect("write package json");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let service = &status["services"][0];
+
+    assert_eq!(service["project"], "hoststamp");
+    assert_eq!(service["service"], "hoststamp");
+}
+
+#[test]
 fn toml_config_wins_over_json_in_same_directory() {
     let registry_path = temp_registry_path("config-precedence-registry");
     let root = temp_test_dir("config-precedence-root");
