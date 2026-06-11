@@ -27,6 +27,8 @@ libc = "0.2.178"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "=1.0.133"
+toml = "1.1.2"
+serde_yaml_ng = "0.10.0"
 
 [profile.release]
 lto = "thin"

@@ -17,6 +17,8 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
   crates.
 - Minimal CLI support for `--help`, `--version`, `status`, `doctor`, and
   one-shot `bindport -- <command>` command wrapping.
+- Optional config discovery from `.bindport.toml`, `.bindport.json`, or
+  `.bindport.yaml`, with a fallback config next to the registry file.
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
 - MIT license, security policy, third-party notices stub, CI/audit workflows,
   and local `mise` tasks.
@@ -33,14 +35,15 @@ It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
 `29000-29999`, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
 SIGINT/SIGTERM to the child, and exits with the child process exit code. This
 bootstrap runner is probe-then-spawn, so another process can still claim the port
-before the child binds. Full identity resolution, config discovery, sticky lease
-reuse, and allocation retry are still future v0.1 work.
+before the child binds. Full identity resolution, sticky lease reuse, and
+allocation retry are still future v0.1 work.
 
 During bootstrap, use Cargo directly:
 
 ```sh
 cargo run -p bindport -- --help
 cargo run -p bindport -- doctor
+cargo run -p bindport -- init
 cargo run -p bindport -- status --json
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
 ```
@@ -72,7 +75,17 @@ Starter config examples live in [examples/config](examples/config):
 - [`.bindport.yaml`](examples/config/.bindport.yaml)
 
 TOML is the reference format. When equivalent config files exist, discovery
-should prefer TOML, then JSON, then YAML.
+prefers TOML, then JSON, then YAML. BindPort walks upward from the current
+directory and uses the first project config it finds. If no project config
+exists, it falls back to the optional `config.toml` stored next to
+`registry.sqlite` in the BindPort state directory. `bindport init` creates that
+fallback config with default values. Config is never required; missing config
+means built-in defaults are used.
+
+The current implementation reads only `project`, `default_range`, and
+`skip_ports`. The example `identity`, `services`, and `proxy` sections document
+the intended future shape and are not applied yet; `bindport doctor` reports
+ignored top-level keys so typos and future-only sections are visible.
 
 ## Documentation
 

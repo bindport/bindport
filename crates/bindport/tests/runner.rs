@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS};
+use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE};
 use bindport_registry::REGISTRY_PATH_ENV;
 use serde_json::Value;
 
@@ -169,6 +169,126 @@ fn runner_continues_when_registry_path_is_unavailable() {
     assert!(stderr.contains("running without registry recording"));
 }
 
+#[test]
+fn parent_project_config_sets_port_range_and_project() {
+    let registry_path = temp_registry_path("project-config-registry");
+    let root = temp_test_dir("project-config-root");
+    let nested = root.join("packages").join("web");
+    fs::create_dir_all(&nested).expect("nested dir");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"configured-project\"\ndefault_range = \"29100-29101\"\nskip_ports = [29100]\n",
+    )
+    .expect("write project config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&nested)
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"29101");
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["services"][0]["project"], "configured-project");
+}
+
+#[test]
+fn toml_config_wins_over_json_in_same_directory() {
+    let registry_path = temp_registry_path("config-precedence-registry");
+    let root = temp_test_dir("config-precedence-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "default_range = \"29110-29110\"\n",
+    )
+    .expect("write toml config");
+    fs::write(
+        root.join(".bindport.json"),
+        r#"{"default_range":"29111-29111"}"#,
+    )
+    .expect("write json config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"29110");
+}
+
+#[test]
+fn fallback_config_next_to_registry_is_used_when_no_project_config_exists() {
+    let state_dir = temp_test_dir("fallback-config-state");
+    let registry_path = state_dir.join("registry.sqlite");
+    let cwd = temp_test_dir("fallback-config-cwd");
+    fs::write(
+        state_dir.join(FALLBACK_CONFIG_FILE),
+        "default_range = \"29200-29200\"\n",
+    )
+    .expect("write fallback config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&cwd)
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"29200");
+}
+
+#[test]
+fn doctor_reports_unknown_config_keys() {
+    let registry_path = temp_registry_path("doctor-unknown-config-registry");
+    let root = temp_test_dir("doctor-unknown-config-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "defaultrange = \"29100-29199\"\n[proxy.traefik]\nenabled = true\n",
+    )
+    .expect("write project config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor"])
+        .output()
+        .expect("run bindport doctor");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("ignored unknown top-level keys: defaultrange, proxy"));
+    assert!(stdout.contains("config applied keys: project, default_range, skip_ports"));
+}
+
+#[test]
+fn init_creates_fallback_config_next_to_registry() {
+    let state_dir = temp_test_dir("init-config-state");
+    let registry_path = state_dir.join("registry.sqlite");
+    let config_path = state_dir.join(FALLBACK_CONFIG_FILE);
+
+    let output = bindport_with_registry(&registry_path)
+        .args(["init"])
+        .output()
+        .expect("run bindport init");
+
+    assert!(output.status.success());
+    assert!(config_path.is_file());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let config = fs::read_to_string(&config_path).expect("fallback config");
+
+    assert!(stdout.contains(&config_path.display().to_string()));
+    assert!(config.contains("default_range = \"29000-29999\""));
+}
+
 #[cfg(unix)]
 #[test]
 fn forwards_sigterm_to_wrapped_child_and_records_exit() {
@@ -236,13 +356,20 @@ fn forwards_sigterm_to_wrapped_child_and_records_exit() {
 }
 
 fn temp_registry_path(name: &str) -> PathBuf {
+    temp_path(name).with_extension("sqlite")
+}
+
+fn temp_test_dir(name: &str) -> PathBuf {
+    let path = temp_path(name);
+    fs::create_dir_all(&path).expect("temp test dir");
+    path
+}
+
+fn temp_path(name: &str) -> PathBuf {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
 
-    std::env::temp_dir().join(format!(
-        "bindport-{name}-{}-{now}.sqlite",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("bindport-{name}-{}-{now}", std::process::id()))
 }
