@@ -42,7 +42,9 @@ identity when it is still free, otherwise scans from a stable identity-based
 offset, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
 SIGINT/SIGTERM to the child, and exits with the child process exit code. This
 bootstrap runner is probe-then-spawn, so another process can still claim the port
-before the child binds. Allocation retry is still future v0.1 work.
+before the child binds. BindPort retries once with another port when the child
+fails immediately and the assigned port is then occupied; stronger lease-based
+coordination is still future v0.1 work.
 
 During bootstrap, use Cargo directly:
 

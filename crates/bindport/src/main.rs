@@ -3,8 +3,8 @@
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
-    process::ExitCode,
-    process::ExitStatus,
+    process::{ExitCode, ExitStatus},
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -27,6 +27,8 @@ use bindport_runner::{
 
 const DOCTOR_PORT_DISPLAY_LIMIT: usize = 10;
 const DOCTOR_MAX_LISTENER_PROBES: u32 = 1024;
+const ALLOCATION_RETRY_WINDOW: Duration = Duration::from_secs(2);
+const MAX_ALLOCATION_RETRIES: usize = 1;
 
 fn main() -> ExitCode {
     run(env::args().skip(1))
@@ -144,46 +146,65 @@ fn run_wrapped_command_result(
         previous_port = None;
     }
 
-    let allocation_hints = AllocationHints {
-        preferred_port: previous_port,
-        scan_start: identity.port_scan_start(config.port_range),
-    };
-    let mut child =
-        spawn_child_with_hints(command, config.port_range, &skip_ports, allocation_hints)?;
-    let run = RunStart {
-        project: identity.project.clone(),
-        service: identity.service.clone(),
-        identity: Some(identity),
-        host: String::from("127.0.0.1"),
-        port: child.port(),
-        pid: child.pid(),
-        command: command.join(" "),
-        cwd,
-    };
+    let mut retries = 0;
+    let command_display = command.join(" ");
 
-    let started = if let Some(registry) = registry.as_mut() {
-        match registry.record_run_started(&run) {
-            Ok(started) => Some(started),
-            Err(error) => {
-                print_registry_warning("failed to record run start", &error);
-                registry_disabled_warning();
-                None
+    loop {
+        let allocation_hints = AllocationHints {
+            preferred_port: previous_port,
+            scan_start: identity.port_scan_start(config.port_range),
+        };
+        let mut child =
+            spawn_child_with_hints(command, config.port_range, &skip_ports, allocation_hints)?;
+        let attempt_started_at = Instant::now();
+        let port = child.port();
+        let run = RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity.clone()),
+            host: String::from("127.0.0.1"),
+            port,
+            pid: child.pid(),
+            command: command_display.clone(),
+            cwd: cwd.clone(),
+        };
+
+        let started = if let Some(registry) = registry.as_mut() {
+            match registry.record_run_started(&run) {
+                Ok(started) => Some(started),
+                Err(error) => {
+                    print_registry_warning("failed to record run start", &error);
+                    registry_disabled_warning();
+                    None
+                }
             }
+        } else {
+            None
+        };
+
+        let status = child.wait()?;
+        let attempt_elapsed = attempt_started_at.elapsed();
+        let exit_code = status_registry_exit_code(&status);
+
+        if let (Some(registry), Some(started)) = (registry.as_mut(), started)
+            && let Err(error) = registry.record_run_finished(started, exit_code)
+        {
+            print_registry_warning("failed to record run finish", &error);
         }
-    } else {
-        None
-    };
 
-    let status = child.wait()?;
-    let exit_code = status_registry_exit_code(&status);
+        if retries < MAX_ALLOCATION_RETRIES
+            && should_retry_allocation(&status, attempt_elapsed, port)
+        {
+            eprintln!(
+                "bindport: warning: assigned port {port} became unavailable; retrying with another port"
+            );
+            skip_ports.push(port);
+            retries += 1;
+            continue;
+        }
 
-    if let (Some(registry), Some(started)) = (registry.as_mut(), started)
-        && let Err(error) = registry.record_run_finished(started, exit_code)
-    {
-        print_registry_warning("failed to record run finish", &error);
+        return Ok(status_to_exit_code(&status));
     }
-
-    Ok(status_to_exit_code(&status))
 }
 
 #[derive(Debug)]
@@ -675,6 +696,12 @@ fn status_to_exit_code(status: &ExitStatus) -> ExitCode {
 
 fn status_registry_exit_code(status: &ExitStatus) -> Option<i32> {
     status.code().or_else(|| signal_exit_code(status))
+}
+
+fn should_retry_allocation(status: &ExitStatus, elapsed: Duration, port: u16) -> bool {
+    matches!(status.code(), Some(code) if code != 0)
+        && elapsed <= ALLOCATION_RETRY_WINDOW
+        && !is_port_available(port)
 }
 
 #[cfg(unix)]

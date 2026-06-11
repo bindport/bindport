@@ -70,14 +70,15 @@ Don't mutate state outside the working tree without being told to.
 - Full local CI: `mise run ci`
 - Dev server: Not configured yet; the dashboard does not exist.
 
-`bindport -- <command>` currently performs one-shot port selection, child
+`bindport -- <command>` currently performs probe-based port selection, child
 process wrapping, optional config discovery, basic project/service and git
 identity resolution, Unix SIGINT/SIGTERM forwarding, and basic SQLite lease/run
 recording. It reuses the previous free port for the same resolved identity and
-otherwise scans from a stable identity-based offset. `bindport doctor` reports
-obvious registry and OS-listener conflicts, but not full process ownership
-diagnostics. Do not claim allocation retry or full process conflict diagnostics
-work until those slices are implemented and verified.
+otherwise scans from a stable identity-based offset. It retries once with a new
+port when the wrapped child fails immediately and the assigned port is then
+occupied. `bindport doctor` reports obvious registry and OS-listener conflicts,
+but not full process ownership diagnostics. Do not claim full process conflict
+diagnostics work until that slice is implemented and verified.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.
