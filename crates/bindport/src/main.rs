@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 
-use std::{env, path::Path, process::ExitCode};
+use std::{env, path::Path, process::ExitCode, process::ExitStatus};
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 use bindport_adapters::AdapterKind;
 use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, SERVICE_NAME};
@@ -125,14 +128,15 @@ fn run_wrapped_command_result(command: &[String]) -> Result<ExitCode, RunnerErro
     };
 
     let status = child.wait()?;
+    let exit_code = status_registry_exit_code(&status);
 
     if let (Some(registry), Some(started)) = (registry.as_mut(), started)
-        && let Err(error) = registry.record_run_finished(started, status.code())
+        && let Err(error) = registry.record_run_finished(started, exit_code)
     {
         print_registry_warning("failed to record run finish", &error);
     }
 
-    Ok(status_to_exit_code(status.code()))
+    Ok(status_to_exit_code(&status))
 }
 
 fn open_optional_registry() -> Option<Registry> {
@@ -197,12 +201,26 @@ fn print_status() -> ExitCode {
     }
 }
 
-fn status_to_exit_code(code: Option<i32>) -> ExitCode {
-    match code {
+fn status_to_exit_code(status: &ExitStatus) -> ExitCode {
+    match status_registry_exit_code(status) {
         Some(0) => ExitCode::SUCCESS,
         Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
         None => ExitCode::FAILURE,
     }
+}
+
+fn status_registry_exit_code(status: &ExitStatus) -> Option<i32> {
+    status.code().or_else(|| signal_exit_code(status))
+}
+
+#[cfg(unix)]
+fn signal_exit_code(status: &ExitStatus) -> Option<i32> {
+    status.signal().map(|signal| 128 + signal)
+}
+
+#[cfg(not(unix))]
+fn signal_exit_code(_status: &ExitStatus) -> Option<i32> {
+    None
 }
 
 fn print_runner_error(error: &RunnerError) {
