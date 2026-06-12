@@ -33,6 +33,10 @@ run = "cargo check --all-targets"
 description = "Build the release binary"
 run = "cargo build --release --locked"
 
+[tasks.release-prep]
+description = "Validate a manual release prep without publishing"
+run = "scripts/release-prep.sh"
+
 [tasks.workflow-lint]
 description = "Lint GitHub Actions workflows"
 run = "actionlint"

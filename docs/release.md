@@ -54,6 +54,29 @@ If the local shell refuses to load this repo's trusted `mise.toml`, run:
 MISE_TRUSTED_CONFIG_PATHS=$PWD mise run ci
 ```
 
+## Manual Release Prep
+
+Release prep is defined but intentionally non-publishing. It validates the
+version, runs the local CI gate, dry-runs Cargo packaging/publishing, and dry-runs
+the npm package tarball.
+
+Run it locally after a release-prep branch updates versions and package artifacts:
+
+```sh
+RELEASE_VERSION=0.1.0 mise run release-prep
+```
+
+Or call the script directly:
+
+```sh
+scripts/release-prep.sh --version 0.1.0
+```
+
+The same gate is available as the manual `Release Prep` GitHub Actions workflow.
+It never creates tags, publishes npm/Cargo packages, or commits version bumps.
+Use its `publish_ready` input only when checking the final state immediately
+before a manual npm publish.
+
 ## Versioning
 
 - `0.0.0`: unreleased bootstrap only.
