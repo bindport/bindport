@@ -30,6 +30,9 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
 - npm wrapper package skeleton.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
+The v0.1 support target is Linux and macOS-style local development. Windows is
+not claimed as supported until the cross-platform hardening milestone.
+
 The first runner slice is available:
 
 ```sh

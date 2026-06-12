@@ -55,6 +55,25 @@ fn terminate_process_from_file(path: &Path) {
     let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
 }
 
+#[cfg(unix)]
+fn write_executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, contents).expect("write executable fixture");
+    let mut permissions = fs::metadata(path)
+        .expect("executable fixture metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("mark executable fixture");
+}
+
+#[cfg(unix)]
+fn prepend_path(path: &Path) -> String {
+    let existing_path = std::env::var_os("PATH").unwrap_or_default();
+
+    format!("{}:{}", path.display(), existing_path.to_string_lossy())
+}
+
 fn wait_for_child(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
     let deadline = Instant::now() + timeout;
 
@@ -86,6 +105,87 @@ fn dash_dash_runs_child_with_assigned_port() {
 
     assert!(DEFAULT_PORT_RANGE.contains(port));
     assert!(!DEFAULT_SKIP_PORTS.contains(&port));
+}
+
+#[cfg(unix)]
+#[test]
+fn package_script_runs_bindport_next_dev_flow() {
+    let registry_path = temp_registry_path("package-script-registry");
+    let root = temp_test_dir("package-script-root");
+    let bindport_bin_dir = root.join(".test-bin");
+    let next_bin_dir = root.join("node_modules").join(".bin");
+
+    fs::create_dir_all(&bindport_bin_dir).expect("bindport bin dir");
+    fs::create_dir_all(&next_bin_dir).expect("next bin dir");
+    std::os::unix::fs::symlink(
+        env!("CARGO_BIN_EXE_bindport"),
+        bindport_bin_dir.join("bindport"),
+    )
+    .expect("link bindport binary");
+    write_executable(
+        &next_bin_dir.join("next"),
+        "#!/bin/sh\nif [ \"$1\" != \"dev\" ]; then echo \"unexpected next args: $*\" >&2; exit 64; fi\nprintf 'next-dev-port=%s\\n' \"$PORT\"\n",
+    );
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"bindport-package-script-fixture","private":true,"scripts":{"dev":"bindport -- next dev"}}"#,
+    )
+    .expect("write package json");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"package-script-fixture\"\nservice = \"web\"\ndefault_range = \"29420-29421\"\nskip_ports = []\n",
+    )
+    .expect("write config");
+
+    let output = Command::new("npm")
+        .current_dir(&root)
+        .env(REGISTRY_PATH_ENV, &registry_path)
+        .env_remove(BINDPORT_PROJECT_ENV)
+        .env_remove(BINDPORT_SERVICE_ENV)
+        .env("PATH", prepend_path(&bindport_bin_dir))
+        .env("NO_UPDATE_NOTIFIER", "1")
+        .env("NPM_CONFIG_AUDIT", "false")
+        .env("NPM_CONFIG_FUND", "false")
+        .args(["run", "--silent", "dev"])
+        .output()
+        .expect("run package script");
+
+    assert!(
+        output.status.success(),
+        "package script failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let port = stdout
+        .trim()
+        .strip_prefix("next-dev-port=")
+        .expect("next dev port marker")
+        .parse::<u16>()
+        .expect("port");
+
+    assert!(matches!(port, 29_420 | 29_421));
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["services"][0]["project"], "package-script-fixture");
+    assert_eq!(status["services"][0]["service"], "web");
+    assert_eq!(status["services"][0]["command"], "next dev");
+    assert_eq!(status["services"][0]["hostname"], Value::Null);
+    assert_eq!(status["services"][0]["route_url"], Value::Null);
+    assert_eq!(status["services"][0]["proxy"], Value::Null);
+    assert_eq!(status["services"][0]["exit_code"], 0);
+    assert_eq!(
+        status["services"][0]["port"]
+            .as_u64()
+            .expect("service port"),
+        u64::from(port)
+    );
+    assert_eq!(status["runs"][0]["exit_code"], 0);
 }
 
 #[test]
@@ -214,6 +314,9 @@ fn status_json_reports_finished_run() {
     assert_eq!(services[0]["exit_code"], 0);
     assert!(services[0]["port"].as_u64().expect("port") >= DEFAULT_PORT_RANGE.start as u64);
     assert!(services[0]["port"].as_u64().expect("port") <= DEFAULT_PORT_RANGE.end as u64);
+    assert_eq!(services[0]["hostname"], Value::Null);
+    assert_eq!(services[0]["route_url"], Value::Null);
+    assert_eq!(services[0]["proxy"], Value::Null);
     assert_eq!(runs[0]["exit_code"], 0);
 }
 

@@ -16,6 +16,9 @@ bindport -- next dev
 Do not publish `0.0.0` to npm or crates.io. It is a local bootstrap version, not
 a release artifact.
 
+The first v0.1 release targets Linux and macOS-style local development. Windows
+support remains future/beta until the cross-platform hardening milestone.
+
 Before v0.1, the minimum release gate is:
 
 1. `bindport -- <command>` allocates or reuses a port.
@@ -25,6 +28,17 @@ Before v0.1, the minimum release gate is:
 5. BindPort exits with the child's exit code.
 6. `bindport status --json` reports the run.
 7. Local and CI checks pass.
+
+The package-script gate is covered by the
+`package_script_runs_bindport_next_dev_flow` integration test. It runs
+`npm run --silent dev` in a temporary package whose `dev` script is
+`bindport -- next dev`, with a fake `next` executable receiving `PORT` and the
+registry recording `next dev`. This proves package-manager script dispatch
+without adding a real Next.js dependency to the repository.
+
+`status --json` exposes route-oriented fields (`hostname`, `route_url`, and
+`proxy`) as `null` until the Traefik adapter begins rendering routes. That keeps
+the v0.1 agent-facing shape explicit without claiming v0.2 proxy behavior.
 
 ## Local Release Checks
 

@@ -138,6 +138,8 @@ pub struct StatusService {
     pub port: u16,
     pub host: String,
     pub url: String,
+    pub hostname: Option<String>,
+    pub route_url: Option<String>,
     pub worktree_path: Option<String>,
     pub worktree_hash: Option<String>,
     pub git_common_dir: Option<String>,
@@ -152,6 +154,14 @@ pub struct StatusService {
     pub exited_at: Option<String>,
     pub exit_code: Option<i32>,
     pub health: String,
+    pub proxy: Option<StatusProxy>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatusProxy {
+    pub adapter: String,
+    pub rendered: bool,
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -503,6 +513,8 @@ impl Registry {
                 port,
                 url: format!("http://{host}:{port}"),
                 host,
+                hostname: None,
+                route_url: None,
                 worktree_path: row.get(5)?,
                 worktree_hash: row.get(6)?,
                 git_common_dir: row.get(7)?,
@@ -517,6 +529,7 @@ impl Registry {
                 exited_at: row.get(16)?,
                 exit_code: row.get(17)?,
                 health: String::from("unknown"),
+                proxy: None,
             })
         })?;
 
@@ -614,6 +627,9 @@ mod tests {
         assert_eq!(snapshot.services[0].state, "stopped");
         assert_eq!(snapshot.services[0].port, 29_123);
         assert_eq!(snapshot.services[0].url, "http://127.0.0.1:29123");
+        assert_eq!(snapshot.services[0].hostname.as_deref(), None);
+        assert_eq!(snapshot.services[0].route_url.as_deref(), None);
+        assert!(snapshot.services[0].proxy.is_none());
         assert_eq!(snapshot.services[0].exit_code, Some(0));
         assert_eq!(snapshot.runs.len(), 1);
     }
