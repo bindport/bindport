@@ -14,8 +14,10 @@ Options:
   --npm-package-name <name>  Expected npm package name. Defaults to bindport.
                              Also accepted through NPM_PACKAGE_NAME.
   --skip-ci                 Skip mise run ci. Also set RUN_CI=false.
+  --allow-dirty             Allow Cargo package dry-runs with uncommitted
+                             release-pr version bump changes.
   --publish-ready           Enforce checks needed immediately before a real
-                             npm publish. Also set PUBLISH_READY=true.
+                             package publish. Also set PUBLISH_READY=true.
   -h, --help                Show this help.
 USAGE
 }
@@ -24,6 +26,7 @@ release_version="${RELEASE_VERSION:-}"
 npm_package_name="${NPM_PACKAGE_NAME:-bindport}"
 run_ci="${RUN_CI:-true}"
 publish_ready="${PUBLISH_READY:-false}"
+allow_dirty="${ALLOW_DIRTY:-false}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-ci)
       run_ci=false
+      shift
+      ;;
+    --allow-dirty)
+      allow_dirty=true
       shift
       ;;
     --publish-ready)
@@ -118,8 +125,20 @@ if [[ "$run_ci" == "true" ]]; then
   mise run ci
 fi
 
-cargo package -p bindport --list
-cargo publish -p bindport --dry-run
-npm --prefix npm/bindport pack --dry-run
+cargo_dirty_flags=()
+if [[ "$allow_dirty" == "true" ]]; then
+  cargo_dirty_flags+=(--allow-dirty)
+fi
+
+cargo package -p bindport "${cargo_dirty_flags[@]}" --list
+if [[ "$publish_ready" == "true" ]]; then
+  cargo publish -p bindport --dry-run "${cargo_dirty_flags[@]}"
+else
+  echo "Skipping Cargo publish dry-run; use --publish-ready before crates.io publishing."
+fi
+(
+  cd npm/bindport
+  npm pack --dry-run
+)
 
 echo "Release prep dry-run completed for v$version."

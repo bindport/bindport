@@ -104,8 +104,10 @@ merged.
 ## Release Validation Gate
 
 Release prep validation is intentionally non-publishing. It validates the
-version, runs the local CI gate, dry-runs Cargo packaging/publishing, and dry-runs
-the npm package tarball.
+version, runs the local CI gate, dry-runs Cargo package contents, and dry-runs
+the npm package tarball. Registry publish dry-runs are reserved for the
+`--publish-ready` gate because npm and crates.io publishing remain manual until
+native binary packaging is ready.
 
 Run it locally after a release-prep branch updates versions and package
 artifacts:
@@ -122,8 +124,8 @@ scripts/release-prep.sh --version 0.1.0
 
 The same validation gate is available as the manual `Release Prep` GitHub
 Actions workflow. It never creates tags, publishes npm/Cargo packages, or commits
-version bumps. Use its `publish_ready` input only when checking the final npm
-package state immediately before a manual npm publish.
+version bumps. Use its `publish_ready` input only when checking the final package
+state immediately before a manual npm or crates.io publish.
 
 ## Stable Release
 
@@ -198,7 +200,7 @@ Before the first real npm publish:
 2. Build or download native binaries for the supported OS/architecture targets.
 3. Make the wrapper resolve those binaries reliably.
 4. Remove `"private": true` from `npm/bindport/package.json`.
-5. Verify `npm --prefix npm/bindport pack --dry-run`.
+5. From `npm/bindport`, verify `npm pack --dry-run`.
 
 First public publish, when ready:
 

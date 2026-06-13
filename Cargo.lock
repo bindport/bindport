@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "bindport"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bindport-adapters",
  "bindport-core",
@@ -28,11 +28,11 @@ dependencies = [
 
 [[package]]
 name = "bindport-adapters"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "bindport-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-registry"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bindport-core",
  "libc",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-runner"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bindport-core",
  "libc",
