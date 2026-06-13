@@ -67,8 +67,8 @@ if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; th
   exit 1
 fi
 
-if [[ "$version" == "0.0.0" ]]; then
-  echo "0.0.0 is a bootstrap version and must not be release-prepped" >&2
+if [[ "$version" =~ ^0\.0\. ]]; then
+  echo "0.0.x is a bootstrap version range and must not be release-prepped" >&2
   exit 1
 fi
 

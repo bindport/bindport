@@ -1,8 +1,12 @@
 # Release Process
 
-BindPort releases are not wired yet. This document records the intended release
-shape so bootstrap work does not accidentally create a publish path before the
-runner and package artifacts are real.
+BindPort releases are review-first. Version bumps happen in a normal pull
+request. A manually dispatched GitHub Actions workflow verifies reviewed `main`
+and can create the stable Git tag and GitHub Release.
+
+Cargo and npm package publishing remain manual until the native binary artifact
+story is real. The npm wrapper is useful release glue, but it must not be
+published until it can install or dispatch to real platform binaries.
 
 ## Current Status
 
@@ -13,8 +17,8 @@ can prove the package-script wrapper:
 bindport -- next dev
 ```
 
-Do not publish `0.0.0` to npm or crates.io. It is a local bootstrap version, not
-a release artifact.
+Do not publish any `0.0.x` version to npm or crates.io. The `0.0.x` range is
+local bootstrap only.
 
 The first v0.1 release targets Linux and macOS-style local development. Windows
 support remains future/beta until the cross-platform hardening milestone.
@@ -26,7 +30,7 @@ Before v0.1, the minimum release gate is:
 3. The child inherits stdio.
 4. SIGINT and SIGTERM are forwarded.
 5. BindPort exits with the child's exit code.
-6. `bindport status --json` reports the run.
+6. `bindport status --json` reports the latest service plus run history.
 7. Local and CI checks pass.
 
 The package-script gate is covered by the
@@ -54,13 +58,56 @@ If the local shell refuses to load this repo's trusted `mise.toml`, run:
 MISE_TRUSTED_CONFIG_PATHS=$PWD mise run ci
 ```
 
-## Manual Release Prep
+## Release Prep PR
 
-Release prep is defined but intentionally non-publishing. It validates the
+Create a release prep pull request with:
+
+```sh
+mise run release-pr -- minor
+mise run release-pr -- patch
+mise run release-pr -- major
+mise run release-pr -- v0.1.0
+mise run release-pr -- 0.1.0
+```
+
+An argument is required. For the first release from `0.0.0`, use `minor` or an
+explicit `v0.1.0`.
+The `--` separator passes the release argument through `mise` to the script.
+
+Before prompting, `release-pr`:
+
+- requires a clean `main` branch synced with `origin/main`;
+- requires Cargo and npm versions to match;
+- requires the current version to be stable `X.Y.Z`;
+- rejects `0.0.x` release targets;
+- accepts `patch`, `minor`, `major`, `vX.Y.Z`, or `X.Y.Z`;
+- rejects explicit target versions that are not greater than the current
+  version;
+- rejects release branches that already exist locally or on `origin`.
+
+After confirmation, it:
+
+- creates `release/vX.Y.Z` from `main`;
+- updates the Cargo workspace version with `cargo set-version --workspace`;
+- updates `npm/bindport/package.json` to the same version;
+- refreshes and validates Cargo metadata;
+- runs `scripts/release-prep.sh --version X.Y.Z`;
+- stages `Cargo.toml`, `Cargo.lock`, and `npm/bindport/package.json`;
+- commits `build: prepare vX.Y.Z release`;
+- pushes the branch to `origin`;
+- opens a pull request with `gh pr create`.
+
+The script intentionally stops before publishing. Stable releases are published
+only after the release prep PR has been reviewed and merged.
+
+## Release Validation Gate
+
+Release prep validation is intentionally non-publishing. It validates the
 version, runs the local CI gate, dry-runs Cargo packaging/publishing, and dry-runs
 the npm package tarball.
 
-Run it locally after a release-prep branch updates versions and package artifacts:
+Run it locally after a release-prep branch updates versions and package
+artifacts:
 
 ```sh
 RELEASE_VERSION=0.1.0 mise run release-prep
@@ -72,14 +119,44 @@ Or call the script directly:
 scripts/release-prep.sh --version 0.1.0
 ```
 
-The same gate is available as the manual `Release Prep` GitHub Actions workflow.
-It never creates tags, publishes npm/Cargo packages, or commits version bumps.
-Use its `publish_ready` input only when checking the final state immediately
-before a manual npm publish.
+The same validation gate is available as the manual `Release Prep` GitHub
+Actions workflow. It never creates tags, publishes npm/Cargo packages, or commits
+version bumps. Use its `publish_ready` input only when checking the final npm
+package state immediately before a manual npm publish.
+
+## Stable Release
+
+After the release prep PR is merged, publish the reviewed release metadata with:
+
+```sh
+mise run release-publish -- --dry-run v0.1.0
+mise run release-publish -- v0.1.0
+```
+
+When no version is provided, `release-publish` uses the workspace version in
+`Cargo.toml`. The script requires a clean `main` branch synced with
+`origin/main`, verifies that Cargo and npm versions match, checks that the
+release tag does not already exist at another commit, and asks for confirmation
+before dispatching the manual `Release` workflow.
+
+The `Release` workflow is manual-only. It verifies that it is running from
+`main`, checks that `vX.Y.Z` matches the Cargo and npm package versions, runs the
+standard release-prep gate, verifies that the workflow did not modify source
+files, verifies release Git credentials with a non-mutating dry-run tag push,
+creates or reuses annotated Git tag `vX.Y.Z`, and creates or updates the GitHub
+Release.
+
+Dry runs run the release checks and release Git credential preflight. They do
+not create Git tags or GitHub Releases.
+
+The workflow needs `contents: write` to create the release tag and GitHub
+Release. Create a `stable-release` environment in GitHub repository settings.
+Add required reviewers to that environment if stable publishing should require
+manual approval before the job runs.
 
 ## Versioning
 
-- `0.0.0`: unreleased bootstrap only.
+- `0.0.x`: unreleased bootstrap only.
 - `0.1.0`: first working runner release.
 - Pre-1.0 minor releases may contain breaking changes.
 - A stable release prep commit should update all package versions together.
@@ -113,6 +190,26 @@ install glue:
 BindPort does not need a Node application stack. The runtime remains the Rust
 binary; npm is only an install path for JavaScript projects that want to call
 `bindport` from `package.json` scripts.
+
+Before the first real npm publish:
+
+1. Choose the final package name (`bindport` or `@bindport/cli`).
+2. Build or download native binaries for the supported OS/architecture targets.
+3. Make the wrapper resolve those binaries reliably.
+4. Remove `"private": true` from `npm/bindport/package.json`.
+5. Verify `npm --prefix npm/bindport pack --dry-run`.
+
+First public publish, when ready:
+
+```sh
+cd npm/bindport
+npm publish --access public
+```
+
+For the unscoped name `bindport`, `--access public` is unnecessary because
+public access is the default. The flag is required only for a scoped public
+package such as `@bindport/cli`. Revisit the command once the final package name
+is chosen.
 
 ## Bun / bunx Workflow
 
@@ -172,32 +269,6 @@ run:
 }
 ```
 
-Before publishing, dry-run the package:
-
-```sh
-cd npm/bindport
-npm pack --dry-run
-```
-
-Before the first real publish:
-
-1. Choose the final package name (`bindport` or `@bindport/cli`).
-2. Remove `"private": true` from `npm/bindport/package.json`.
-3. Bump the npm package version from `0.0.0` to the release version.
-4. Verify the package includes a real native binary install/dispatch path.
-
-First public publish, when ready:
-
-```sh
-cd npm/bindport
-npm publish --access public
-```
-
-For the unscoped name `bindport`, `--access public` is unnecessary because
-public access is the default. The flag is required only for a scoped public
-package such as `@bindport/cli`. Revisit the command once the final package name
-is chosen.
-
 ## Cargo Package Shape
 
 The Cargo package is the Rust CLI crate `bindport`. Before publishing:
@@ -215,12 +286,11 @@ cargo publish -p bindport
 
 ## Automation Policy
 
-Stable publishing should stay manual until v0.1 has a real artifact story:
-
-- no workflow should create tags yet;
-- no workflow should publish to npm or crates.io yet;
-- no workflow should commit version bumps back to the repository;
-- release prep should happen through a normal reviewed pull request.
-
-Add automated publishing only after the manual process has shipped at least one
-working release candidate cleanly.
+- `release-pr` may create a branch, commit, push, and open a PR after explicit
+  confirmation.
+- The `Release` workflow may create a Git tag and GitHub Release when
+  `dry_run=false`.
+- No workflow publishes npm or crates.io packages yet.
+- No workflow commits version bumps back to the repository.
+- Add automated package publishing only after the native binary artifact process
+  has shipped at least one working release candidate cleanly.
