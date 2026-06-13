@@ -11,7 +11,7 @@ use std::{
 
 use bindport_core::{
     BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS,
-    FALLBACK_CONFIG_FILE, ServiceIdentity,
+    FALLBACK_CONFIG_FILE, SERVICE_NAME, ServiceIdentity,
 };
 use bindport_registry::{REGISTRY_PATH_ENV, Registry, RunStart};
 use serde_json::Value;
@@ -23,6 +23,7 @@ fn bindport() -> Command {
 fn bindport_with_registry(registry_path: &Path) -> Command {
     let mut command = bindport();
     command.env(REGISTRY_PATH_ENV, registry_path);
+    command.env("XDG_CONFIG_HOME", config_home_for_registry(registry_path));
     command.env_remove(BINDPORT_PROJECT_ENV);
     command.env_remove(BINDPORT_SERVICE_ENV);
     command
@@ -31,10 +32,19 @@ fn bindport_with_registry(registry_path: &Path) -> Command {
 fn bindport_without_registry_path() -> Command {
     let mut command = bindport();
     command.env_remove(REGISTRY_PATH_ENV);
+    command.env_remove("XDG_CONFIG_HOME");
     command.env_remove("XDG_STATE_HOME");
     command.env_remove("HOME");
     command.env_remove("APPDATA");
     command
+}
+
+fn config_home_for_registry(registry_path: &Path) -> PathBuf {
+    registry_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("config-home")
 }
 
 #[cfg(unix)]
@@ -53,6 +63,25 @@ fn terminate_process_from_file(path: &Path) {
     };
 
     let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
+}
+
+#[cfg(unix)]
+fn write_executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, contents).expect("write executable fixture");
+    let mut permissions = fs::metadata(path)
+        .expect("executable fixture metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("mark executable fixture");
+}
+
+#[cfg(unix)]
+fn prepend_path(path: &Path) -> String {
+    let existing_path = std::env::var_os("PATH").unwrap_or_default();
+
+    format!("{}:{}", path.display(), existing_path.to_string_lossy())
 }
 
 fn wait_for_child(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
@@ -86,6 +115,87 @@ fn dash_dash_runs_child_with_assigned_port() {
 
     assert!(DEFAULT_PORT_RANGE.contains(port));
     assert!(!DEFAULT_SKIP_PORTS.contains(&port));
+}
+
+#[cfg(unix)]
+#[test]
+fn package_script_runs_bindport_next_dev_flow() {
+    let registry_path = temp_registry_path("package-script-registry");
+    let root = temp_test_dir("package-script-root");
+    let bindport_bin_dir = root.join(".test-bin");
+    let next_bin_dir = root.join("node_modules").join(".bin");
+
+    fs::create_dir_all(&bindport_bin_dir).expect("bindport bin dir");
+    fs::create_dir_all(&next_bin_dir).expect("next bin dir");
+    std::os::unix::fs::symlink(
+        env!("CARGO_BIN_EXE_bindport"),
+        bindport_bin_dir.join("bindport"),
+    )
+    .expect("link bindport binary");
+    write_executable(
+        &next_bin_dir.join("next"),
+        "#!/bin/sh\nif [ \"$1\" != \"dev\" ]; then echo \"unexpected next args: $*\" >&2; exit 64; fi\nprintf 'next-dev-port=%s\\n' \"$PORT\"\n",
+    );
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"bindport-package-script-fixture","private":true,"scripts":{"dev":"bindport -- next dev"}}"#,
+    )
+    .expect("write package json");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"package-script-fixture\"\nservice = \"web\"\ndefault_range = \"29420-29421\"\nskip_ports = []\n",
+    )
+    .expect("write config");
+
+    let output = Command::new("npm")
+        .current_dir(&root)
+        .env(REGISTRY_PATH_ENV, &registry_path)
+        .env_remove(BINDPORT_PROJECT_ENV)
+        .env_remove(BINDPORT_SERVICE_ENV)
+        .env("PATH", prepend_path(&bindport_bin_dir))
+        .env("NO_UPDATE_NOTIFIER", "1")
+        .env("NPM_CONFIG_AUDIT", "false")
+        .env("NPM_CONFIG_FUND", "false")
+        .args(["run", "--silent", "dev"])
+        .output()
+        .expect("run package script");
+
+    assert!(
+        output.status.success(),
+        "package script failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let port = stdout
+        .trim()
+        .strip_prefix("next-dev-port=")
+        .expect("next dev port marker")
+        .parse::<u16>()
+        .expect("port");
+
+    assert!(matches!(port, 29_420 | 29_421));
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["services"][0]["project"], "package-script-fixture");
+    assert_eq!(status["services"][0]["service"], "web");
+    assert_eq!(status["services"][0]["command"], "next dev");
+    assert_eq!(status["services"][0]["hostname"], Value::Null);
+    assert_eq!(status["services"][0]["route_url"], Value::Null);
+    assert_eq!(status["services"][0]["proxy"], Value::Null);
+    assert_eq!(status["services"][0]["exit_code"], 0);
+    assert_eq!(
+        status["services"][0]["port"]
+            .as_u64()
+            .expect("service port"),
+        u64::from(port)
+    );
+    assert_eq!(status["runs"][0]["exit_code"], 0);
 }
 
 #[test]
@@ -214,7 +324,60 @@ fn status_json_reports_finished_run() {
     assert_eq!(services[0]["exit_code"], 0);
     assert!(services[0]["port"].as_u64().expect("port") >= DEFAULT_PORT_RANGE.start as u64);
     assert!(services[0]["port"].as_u64().expect("port") <= DEFAULT_PORT_RANGE.end as u64);
+    assert_eq!(services[0]["hostname"], Value::Null);
+    assert_eq!(services[0]["route_url"], Value::Null);
+    assert_eq!(services[0]["proxy"], Value::Null);
     assert_eq!(runs[0]["exit_code"], 0);
+}
+
+#[test]
+fn status_reports_latest_service_once_and_keeps_run_history() {
+    let registry_path = temp_registry_path("deduped-status");
+    let root = temp_test_dir("deduped-status-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"status-project\"\nservice = \"web\"\ndefault_range = \"29320-29321\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    let first_port = run_print_port(&registry_path, &root);
+    let second_port = run_print_port(&registry_path, &root);
+
+    assert_eq!(second_port, first_port);
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status json");
+
+    assert!(status_output.status.success());
+
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    let runs = status["runs"].as_array().expect("runs");
+
+    assert_eq!(services.len(), 1);
+    assert_eq!(runs.len(), 2);
+    assert_eq!(services[0]["project"], "status-project");
+    assert_eq!(services[0]["service"], "web");
+    assert_eq!(
+        services[0]["port"].as_u64().expect("service port"),
+        u64::from(second_port)
+    );
+    assert_eq!(services[0]["pid"], runs[0]["pid"]);
+    assert_eq!(services[0]["started_at"], runs[0]["started_at"]);
+
+    let plain_status = bindport_with_registry(&registry_path)
+        .args(["status"])
+        .output()
+        .expect("run bindport status");
+
+    assert!(plain_status.status.success());
+    let stdout = String::from_utf8(plain_status.stdout).expect("plain status stdout");
+    let lines = stdout.lines().collect::<Vec<_>>();
+
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains(&format!("stopped\tweb\t127.0.0.1:{second_port}")));
 }
 
 #[test]
@@ -482,15 +645,15 @@ fn toml_config_wins_over_json_in_same_directory() {
 }
 
 #[test]
-fn fallback_config_next_to_registry_is_used_when_no_project_config_exists() {
+fn fallback_config_from_config_home_is_used_when_no_project_config_exists() {
     let state_dir = temp_test_dir("fallback-config-state");
     let registry_path = state_dir.join("registry.sqlite");
+    let config_path = config_home_for_registry(&registry_path)
+        .join(SERVICE_NAME)
+        .join(FALLBACK_CONFIG_FILE);
     let cwd = temp_test_dir("fallback-config-cwd");
-    fs::write(
-        state_dir.join(FALLBACK_CONFIG_FILE),
-        "default_range = \"29200-29200\"\n",
-    )
-    .expect("write fallback config");
+    fs::create_dir_all(config_path.parent().expect("config parent")).expect("config dir");
+    fs::write(&config_path, "default_range = \"29200-29200\"\n").expect("write fallback config");
 
     let output = bindport_with_registry(&registry_path)
         .current_dir(&cwd)
@@ -607,10 +770,12 @@ fn doctor_caps_os_listener_conflict_scan_for_wide_ranges() {
 }
 
 #[test]
-fn init_creates_fallback_config_next_to_registry() {
+fn init_creates_fallback_config_in_config_home() {
     let state_dir = temp_test_dir("init-config-state");
     let registry_path = state_dir.join("registry.sqlite");
-    let config_path = state_dir.join(FALLBACK_CONFIG_FILE);
+    let config_path = config_home_for_registry(&registry_path)
+        .join(SERVICE_NAME)
+        .join(FALLBACK_CONFIG_FILE);
 
     let output = bindport_with_registry(&registry_path)
         .args(["init"])

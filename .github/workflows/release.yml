@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable release version, for example 0.1.0 or v0.1.0
+        required: true
+        type: string
+      dry_run:
+        description: Verify without tagging or creating a GitHub release
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: stable release
+    runs-on: ubuntu-latest
+    environment: stable-release
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+        with:
+          version: 2026.5.16
+          sha256: fb2d7bf1a3751398a5c336a3565cd3c60af9b41952abe6fd62e2f2f0d5f06b60
+          install: true
+          install_args: --locked
+          cache: true
+
+      - name: Install Rust components
+        run: rustup component add rustfmt clippy
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Resolve release version
+        id: release
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+            echo "stable releases must run from main, got ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+          raw_version="$RAW_VERSION"
+          version="${raw_version#v}"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "version must be stable X.Y.Z or vX.Y.Z, got $raw_version" >&2
+            exit 1
+          fi
+          if [[ "$version" =~ ^0\.0\. ]]; then
+            echo "0.0.x is bootstrap-only and must not be released" >&2
+            exit 1
+          fi
+
+          cargo_version="$(awk -F'"' '/^version = / { print $2; exit }' Cargo.toml)"
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "requested version $version does not match Cargo.toml version $cargo_version" >&2
+            exit 1
+          fi
+
+          npm_version="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync('npm/bindport/package.json', 'utf8')).version)")"
+          if [[ "$version" != "$npm_version" ]]; then
+            echo "requested version $version does not match npm package version $npm_version" >&2
+            exit 1
+          fi
+
+          git fetch origin main --tags
+          head_sha="$(git rev-parse HEAD)"
+          remote_main="$(git rev-parse origin/main)"
+          if [[ "$head_sha" != "$remote_main" ]]; then
+            echo "release checkout must match origin/main before publishing" >&2
+            exit 1
+          fi
+
+          tag="v$version"
+          tag_exists=false
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/tmp/remote-tag 2>/dev/null; then
+            peeled_sha="$(git ls-remote --tags origin "refs/tags/$tag^{}" | awk '{ print $1 }')"
+            if [[ -z "$peeled_sha" ]]; then
+              peeled_sha="$(awk '{ print $1 }' /tmp/remote-tag)"
+            fi
+            if [[ "$peeled_sha" != "$head_sha" ]]; then
+              echo "remote tag $tag already exists at $peeled_sha, not $head_sha" >&2
+              exit 1
+            fi
+            tag_exists=true
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "tag_exists=$tag_exists"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run release prep gate
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RUN_CI: true
+          PUBLISH_READY: false
+        run: scripts/release-prep.sh
+
+      - name: Verify release workflow did not change source
+        run: git diff --exit-code
+
+      - name: Verify release git credentials
+        if: ${{ steps.release.outputs.tag_exists == 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --dry-run "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/tags/$TAG"
+
+      - name: Create stable release tag
+        if: ${{ inputs.dry_run == false && steps.release.outputs.tag_exists == 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
+
+      - name: Reuse existing stable release tag
+        if: ${{ inputs.dry_run == false && steps.release.outputs.tag_exists == 'true' }}
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: echo "Reusing $TAG at this commit."
+
+      - name: Create GitHub release
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes "Release $TAG"
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes "Release $TAG"
+          fi
+
+      - name: Report dry run
+        if: ${{ inputs.dry_run }}
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: echo "Dry run completed for $TAG."
+
+      - name: Report package publishing status
+        run: echo "Cargo and npm publishing remain manual until native binary packaging is ready."
