@@ -26,7 +26,7 @@ bindport-runner = { path = "crates/bindport-runner", version = "0.1.0" }
 libc = "0.2.186"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "=1.0.150"
+serde_json = "=1.0.133"
 toml = "1.1.2"
 serde_yaml_ng = "0.10.0"
 
