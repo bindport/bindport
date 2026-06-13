@@ -1,4 +1,4 @@
-name: Release Prep
+name: Release Check
 
 on:
   workflow_dispatch:
@@ -18,13 +18,13 @@ on:
         default: true
         type: boolean
       publish_ready:
-        description: Enforce final npm publish readiness checks
+        description: Run full crates.io publish dry-runs
         required: true
         default: false
         type: boolean
 
 concurrency:
-  group: release-prep-${{ github.ref }}
+  group: release-check-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -34,8 +34,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release-prep:
-    name: manual release prep
+  release-check:
+    name: manual release check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -58,13 +58,13 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
-      - name: Run release prep dry-run
+      - name: Run release check
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           NPM_PACKAGE_NAME: ${{ inputs.npm_package_name }}
           RUN_CI: ${{ inputs.run_ci }}
           PUBLISH_READY: ${{ inputs.publish_ready }}
-        run: scripts/release-prep.sh
+        run: scripts/release-check.sh
 
-      - name: Verify release prep did not change source
+      - name: Verify release check did not change source
         run: git diff --exit-code

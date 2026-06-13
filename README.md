@@ -9,9 +9,18 @@ BindPort does not aim to become the local edge proxy. By default it should not
 bind 80/443, install certificates, mutate DNS, edit `/etc/hosts`, or require a
 root-owned daemon.
 
-## Bootstrap Status
+## Current Status
 
-This repository is in the pre-v0.1 bootstrap phase. The current scaffold includes:
+BindPort v0.1.0 is available through Cargo:
+
+```sh
+cargo install bindport
+bindport --help
+bindport -- doctor
+bindport -- -- sh -c 'echo "$PORT"'
+```
+
+The current release includes:
 
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
@@ -27,15 +36,17 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
   active registry ports, OS listener conflicts, and the next candidate port.
 - MIT license, security policy, third-party notices stub, CI/audit/release
   workflows, and local `mise` tasks.
-- npm wrapper package skeleton.
+- npm wrapper package skeleton. It is not published yet because native binary
+  dispatch is not wired.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
 The v0.1 support target is Linux and macOS-style local development. Windows is
 not claimed as supported until the cross-platform hardening milestone.
 
-The first runner slice is available:
+The v0.1 runner is available from Cargo or from a source checkout:
 
 ```sh
+bindport -- next dev
 cargo run -p bindport -- -- next dev
 ```
 
@@ -44,12 +55,12 @@ It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
 identity when it is still free, otherwise scans from a stable identity-based
 offset, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
 SIGINT/SIGTERM to the child, and exits with the child process exit code. This
-bootstrap runner is probe-then-spawn, so another process can still claim the port
+v0.1 runner is probe-then-spawn, so another process can still claim the port
 before the child binds. BindPort retries once with another port when the child
 fails immediately and the assigned port is then occupied; stronger lease-based
 coordination is still future v0.1 work.
 
-During bootstrap, use Cargo directly:
+From a source checkout, use Cargo directly:
 
 ```sh
 cargo run -p bindport -- --help
@@ -110,8 +121,8 @@ service argument in `bindport run <service> -- ...` wins, then
 
 ## Documentation
 
-- [Release](docs/release.md): release PR automation, manual release workflow,
-  package-name timing, and npm/Cargo publishing boundaries.
+- [Release](docs/release.md): release prep automation, GitHub release binaries,
+  Cargo publish helpers, and npm packaging boundaries.
 
 ## License
 
