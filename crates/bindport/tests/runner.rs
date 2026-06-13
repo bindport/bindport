@@ -11,7 +11,7 @@ use std::{
 
 use bindport_core::{
     BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS,
-    FALLBACK_CONFIG_FILE, ServiceIdentity,
+    FALLBACK_CONFIG_FILE, SERVICE_NAME, ServiceIdentity,
 };
 use bindport_registry::{REGISTRY_PATH_ENV, Registry, RunStart};
 use serde_json::Value;
@@ -23,6 +23,7 @@ fn bindport() -> Command {
 fn bindport_with_registry(registry_path: &Path) -> Command {
     let mut command = bindport();
     command.env(REGISTRY_PATH_ENV, registry_path);
+    command.env("XDG_CONFIG_HOME", config_home_for_registry(registry_path));
     command.env_remove(BINDPORT_PROJECT_ENV);
     command.env_remove(BINDPORT_SERVICE_ENV);
     command
@@ -31,10 +32,19 @@ fn bindport_with_registry(registry_path: &Path) -> Command {
 fn bindport_without_registry_path() -> Command {
     let mut command = bindport();
     command.env_remove(REGISTRY_PATH_ENV);
+    command.env_remove("XDG_CONFIG_HOME");
     command.env_remove("XDG_STATE_HOME");
     command.env_remove("HOME");
     command.env_remove("APPDATA");
     command
+}
+
+fn config_home_for_registry(registry_path: &Path) -> PathBuf {
+    registry_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("config-home")
 }
 
 #[cfg(unix)]
@@ -321,6 +331,56 @@ fn status_json_reports_finished_run() {
 }
 
 #[test]
+fn status_reports_latest_service_once_and_keeps_run_history() {
+    let registry_path = temp_registry_path("deduped-status");
+    let root = temp_test_dir("deduped-status-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"status-project\"\nservice = \"web\"\ndefault_range = \"29320-29321\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    let first_port = run_print_port(&registry_path, &root);
+    let second_port = run_print_port(&registry_path, &root);
+
+    assert_eq!(second_port, first_port);
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status json");
+
+    assert!(status_output.status.success());
+
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    let runs = status["runs"].as_array().expect("runs");
+
+    assert_eq!(services.len(), 1);
+    assert_eq!(runs.len(), 2);
+    assert_eq!(services[0]["project"], "status-project");
+    assert_eq!(services[0]["service"], "web");
+    assert_eq!(
+        services[0]["port"].as_u64().expect("service port"),
+        u64::from(second_port)
+    );
+    assert_eq!(services[0]["pid"], runs[0]["pid"]);
+    assert_eq!(services[0]["started_at"], runs[0]["started_at"]);
+
+    let plain_status = bindport_with_registry(&registry_path)
+        .args(["status"])
+        .output()
+        .expect("run bindport status");
+
+    assert!(plain_status.status.success());
+    let stdout = String::from_utf8(plain_status.stdout).expect("plain status stdout");
+    let lines = stdout.lines().collect::<Vec<_>>();
+
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains(&format!("stopped\tweb\t127.0.0.1:{second_port}")));
+}
+
+#[test]
 fn runner_reuses_previous_identity_port_when_available() {
     let registry_path = temp_registry_path("sticky-registry");
     let root = temp_test_dir("sticky-root");
@@ -585,15 +645,15 @@ fn toml_config_wins_over_json_in_same_directory() {
 }
 
 #[test]
-fn fallback_config_next_to_registry_is_used_when_no_project_config_exists() {
+fn fallback_config_from_config_home_is_used_when_no_project_config_exists() {
     let state_dir = temp_test_dir("fallback-config-state");
     let registry_path = state_dir.join("registry.sqlite");
+    let config_path = config_home_for_registry(&registry_path)
+        .join(SERVICE_NAME)
+        .join(FALLBACK_CONFIG_FILE);
     let cwd = temp_test_dir("fallback-config-cwd");
-    fs::write(
-        state_dir.join(FALLBACK_CONFIG_FILE),
-        "default_range = \"29200-29200\"\n",
-    )
-    .expect("write fallback config");
+    fs::create_dir_all(config_path.parent().expect("config parent")).expect("config dir");
+    fs::write(&config_path, "default_range = \"29200-29200\"\n").expect("write fallback config");
 
     let output = bindport_with_registry(&registry_path)
         .current_dir(&cwd)
@@ -710,10 +770,12 @@ fn doctor_caps_os_listener_conflict_scan_for_wide_ranges() {
 }
 
 #[test]
-fn init_creates_fallback_config_next_to_registry() {
+fn init_creates_fallback_config_in_config_home() {
     let state_dir = temp_test_dir("init-config-state");
     let registry_path = state_dir.join("registry.sqlite");
-    let config_path = state_dir.join(FALLBACK_CONFIG_FILE);
+    let config_path = config_home_for_registry(&registry_path)
+        .join(SERVICE_NAME)
+        .join(FALLBACK_CONFIG_FILE);
 
     let output = bindport_with_registry(&registry_path)
         .args(["init"])

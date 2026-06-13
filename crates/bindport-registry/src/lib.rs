@@ -500,6 +500,23 @@ impl Registry {
                 runs.exit_code
              FROM leases
              JOIN runs ON runs.lease_id = leases.id
+             JOIN (
+                SELECT MAX(runs.id) AS latest_run_id
+                FROM leases
+                JOIN runs ON runs.lease_id = leases.id
+                GROUP BY COALESCE(
+                    leases.identity_key,
+                    leases.project
+                        || char(31)
+                        || leases.service
+                        || char(31)
+                        || COALESCE(leases.worktree_path, '')
+                        || char(31)
+                        || COALESCE(leases.branch_label, '')
+                        || char(31)
+                        || leases.host
+                )
+             ) latest_services ON latest_services.latest_run_id = runs.id
              ORDER BY runs.started_at DESC, runs.id DESC",
         )?;
         let rows = statement.query_map([], |row| {

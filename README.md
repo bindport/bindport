@@ -18,7 +18,7 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
 - Minimal CLI support for `--help`, `--version`, `status`, `doctor`, and
   one-shot `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
-  `.bindport.yaml`, with a fallback config next to the registry file.
+  `.bindport.yaml`, with a fallback user config in the XDG config directory.
 - Basic project/service identity resolution from environment, config,
   `package.json`, command inference, and `bindport run <service> -- ...`, with
   git branch/worktree metadata recorded when available.
@@ -89,10 +89,13 @@ Starter config examples live in [examples/config](examples/config):
 TOML is the reference format. When equivalent config files exist, discovery
 prefers TOML, then JSON, then YAML. BindPort walks upward from the current
 directory and uses the first project config it finds. If no project config
-exists, it falls back to the optional `config.toml` stored next to
-`registry.sqlite` in the BindPort state directory. `bindport init` creates that
-fallback config with default values. Config is never required; missing config
-means built-in defaults are used.
+exists, it falls back to the optional user config at
+`$XDG_CONFIG_HOME/bindport/config.toml`, or `~/.config/bindport/config.toml`
+when `XDG_CONFIG_HOME` is unset. The registry database remains state at
+`$XDG_STATE_HOME/bindport/registry.sqlite`, or
+`~/.local/state/bindport/registry.sqlite` when `XDG_STATE_HOME` is unset.
+`bindport init` creates the optional user config with default values. Config is
+never required; missing config means built-in defaults are used.
 
 The current implementation reads only top-level `project`, `service`,
 `default_range`, and `skip_ports`. The example `identity`, `services`, and

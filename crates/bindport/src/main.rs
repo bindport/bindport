@@ -282,15 +282,30 @@ fn resolve_run_identity(
     })
 }
 
-fn fallback_config_path() -> Result<PathBuf, RegistryError> {
-    let registry_path = default_registry_path()?;
-    let path = registry_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .map(|parent| parent.join(FALLBACK_CONFIG_FILE))
-        .unwrap_or_else(|| PathBuf::from(FALLBACK_CONFIG_FILE));
+fn fallback_config_path() -> io::Result<PathBuf> {
+    if let Some(config_home) = env::var_os("XDG_CONFIG_HOME").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(config_home)
+            .join(SERVICE_NAME)
+            .join(FALLBACK_CONFIG_FILE));
+    }
 
-    Ok(path)
+    if let Some(home) = env::var_os("HOME").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(home)
+            .join(".config")
+            .join(SERVICE_NAME)
+            .join(FALLBACK_CONFIG_FILE));
+    }
+
+    if let Some(appdata) = env::var_os("APPDATA").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(appdata)
+            .join(SERVICE_NAME)
+            .join(FALLBACK_CONFIG_FILE));
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "could not determine config directory; set XDG_CONFIG_HOME, HOME, or APPDATA",
+    ))
 }
 
 fn open_optional_registry() -> Option<Registry> {
@@ -661,7 +676,7 @@ enum InitConfigResult {
 }
 
 fn write_fallback_config() -> io::Result<InitConfigResult> {
-    let path = fallback_config_path().map_err(io::Error::other)?;
+    let path = fallback_config_path()?;
 
     if path.is_file() {
         return Ok(InitConfigResult::AlreadyExists(path));
