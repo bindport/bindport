@@ -7,7 +7,14 @@ native binary for the current platform. Do not publish this package until the
 native binary install/dispatch path is real. See
 [`docs/release.md`](../../docs/release.md) for the release policy.
 
-During repository bootstrap, use Cargo directly:
+For now, install the published Cargo crate:
+
+```sh
+cargo install bindport
+bindport --help
+```
+
+From a repository checkout, use Cargo directly:
 
 ```sh
 cargo run -p bindport -- --help

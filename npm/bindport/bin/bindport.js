@@ -15,7 +15,7 @@ const binary = candidates.find((candidate) => existsSync(candidate));
 
 if (!binary) {
   console.error("BindPort npm wrapper is a bootstrap placeholder.");
-  console.error("Use `cargo run -p bindport -- ...` until release packaging is wired.");
+  console.error("Use `cargo install bindport` until npm native binary packaging is wired.");
   process.exit(1);
 }
 

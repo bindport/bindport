@@ -5,12 +5,12 @@ lockfile = true
 # `default` rustup profile is NOT used; mise installs minimal. rustfmt and
 # clippy are needed by local checks and CI.
 rust = { version = "1.96.0", components = "rustfmt,clippy" }
-node = "22.22.3"
-"cargo:cargo-audit" = "0.22.1"
+node = "26.3.0"
+"cargo:cargo-audit" = "0.22.2"
 "cargo:cargo-edit" = "0.13.11"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
-trivy = "0.70.0"
+trivy = "0.71.0"
 # actionlint shells out to shellcheck for `run:` blocks. Pin it so local
 # workflow linting matches CI.
 shellcheck = "0.11.0"
@@ -36,16 +36,92 @@ description = "Build the release binary"
 run = "cargo build --release --locked"
 
 [tasks.release-prep]
-description = "Validate a manual release prep without publishing"
-run = "scripts/release-prep.sh"
-
-[tasks.release-pr]
 description = "Create a release prep branch, version bump commit, and PR"
-run = "scripts/release-pr.sh"
+usage = '''
+arg "[request]" help="patch, minor, major, vX.Y.Z, or X.Y.Z" default="patch"
+'''
+run = 'scripts/release-prep.sh "${usage_request?}"'
+
+[tasks.release-check]
+description = "Validate a release checkout without publishing"
+usage = '''
+arg "<version>" help="Release version to validate, for example 0.1.0 or v0.1.0"
+flag "--npm-package-name <name>" help="Expected npm package name" default="bindport"
+flag "--skip-ci" help="Skip the full local CI gate"
+flag "--allow-dirty" help="Allow release-prep version bump changes"
+flag "--publish-ready" help="Run full crates.io publish dry-runs"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=(
+  --version "${usage_version?}"
+  --npm-package-name "${usage_npm_package_name?}"
+)
+if [[ "${usage_skip_ci:-false}" == "true" ]]; then
+  args+=(--skip-ci)
+fi
+if [[ "${usage_allow_dirty:-false}" == "true" ]]; then
+  args+=(--allow-dirty)
+fi
+if [[ "${usage_publish_ready:-false}" == "true" ]]; then
+  args+=(--publish-ready)
+fi
+scripts/release-check.sh "${args[@]}"
+'''
 
 [tasks.release-publish]
 description = "Dispatch the stable release workflow for the current version"
-run = "scripts/release-publish.sh"
+usage = '''
+arg "[version]" help="Stable release version, for example 0.1.0 or v0.1.0"
+flag "--dry-run" help="Verify without tagging or creating a GitHub release"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=()
+if [[ "${usage_dry_run:-false}" == "true" ]]; then
+  args+=(--dry-run)
+fi
+if [[ -n "${usage_version:-}" ]]; then
+  args+=("${usage_version}")
+fi
+scripts/release-publish.sh "${args[@]}"
+'''
+
+[tasks.cargo-publish]
+description = "Dry-run or execute crates.io publishing in workspace order"
+usage = '''
+arg "[version]" help="Release version to publish, for example 0.1.0 or v0.1.0"
+flag "--execute" help="Actually publish to crates.io"
+flag "--allow-dirty" help="Allow dirty dry-runs"
+flag "--wait-seconds <n>" help="Seconds to wait between real publishes"
+flag "--yes" help="Skip the interactive publish confirmation"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=()
+if [[ -n "${usage_version:-}" ]]; then
+  args+=("${usage_version}")
+fi
+if [[ "${usage_execute:-false}" == "true" ]]; then
+  args+=(--execute)
+fi
+if [[ "${usage_allow_dirty:-false}" == "true" ]]; then
+  args+=(--allow-dirty)
+fi
+if [[ -n "${usage_wait_seconds:-}" ]]; then
+  args+=(--wait-seconds "${usage_wait_seconds}")
+fi
+if [[ "${usage_yes:-false}" == "true" ]]; then
+  args+=(--yes)
+fi
+scripts/cargo-publish.sh "${args[@]}"
+'''
 
 [tasks.workflow-lint]
 description = "Lint GitHub Actions workflows"
