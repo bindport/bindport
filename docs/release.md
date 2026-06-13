@@ -97,8 +97,9 @@ After confirmation, it:
 - pushes the branch to `origin`;
 - opens a pull request with `gh pr create`.
 
-The script intentionally stops before publishing. Stable releases are published
-only after the release prep PR has been reviewed and merged.
+The script intentionally stops before publishing release metadata. The release
+workflow is dispatched only after the release prep PR has been reviewed and
+merged.
 
 ## Release Validation Gate
 

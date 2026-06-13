@@ -25,8 +25,8 @@ This repository is in the pre-v0.1 bootstrap phase. The current scaffold include
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
-- MIT license, security policy, third-party notices stub, CI/audit workflows,
-  and local `mise` tasks.
+- MIT license, security policy, third-party notices stub, CI/audit/release
+  workflows, and local `mise` tasks.
 - npm wrapper package skeleton.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
@@ -110,8 +110,8 @@ service argument in `bindport run <service> -- ...` wins, then
 
 ## Documentation
 
-- [Release](docs/release.md): bootstrap release policy, package-name timing, and
-  future npm/Cargo publish shape.
+- [Release](docs/release.md): release PR automation, manual release workflow,
+  package-name timing, and npm/Cargo publishing boundaries.
 
 ## License
 
