@@ -184,6 +184,21 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify release artifact checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          checksums=(dist/*.sha256)
+          if [[ ${#checksums[@]} -eq 0 ]]; then
+            echo "no checksum files found in dist/" >&2
+            exit 1
+          fi
+          (
+            cd dist
+            sha256sum -c ./*.sha256
+          )
+
       - name: Verify release git credentials
         if: ${{ steps.release.outputs.tag_exists == 'false' }}
         env:
