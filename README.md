@@ -121,6 +121,8 @@ service argument in `bindport run <service> -- ...` wins, then
 
 ## Documentation
 
+- [Dashboard](docs/dashboard.md): local read-only service dashboard, status API,
+  default port, fallback behavior, and security posture.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 
