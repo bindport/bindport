@@ -420,26 +420,153 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BindPort Dashboard</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { margin: 0; background: Canvas; color: CanvasText; }
-    main { max-width: 1120px; margin: 0 auto; padding: 24px; }
-    header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-    h1 { font-size: 1.4rem; margin: 0; }
-    .meta { color: color-mix(in srgb, CanvasText 68%, Canvas); font-size: 0.9rem; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
-    th, td { border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, Canvas); padding: 10px 8px; text-align: left; vertical-align: top; }
-    th { font-size: 0.75rem; letter-spacing: 0; text-transform: uppercase; color: color-mix(in srgb, CanvasText 62%, Canvas); }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86rem; }
-    .state { font-weight: 700; }
-    .empty, .error { border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas); padding: 16px; }
-    .error { color: #9f1d20; }
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, sans-serif;
+      --border: color-mix(in srgb, CanvasText 16%, Canvas);
+      --muted: color-mix(in srgb, CanvasText 62%, Canvas);
+      --soft: color-mix(in srgb, CanvasText 5%, Canvas);
+      --active: #138a4b;
+      --stopped: #64748b;
+      --stale: #a15c00;
+      --other: #9f1d20;
+    }
+    body {
+      margin: 0;
+      background: Canvas;
+      color: CanvasText;
+    }
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 0;
+    }
+    h2 {
+      font-size: 1rem;
+      margin: 0;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-align: right;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+    .summary-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--soft);
+    }
+    .summary-label {
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+    }
+    .summary-value {
+      display: block;
+      font-size: 1.45rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+    .service-group {
+      margin-top: 22px;
+    }
+    .group-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .group-count {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .table-wrap {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      min-width: 960px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    th {
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    a {
+      color: LinkText;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.86rem;
+    }
+    .state-pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      display: inline-flex;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+    .state-active { color: var(--active); }
+    .state-stopped { color: var(--stopped); }
+    .state-stale { color: var(--stale); }
+    .state-other { color: var(--other); }
+    .empty, .error {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      background: var(--soft);
+    }
+    .error {
+      color: var(--other);
+    }
     @media (max-width: 760px) {
       main { padding: 16px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .meta { text-align: left; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .table-wrap { border: 0; overflow: visible; }
+      table { min-width: 0; }
       table, thead, tbody, th, td, tr { display: block; }
       thead { display: none; }
-      tr { border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, Canvas); padding: 8px 0; }
+      tr { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; padding: 8px 10px; }
       td { border: 0; padding: 6px 0; }
-      td::before { content: attr(data-label); display: block; font-size: 0.72rem; text-transform: uppercase; color: color-mix(in srgb, CanvasText 62%, Canvas); margin-bottom: 2px; }
+      td::before { content: attr(data-label); display: block; font-size: 0.72rem; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
     }
   </style>
 </head>
@@ -454,6 +581,12 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
   <script>
     const content = document.getElementById("content");
     const generatedAt = document.getElementById("generated-at");
+    const groups = [
+      { key: "active", label: "Active" },
+      { key: "stopped", label: "Stopped" },
+      { key: "stale", label: "Stale" },
+      { key: "other", label: "Other" }
+    ];
 
     function text(value) {
       return value === null || value === undefined || value === "" ? "-" : String(value);
@@ -472,6 +605,95 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       return service.route_url || service.url || "";
     }
 
+    function safeLink(value) {
+      if (!value) return "";
+      try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+      } catch {
+        return "";
+      }
+    }
+
+    function stateKey(service) {
+      const state = text(service.state).toLowerCase();
+      return ["active", "stopped", "stale"].includes(state) ? state : "other";
+    }
+
+    function groupServices(services) {
+      const grouped = Object.fromEntries(groups.map((group) => [group.key, []]));
+      for (const service of services) {
+        grouped[stateKey(service)].push(service);
+      }
+      return grouped;
+    }
+
+    function renderSummary(grouped) {
+      return `<section class="summary" aria-label="Service summary">
+        ${groups.map((group) => `
+          <div class="summary-item">
+            <span class="summary-label">${group.label}</span>
+            <span class="summary-value state-${group.key}">${grouped[group.key].length}</span>
+          </div>
+        `).join("")}
+      </section>`;
+    }
+
+    function renderState(state) {
+      const key = ["active", "stopped", "stale"].includes(String(state).toLowerCase())
+        ? String(state).toLowerCase()
+        : "other";
+      return `<span class="state-pill state-${key}">${escapeHtml(state)}</span>`;
+    }
+
+    function renderUrl(service) {
+      const url = serviceUrl(service);
+      const link = safeLink(url);
+      if (!url) return "-";
+      if (!link) return escapeHtml(url);
+      return `<a href="${escapeHtml(link)}">${escapeHtml(url)}</a>`;
+    }
+
+    function renderServiceRow(service) {
+      return `<tr>
+        <td data-label="State">${renderState(service.state)}</td>
+        <td data-label="Project">${escapeHtml(service.project)}</td>
+        <td data-label="Service">${escapeHtml(service.service)}</td>
+        <td data-label="URL">${renderUrl(service)}</td>
+        <td data-label="Worktree">${escapeHtml(service.worktree_path)}</td>
+        <td data-label="Branch">${escapeHtml(service.branch_label || service.branch)}</td>
+        <td data-label="PID">${escapeHtml(service.pid)}</td>
+        <td data-label="Command"><code>${escapeHtml(service.command)}</code></td>
+      </tr>`;
+    }
+
+    function renderGroup(group, services) {
+      if (services.length === 0) return "";
+      return `<section class="service-group" aria-labelledby="group-${group.key}">
+        <div class="group-heading">
+          <h2 id="group-${group.key}">${group.label}</h2>
+          <span class="group-count">${services.length}</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>State</th>
+                <th>Project</th>
+                <th>Service</th>
+                <th>URL</th>
+                <th>Worktree</th>
+                <th>Branch</th>
+                <th>PID</th>
+                <th>Command</th>
+              </tr>
+            </thead>
+            <tbody>${services.map(renderServiceRow).join("")}</tbody>
+          </table>
+        </div>
+      </section>`;
+    }
+
     function render(snapshot) {
       generatedAt.textContent = snapshot.generated_at ? `Updated ${snapshot.generated_at}` : "";
       const services = snapshot.services || [];
@@ -481,28 +703,12 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         return;
       }
 
+      const grouped = groupServices(services);
       content.className = "";
-      content.innerHTML = `<table>
-        <thead>
-          <tr>
-            <th>State</th><th>Service</th><th>URL</th><th>Branch</th><th>PID</th><th>Command</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>`;
-      const body = content.querySelector("tbody");
-      for (const service of services) {
-        const row = document.createElement("tr");
-        const url = serviceUrl(service);
-        row.innerHTML = `
-          <td data-label="State"><span class="state">${escapeHtml(service.state)}</span></td>
-          <td data-label="Service"><strong>${escapeHtml(service.project)}</strong><br>${escapeHtml(service.service)}</td>
-          <td data-label="URL">${url ? `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>` : "-"}</td>
-          <td data-label="Branch">${escapeHtml(service.branch_label || service.branch)}</td>
-          <td data-label="PID">${escapeHtml(service.pid)}</td>
-          <td data-label="Command"><code>${escapeHtml(service.command)}</code></td>`;
-        body.appendChild(row);
-      }
+      content.innerHTML = `
+        ${renderSummary(grouped)}
+        ${groups.map((group) => renderGroup(group, grouped[group.key])).join("")}
+      `;
     }
 
     fetch("/api/status", { cache: "no-store" })
@@ -534,6 +740,10 @@ mod tests {
         assert!(text.starts_with("HTTP/1.1 200 OK"));
         assert!(text.contains("BindPort Dashboard"));
         assert!(text.contains("/api/status"));
+        assert!(text.contains("Service summary"));
+        assert!(text.contains("<th>Project</th>"));
+        assert!(text.contains("<th>Worktree</th>"));
+        assert!(text.contains("state-active"));
     }
 
     #[test]
