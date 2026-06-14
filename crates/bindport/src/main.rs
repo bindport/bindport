@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    env, fs, io,
+    env, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{ExitCode, ExitStatus},
     time::{Duration, Instant},
@@ -17,6 +18,7 @@ use bindport_core::{
     PortRange, SERVICE_NAME, ServiceIdentity, default_fallback_config, detect_git_identity,
     discover_config, resolve_identity,
 };
+use bindport_dashboard::{DashboardOptions, DashboardServer};
 use bindport_registry::{
     REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, default_registry_path,
 };
@@ -58,6 +60,7 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
             }
         }
         Some("doctor") => print_doctor(),
+        Some("dashboard") => run_dashboard(),
         Some("init") => init_fallback_config(),
         Some("--") => run_wrapped_command(&args[1..], RunOptions::default()),
         Some("run") => run_subcommand(&args[1..]),
@@ -316,6 +319,62 @@ fn open_optional_registry() -> Option<Registry> {
             registry_disabled_warning();
             None
         }
+    }
+}
+
+fn run_dashboard() -> ExitCode {
+    match run_dashboard_result() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(DashboardCommandError::Config(error)) => {
+            print_config_error(&error);
+            ExitCode::FAILURE
+        }
+        Err(DashboardCommandError::Dashboard(error)) => {
+            eprintln!("bindport: dashboard unavailable: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_dashboard_result() -> Result<(), DashboardCommandError> {
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    let config = resolve_config(&cwd)?;
+    let mut skip_ports = config.skip_ports.clone();
+
+    if let Some(mut registry) = open_optional_registry() {
+        match registry.active_ports() {
+            Ok(active_ports) => skip_ports.extend(active_ports),
+            Err(error) => print_registry_warning("failed to read active registry ports", &error),
+        }
+    }
+
+    let server = DashboardServer::bind(DashboardOptions {
+        fallback_range: config.port_range,
+        skip_ports,
+        ..DashboardOptions::default()
+    })?;
+    println!("dashboard: {}", server.url());
+    io::stdout().flush().ok();
+    server.serve()?;
+
+    Ok(())
+}
+
+#[derive(Debug)]
+enum DashboardCommandError {
+    Config(ConfigError),
+    Dashboard(bindport_dashboard::DashboardError),
+}
+
+impl From<ConfigError> for DashboardCommandError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(error)
+    }
+}
+
+impl From<bindport_dashboard::DashboardError> for DashboardCommandError {
+    fn from(error: bindport_dashboard::DashboardError) -> Self {
+        Self::Dashboard(error)
     }
 }
 
@@ -761,6 +820,7 @@ fn print_help() {
     println!("                                  Run a command with an optional service name");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport doctor              Show bootstrap diagnostics");
+    println!("  bindport dashboard           Serve the read-only local dashboard");
     println!("  bindport init                Create optional fallback config");
     println!("  bindport --version           Print version");
 }
