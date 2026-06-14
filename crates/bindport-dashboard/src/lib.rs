@@ -529,9 +529,43 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     a {
       color: LinkText;
     }
+    button {
+      font: inherit;
+    }
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.86rem;
+    }
+    .url-cell {
+      display: grid;
+      gap: 6px;
+    }
+    .url-text {
+      overflow-wrap: anywhere;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .action-link,
+    .action-button {
+      align-items: center;
+      background: Canvas;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: LinkText;
+      cursor: pointer;
+      display: inline-flex;
+      font-size: 0.78rem;
+      line-height: 1.2;
+      padding: 4px 7px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .action-button:disabled {
+      color: var(--muted);
+      cursor: default;
     }
     .state-pill {
       border: 1px solid var(--border);
@@ -650,8 +684,19 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       const url = serviceUrl(service);
       const link = safeLink(url);
       if (!url) return "-";
-      if (!link) return escapeHtml(url);
-      return `<a href="${escapeHtml(link)}">${escapeHtml(url)}</a>`;
+      const display = link
+        ? `<a class="url-text" href="${escapeHtml(link)}">${escapeHtml(url)}</a>`
+        : `<span class="url-text">${escapeHtml(url)}</span>`;
+      const open = link
+        ? `<a class="action-link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer noopener">Open</a>`
+        : "";
+      return `<div class="url-cell">
+        ${display}
+        <span class="actions">
+          ${open}
+          <button class="action-button" type="button" data-copy-url="${escapeHtml(url)}">Copy</button>
+        </span>
+      </div>`;
     }
 
     function renderServiceRow(service) {
@@ -711,6 +756,50 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       `;
     }
 
+    async function copyText(value) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+
+      const input = document.createElement("textarea");
+      input.value = value;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.left = "-9999px";
+      document.body.appendChild(input);
+      input.select();
+      try {
+        if (!document.execCommand("copy")) {
+          throw new Error("copy failed");
+        }
+      } finally {
+        input.remove();
+      }
+    }
+
+    function resetCopyButton(button, label) {
+      window.setTimeout(() => {
+        button.disabled = false;
+        button.textContent = label;
+      }, 1200);
+    }
+
+    content.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-copy-url]");
+      if (!button) return;
+
+      const label = button.textContent;
+      button.disabled = true;
+      try {
+        await copyText(button.getAttribute("data-copy-url"));
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Failed";
+      }
+      resetCopyButton(button, label);
+    });
+
     fetch("/api/status", { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error(`status ${response.status}`);
@@ -744,6 +833,9 @@ mod tests {
         assert!(text.contains("<th>Project</th>"));
         assert!(text.contains("<th>Worktree</th>"));
         assert!(text.contains("state-active"));
+        assert!(text.contains("data-copy-url"));
+        assert!(text.contains("Open"));
+        assert!(text.contains("Copy"));
     }
 
     #[test]
