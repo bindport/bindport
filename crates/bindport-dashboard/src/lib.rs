@@ -464,6 +464,56 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .meta-error {
       color: var(--other);
     }
+    .controls {
+      align-items: flex-end;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .search-control {
+      display: grid;
+      flex: 1 1 280px;
+      gap: 5px;
+      max-width: 520px;
+    }
+    .control-label {
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+    }
+    input[type="search"] {
+      background: Canvas;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: CanvasText;
+      font: inherit;
+      min-height: 38px;
+      padding: 7px 10px;
+    }
+    .state-filter {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .filter-button {
+      background: Canvas;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: CanvasText;
+      cursor: pointer;
+      font-size: 0.84rem;
+      line-height: 1.2;
+      min-height: 38px;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+    .filter-button[aria-pressed="true"] {
+      background: Highlight;
+      border-color: Highlight;
+      color: HighlightText;
+    }
     .summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -613,14 +663,31 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       <h1>BindPort Dashboard</h1>
       <div id="generated-at" class="meta" role="status" aria-live="polite"></div>
     </header>
+    <section class="controls" aria-label="Dashboard filters">
+      <label class="search-control" for="service-search">
+        <span class="control-label">Search</span>
+        <input id="service-search" type="search" autocomplete="off" placeholder="Project, service, branch, command">
+      </label>
+      <div class="state-filter" role="group" aria-label="Filter by state">
+        <button class="filter-button" type="button" data-state-filter="all" aria-pressed="true">All</button>
+        <button class="filter-button" type="button" data-state-filter="active" aria-pressed="false">Active</button>
+        <button class="filter-button" type="button" data-state-filter="stopped" aria-pressed="false">Stopped</button>
+        <button class="filter-button" type="button" data-state-filter="stale" aria-pressed="false">Stale</button>
+        <button class="filter-button" type="button" data-state-filter="other" aria-pressed="false">Other</button>
+      </div>
+    </section>
     <section id="content" class="empty">Loading...</section>
   </main>
   <script>
     const content = document.getElementById("content");
     const generatedAt = document.getElementById("generated-at");
+    const serviceSearch = document.getElementById("service-search");
+    const stateFilterButtons = Array.from(document.querySelectorAll("[data-state-filter]"));
     const REFRESH_INTERVAL_MS = 5000;
     let lastSnapshot = null;
     let lastRefreshAt = null;
+    let searchQuery = "";
+    let activeStateFilter = "all";
     const groups = [
       { key: "active", label: "Active" },
       { key: "stopped", label: "Stopped" },
@@ -695,6 +762,45 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       }
       parts.push(`refreshes every ${refreshSeconds()}s`);
       setRefreshMeta(parts.join(" - "));
+    }
+
+    function serviceSearchText(service) {
+      return [
+        service.state,
+        service.project,
+        service.service,
+        serviceUrl(service),
+        service.worktree_path,
+        service.branch_label,
+        service.branch,
+        service.pid,
+        service.command,
+        service.cwd
+      ].map(text).join(" ").toLowerCase();
+    }
+
+    function matchesFilters(service) {
+      if (activeStateFilter !== "all" && stateKey(service) !== activeStateFilter) {
+        return false;
+      }
+      return !searchQuery || serviceSearchText(service).includes(searchQuery);
+    }
+
+    function filteredServices(services) {
+      return services.filter(matchesFilters);
+    }
+
+    function updateFilterButtons() {
+      for (const button of stateFilterButtons) {
+        button.setAttribute(
+          "aria-pressed",
+          button.dataset.stateFilter === activeStateFilter ? "true" : "false"
+        );
+      }
+    }
+
+    function renderLastSnapshot() {
+      if (lastSnapshot) render(lastSnapshot);
     }
 
     function renderSummary(grouped) {
@@ -783,7 +889,14 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         return;
       }
 
-      const grouped = groupServices(services);
+      const visibleServices = filteredServices(services);
+      if (visibleServices.length === 0) {
+        content.className = "empty";
+        content.textContent = "No services match the current filters.";
+        return;
+      }
+
+      const grouped = groupServices(visibleServices);
       content.className = "";
       content.innerHTML = `
         ${renderSummary(grouped)}
@@ -834,6 +947,19 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       }
       resetCopyButton(button, label);
     });
+
+    serviceSearch.addEventListener("input", () => {
+      searchQuery = serviceSearch.value.trim().toLowerCase();
+      renderLastSnapshot();
+    });
+
+    for (const button of stateFilterButtons) {
+      button.addEventListener("click", () => {
+        activeStateFilter = button.dataset.stateFilter;
+        updateFilterButtons();
+        renderLastSnapshot();
+      });
+    }
 
     function renderRefreshError(error) {
       if (lastSnapshot && lastRefreshAt) {
@@ -895,6 +1021,9 @@ mod tests {
         assert!(text.contains("REFRESH_INTERVAL_MS = 5000"));
         assert!(text.contains("refreshStatus"));
         assert!(text.contains("aria-live=\"polite\""));
+        assert!(text.contains("service-search"));
+        assert!(text.contains("data-state-filter=\"active\""));
+        assert!(text.contains("No services match the current filters."));
     }
 
     #[test]
