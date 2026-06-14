@@ -48,6 +48,10 @@ include `Open` and `Copy` actions for quick browser and testing workflows. Only
 `http` and `https` URLs are opened as links; other schemes are displayed as
 plain text.
 
+The dashboard refreshes its registry snapshot every five seconds and shows the
+last successful refresh time in the header. If a later refresh fails, the last
+successful view stays visible while the header reports the refresh error.
+
 ## API
 
 The dashboard serves:

@@ -461,6 +461,9 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       font-size: 0.9rem;
       text-align: right;
     }
+    .meta-error {
+      color: var(--other);
+    }
     .summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -608,13 +611,16 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
   <main>
     <header>
       <h1>BindPort Dashboard</h1>
-      <div id="generated-at" class="meta"></div>
+      <div id="generated-at" class="meta" role="status" aria-live="polite"></div>
     </header>
     <section id="content" class="empty">Loading...</section>
   </main>
   <script>
     const content = document.getElementById("content");
     const generatedAt = document.getElementById("generated-at");
+    const REFRESH_INTERVAL_MS = 5000;
+    let lastSnapshot = null;
+    let lastRefreshAt = null;
     const groups = [
       { key: "active", label: "Active" },
       { key: "stopped", label: "Stopped" },
@@ -660,6 +666,35 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         grouped[stateKey(service)].push(service);
       }
       return grouped;
+    }
+
+    function refreshSeconds() {
+      return Math.round(REFRESH_INTERVAL_MS / 1000);
+    }
+
+    function formatTime(date) {
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function setRefreshMeta(message, failed = false) {
+      generatedAt.className = failed ? "meta meta-error" : "meta";
+      generatedAt.textContent = message;
+    }
+
+    function renderRefreshMeta(snapshot) {
+      const parts = [];
+      if (lastRefreshAt) {
+        parts.push(`Updated ${formatTime(lastRefreshAt)}`);
+      }
+      if (snapshot.generated_at) {
+        parts.push(`registry ${snapshot.generated_at}`);
+      }
+      parts.push(`refreshes every ${refreshSeconds()}s`);
+      setRefreshMeta(parts.join(" - "));
     }
 
     function renderSummary(grouped) {
@@ -740,7 +775,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
 
     function render(snapshot) {
-      generatedAt.textContent = snapshot.generated_at ? `Updated ${snapshot.generated_at}` : "";
+      renderRefreshMeta(snapshot);
       const services = snapshot.services || [];
       if (services.length === 0) {
         content.className = "empty";
@@ -800,16 +835,37 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       resetCopyButton(button, label);
     });
 
-    fetch("/api/status", { cache: "no-store" })
-      .then((response) => {
+    function renderRefreshError(error) {
+      if (lastSnapshot && lastRefreshAt) {
+        setRefreshMeta(
+          `Refresh failed: ${error.message} - last updated ${formatTime(lastRefreshAt)}`,
+          true
+        );
+        return;
+      }
+
+      setRefreshMeta(`Refresh failed: ${error.message}`, true);
+      content.className = "error";
+      content.textContent = `Dashboard status unavailable: ${error.message}`;
+    }
+
+    async function refreshStatus() {
+      try {
+        const response = await fetch("/api/status", { cache: "no-store" });
         if (!response.ok) throw new Error(`status ${response.status}`);
-        return response.json();
-      })
-      .then(render)
-      .catch((error) => {
-        content.className = "error";
-        content.textContent = `Dashboard status unavailable: ${error.message}`;
-      });
+
+        const snapshot = await response.json();
+        lastSnapshot = snapshot;
+        lastRefreshAt = new Date();
+        render(snapshot);
+      } catch (error) {
+        renderRefreshError(error);
+      } finally {
+        window.setTimeout(refreshStatus, REFRESH_INTERVAL_MS);
+      }
+    }
+
+    refreshStatus();
   </script>
 </body>
 </html>
@@ -836,6 +892,9 @@ mod tests {
         assert!(text.contains("data-copy-url"));
         assert!(text.contains("Open"));
         assert!(text.contains("Copy"));
+        assert!(text.contains("REFRESH_INTERVAL_MS = 5000"));
+        assert!(text.contains("refreshStatus"));
+        assert!(text.contains("aria-live=\"polite\""));
     }
 
     #[test]
