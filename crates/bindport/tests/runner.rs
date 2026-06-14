@@ -2,7 +2,8 @@
 
 use std::{
     fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     thread,
@@ -196,6 +197,104 @@ fn package_script_runs_bindport_next_dev_flow() {
         u64::from(port)
     );
     assert_eq!(status["runs"][0]["exit_code"], 0);
+}
+
+#[test]
+fn dashboard_serves_status_api() {
+    let registry_path = temp_registry_path("dashboard-api-registry");
+    let mut command = bindport_with_registry(&registry_path);
+    let output = command
+        .env(BINDPORT_PROJECT_ENV, "dashboard-fixture")
+        .args(["run", "web", "--", "sh", "-c", "printf dashboard-fixture"])
+        .output()
+        .expect("run bindport fixture");
+
+    assert!(output.status.success());
+
+    let dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let response = http_get(dashboard.port, "/api/status");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+
+    let body = http_body(&response);
+    let status = serde_json::from_str::<Value>(body).expect("status json");
+
+    assert_eq!(status["schema_version"], "0.1");
+    assert_eq!(status["services"][0]["project"], "dashboard-fixture");
+    assert_eq!(status["services"][0]["service"], "web");
+    assert_eq!(
+        status["services"][0]["command"],
+        "sh -c printf dashboard-fixture"
+    );
+}
+
+#[test]
+fn dashboard_rejects_untrusted_host_header() {
+    let registry_path = temp_registry_path("dashboard-host-rejection-registry");
+    let dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let response = http_get_with_host(dashboard.port, "/api/status", "example.test");
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden"));
+    assert_eq!(http_body(&response), "forbidden\n");
+}
+
+#[test]
+fn dashboard_returns_not_found_for_unknown_route() {
+    let registry_path = temp_registry_path("dashboard-not-found-registry");
+    let dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let response = http_get(dashboard.port, "/missing");
+
+    assert!(response.starts_with("HTTP/1.1 404 Not Found"));
+    assert_eq!(http_body(&response), "not found\n");
+}
+
+#[test]
+fn dashboard_falls_back_when_default_port_is_busy() {
+    let busy_default = match TcpListener::bind(("127.0.0.1", 27_080)) {
+        Ok(listener) => Some(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
+        Err(error) => panic!("bind busy dashboard port: {error}"),
+    };
+    let fallback_port = free_loopback_port();
+    let registry_path = temp_registry_path("dashboard-fallback-registry");
+    let root = temp_test_dir("dashboard-fallback-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        format!("default_range = \"{fallback_port}-{fallback_port}\"\nskip_ports = []\n"),
+    )
+    .expect("write dashboard fallback config");
+
+    let mut command = bindport_with_registry(&registry_path);
+    command.current_dir(&root);
+    let dashboard = start_dashboard(command);
+
+    assert_eq!(dashboard.port, fallback_port);
+    assert_ne!(dashboard.port, 27_080);
+
+    drop(busy_default);
+}
+
+#[test]
+fn dashboard_survives_dropped_connection() {
+    let registry_path = temp_registry_path("dashboard-dropped-connection-registry");
+    let mut dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let stream = TcpStream::connect(("127.0.0.1", dashboard.port)).expect("connect dashboard");
+    drop(stream);
+    thread::sleep(Duration::from_millis(50));
+
+    assert!(
+        dashboard
+            .child
+            .try_wait()
+            .expect("poll dashboard")
+            .is_none(),
+        "dashboard exited after a dropped connection"
+    );
+
+    let response = http_get(dashboard.port, "/healthz");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+    assert_eq!(http_body(&response), "ok\n");
 }
 
 #[test]
@@ -923,6 +1022,71 @@ fn reserve_registry_port(registry_path: &Path, port: u16) {
             cwd: PathBuf::from("/tmp/bindport-busy-fixture"),
         })
         .expect("reserve registry port");
+}
+
+struct DashboardProcess {
+    child: Child,
+    port: u16,
+}
+
+impl Drop for DashboardProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn start_dashboard(mut command: Command) -> DashboardProcess {
+    let mut child = command
+        .args(["dashboard"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start bindport dashboard");
+    let stdout = child.stdout.take().expect("dashboard stdout");
+    let mut stdout = BufReader::new(stdout);
+    let mut line = String::new();
+    stdout.read_line(&mut line).expect("read dashboard URL");
+
+    let port = line
+        .trim()
+        .strip_prefix("dashboard: http://127.0.0.1:")
+        .expect("dashboard URL line")
+        .parse::<u16>()
+        .expect("dashboard port");
+
+    DashboardProcess { child, port }
+}
+
+fn http_get(port: u16, path: &str) -> String {
+    http_get_with_host(port, path, &format!("127.0.0.1:{port}"))
+}
+
+fn http_get_with_host(port: u16, path: &str, host: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect dashboard");
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    )
+    .expect("write dashboard request");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("read dashboard response");
+    response
+}
+
+fn http_body(response: &str) -> &str {
+    response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .expect("http body separator")
+}
+
+fn free_loopback_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral port");
+    listener.local_addr().expect("local addr").port()
 }
 
 fn init_git_repo(root: &Path, branch: &str) {

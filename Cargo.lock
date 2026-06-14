@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "bindport-adapters",
  "bindport-core",
+ "bindport-dashboard",
  "bindport-registry",
  "bindport-runner",
  "libc",
@@ -26,6 +27,15 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "toml",
+]
+
+[[package]]
+name = "bindport-dashboard"
+version = "0.1.0"
+dependencies = [
+ "bindport-core",
+ "bindport-registry",
+ "serde_json",
 ]
 
 [[package]]
