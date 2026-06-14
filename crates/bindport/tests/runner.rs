@@ -229,6 +229,26 @@ fn dashboard_serves_status_api() {
 }
 
 #[test]
+fn dashboard_rejects_untrusted_host_header() {
+    let registry_path = temp_registry_path("dashboard-host-rejection-registry");
+    let dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let response = http_get_with_host(dashboard.port, "/api/status", "example.test");
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden"));
+    assert_eq!(http_body(&response), "forbidden\n");
+}
+
+#[test]
+fn dashboard_returns_not_found_for_unknown_route() {
+    let registry_path = temp_registry_path("dashboard-not-found-registry");
+    let dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let response = http_get(dashboard.port, "/missing");
+
+    assert!(response.starts_with("HTTP/1.1 404 Not Found"));
+    assert_eq!(http_body(&response), "not found\n");
+}
+
+#[test]
 fn dashboard_falls_back_when_default_port_is_busy() {
     let busy_default = match TcpListener::bind(("127.0.0.1", 27_080)) {
         Ok(listener) => Some(listener),
@@ -1039,10 +1059,14 @@ fn start_dashboard(mut command: Command) -> DashboardProcess {
 }
 
 fn http_get(port: u16, path: &str) -> String {
+    http_get_with_host(port, path, &format!("127.0.0.1:{port}"))
+}
+
+fn http_get_with_host(port: u16, path: &str, host: &str) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect dashboard");
     write!(
         stream,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
     )
     .expect("write dashboard request");
 
