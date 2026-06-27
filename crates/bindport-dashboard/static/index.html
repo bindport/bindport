@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BindPort Dashboard</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>BindPort Dashboard</h1>
+      <div class="header-actions">
+        <button id="token-logout" class="icon-button header-icon-button" type="button" aria-label="Lock dashboard" title="Lock dashboard" hidden></button>
+        <div id="generated-at" class="meta" role="status" aria-live="polite"></div>
+      </div>
+    </header>
+    <section id="auth-panel" class="auth-panel" hidden>
+      <form id="auth-form">
+        <label class="search-control" for="auth-token">
+          <span class="control-label">Token</span>
+          <input id="auth-token" type="password" autocomplete="current-password" placeholder="Dashboard bearer token">
+        </label>
+        <button class="filter-button auth-button" type="submit">Unlock</button>
+      </form>
+    </section>
+    <section class="controls" aria-label="Dashboard filters">
+      <label class="search-control" for="service-search">
+        <span class="control-label">Search</span>
+        <input id="service-search" type="search" autocomplete="off" placeholder="Project, service, branch, command">
+      </label>
+      <div class="state-filter" role="group" aria-label="Filter by state">
+        <button class="filter-button" type="button" data-state-filter="all" aria-pressed="true">All</button>
+        <button class="filter-button" type="button" data-state-filter="active" aria-pressed="false">Active</button>
+        <button class="filter-button" type="button" data-state-filter="stopped" aria-pressed="false">Stopped</button>
+        <button class="filter-button" type="button" data-state-filter="stale" aria-pressed="false">Stale</button>
+        <button class="filter-button" type="button" data-state-filter="other" aria-pressed="false">Other</button>
+      </div>
+    </section>
+    <section id="content" class="empty">Loading...</section>
+    <footer class="app-footer" aria-label="Application information">
+      <span class="app-name">{{APP_NAME}}</span>
+      <span class="app-version">v{{APP_VERSION}}</span>
+    </footer>
+  </main>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

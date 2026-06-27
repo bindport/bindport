@@ -11,6 +11,7 @@ node = "26.3.0"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
 trivy = "0.71.0"
+watchexec = "2.5.1"
 # actionlint shells out to shellcheck for `run:` blocks. Pin it so local
 # workflow linting matches CI.
 shellcheck = "0.11.0"
@@ -34,6 +35,33 @@ run = "cargo check --all-targets"
 [tasks.build]
 description = "Build the release binary"
 run = "cargo build --release --locked"
+
+[tasks.dev-dashboard]
+description = "Run the dashboard with local static assets"
+run = "BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static cargo run -p bindport -- dashboard serve --static-dir crates/bindport-dashboard/static"
+
+[tasks.dev-dashboard-watch]
+description = "Restart the dashboard when Rust sources change"
+run = "BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static watchexec --restart --clear --watch Cargo.toml --watch Cargo.lock --watch crates -- cargo run -p bindport -- dashboard serve --static-dir crates/bindport-dashboard/static"
+
+[tasks.dev-dashboard-remote]
+description = "Run a remotely reachable dashboard with token auth"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${BINDPORT_DASHBOARD_TOKEN:-}" ]]; then
+  echo "set BINDPORT_DASHBOARD_TOKEN before running remote dashboard dev" >&2
+  exit 1
+fi
+
+BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static \
+  cargo run -p bindport -- dashboard serve \
+    --host 0.0.0.0 \
+    --auth required \
+    --token-env BINDPORT_DASHBOARD_TOKEN \
+    --static-dir crates/bindport-dashboard/static
+'''
 
 [tasks.release-prep]
 description = "Create a release prep branch, version bump commit, and PR"

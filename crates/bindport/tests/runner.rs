@@ -229,6 +229,219 @@ fn dashboard_serves_status_api() {
 }
 
 #[test]
+fn dashboard_uses_cli_port_option() {
+    let registry_path = temp_registry_path("dashboard-cli-port-registry");
+    let port = free_loopback_port();
+    let dashboard = start_dashboard_with_args(
+        bindport_with_registry(&registry_path),
+        &["dashboard", "serve", "--port", &port.to_string()],
+    );
+    let response = http_get(dashboard.port, "/healthz");
+
+    assert_eq!(dashboard.port, port);
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+}
+
+#[test]
+fn dashboard_rejects_non_loopback_host_without_auth() {
+    let registry_path = temp_registry_path("dashboard-host-auth-registry");
+    let output = bindport_with_registry(&registry_path)
+        .args(["dashboard", "serve", "--host", "0.0.0.0"])
+        .output()
+        .expect("run dashboard serve");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requires auth"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn dashboard_requires_bearer_token_when_auth_is_enabled() {
+    let registry_path = temp_registry_path("dashboard-token-registry");
+    let port = free_loopback_port();
+    let dashboard = start_dashboard_with_args(
+        bindport_with_registry(&registry_path),
+        &[
+            "dashboard",
+            "serve",
+            "--port",
+            &port.to_string(),
+            "--auth",
+            "required",
+            "--token",
+            "secret",
+        ],
+    );
+    let rejected = http_get(dashboard.port, "/api/status");
+    let accepted = http_get_with_auth(dashboard.port, "/api/status", "Bearer secret");
+
+    assert!(rejected.starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(accepted.starts_with("HTTP/1.1 200 OK"));
+}
+
+#[test]
+fn dashboard_start_status_stop_controls_background_service() {
+    let registry_path = temp_registry_path("dashboard-service-registry");
+    let state_home = temp_test_dir("dashboard-service-state");
+    let port = free_loopback_port();
+    let port_arg = port.to_string();
+    let start = bindport_with_registry(&registry_path)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["dashboard", "start", "--port", &port_arg])
+        .output()
+        .expect("start dashboard service");
+
+    assert!(
+        start.status.success(),
+        "dashboard start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    assert!(String::from_utf8_lossy(&start.stdout).contains("dashboard started:"));
+    assert!(http_get(port, "/healthz").starts_with("HTTP/1.1 200 OK"));
+
+    let status = bindport_with_registry(&registry_path)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["dashboard", "status"])
+        .output()
+        .expect("dashboard service status");
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("dashboard running:"));
+
+    let stop = bindport_with_registry(&registry_path)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["dashboard", "stop"])
+        .output()
+        .expect("stop dashboard service");
+    assert!(
+        stop.status.success(),
+        "dashboard stop failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+}
+
+#[test]
+fn dashboard_start_reports_child_startup_error() {
+    let registry_path = temp_registry_path("dashboard-service-start-error-registry");
+    let state_home = temp_test_dir("dashboard-service-start-error-state");
+    let output = bindport_with_registry(&registry_path)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["dashboard", "start", "--auth", "required"])
+        .output()
+        .expect("start dashboard service without token");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("dashboard did not start:"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("BINDPORT_DASHBOARD_TOKEN is required"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn dashboard_start_passes_cli_token_outside_child_argv() {
+    let registry_path = temp_registry_path("dashboard-service-token-registry");
+    let state_home = temp_test_dir("dashboard-service-token-state");
+    let port = free_loopback_port();
+    let port_arg = port.to_string();
+    let start = bindport_with_registry(&registry_path)
+        .env("XDG_STATE_HOME", &state_home)
+        .args([
+            "dashboard",
+            "start",
+            "--port",
+            &port_arg,
+            "--auth",
+            "required",
+            "--token",
+            "secret",
+        ])
+        .output()
+        .expect("start dashboard service with token");
+
+    assert!(
+        start.status.success(),
+        "dashboard start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&start.stdout);
+    assert!(stdout.contains("dashboard started:"));
+    let pid = stdout
+        .split_whitespace()
+        .last()
+        .expect("dashboard pid")
+        .parse::<u32>()
+        .expect("dashboard pid is numeric");
+
+    #[cfg(target_os = "linux")]
+    {
+        let cmdline =
+            fs::read(Path::new("/proc").join(pid.to_string()).join("cmdline")).expect("cmdline");
+        assert!(
+            !String::from_utf8_lossy(&cmdline).contains("secret"),
+            "dashboard token leaked into child argv"
+        );
+    }
+
+    assert!(http_get(port, "/api/status").starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(
+        http_get_with_auth(port, "/api/status", "Bearer secret").starts_with("HTTP/1.1 200 OK")
+    );
+
+    let stop = bindport_with_registry(&registry_path)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["dashboard", "stop"])
+        .output()
+        .expect("stop dashboard service");
+    assert!(
+        stop.status.success(),
+        "dashboard stop failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn dashboard_stop_removes_mismatched_state_without_signal() {
+    let state_home = temp_test_dir("dashboard-service-mismatch-state");
+    let state_dir = state_home.join(SERVICE_NAME);
+    let state_file = state_dir.join("dashboard.state");
+    fs::create_dir_all(&state_dir).expect("dashboard state dir");
+    fs::write(
+        &state_file,
+        format!(
+            "pid={}\nurl=http://127.0.0.1:27080\nprocess_start_time=0\n",
+            std::process::id()
+        ),
+    )
+    .expect("dashboard state file");
+
+    let stop = bindport()
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["dashboard", "stop"])
+        .output()
+        .expect("stop dashboard service");
+
+    assert!(
+        stop.status.success(),
+        "dashboard stop failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&stop.stdout).contains("no longer matches dashboard"),
+        "unexpected stdout: {}",
+        String::from_utf8_lossy(&stop.stdout)
+    );
+    assert!(!state_file.exists());
+}
+
+#[test]
 fn dashboard_rejects_untrusted_host_header() {
     let registry_path = temp_registry_path("dashboard-host-rejection-registry");
     let dashboard = start_dashboard(bindport_with_registry(&registry_path));
@@ -1036,9 +1249,13 @@ impl Drop for DashboardProcess {
     }
 }
 
-fn start_dashboard(mut command: Command) -> DashboardProcess {
+fn start_dashboard(command: Command) -> DashboardProcess {
+    start_dashboard_with_args(command, &["dashboard"])
+}
+
+fn start_dashboard_with_args(mut command: Command, args: &[&str]) -> DashboardProcess {
     let mut child = command
-        .args(["dashboard"])
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1050,8 +1267,11 @@ fn start_dashboard(mut command: Command) -> DashboardProcess {
 
     let port = line
         .trim()
-        .strip_prefix("dashboard: http://127.0.0.1:")
+        .strip_prefix("dashboard: http://")
         .expect("dashboard URL line")
+        .rsplit_once(':')
+        .map(|(_, port)| port)
+        .expect("dashboard URL port")
         .parse::<u16>()
         .expect("dashboard port");
 
@@ -1063,12 +1283,25 @@ fn http_get(port: u16, path: &str) -> String {
 }
 
 fn http_get_with_host(port: u16, path: &str, host: &str) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect dashboard");
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    http_get_with_headers(port, path, host, &[])
+}
+
+fn http_get_with_auth(port: u16, path: &str, authorization: &str) -> String {
+    http_get_with_headers(
+        port,
+        path,
+        &format!("127.0.0.1:{port}"),
+        &[("Authorization", authorization)],
     )
-    .expect("write dashboard request");
+}
+
+fn http_get_with_headers(port: u16, path: &str, host: &str, headers: &[(&str, &str)]) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect dashboard");
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\n").expect("write dashboard request");
+    for (name, value) in headers {
+        write!(stream, "{name}: {value}\r\n").expect("write dashboard request header");
+    }
+    write!(stream, "Connection: close\r\n\r\n").expect("finish dashboard request");
 
     let mut response = String::new();
     stream

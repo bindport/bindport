@@ -68,7 +68,9 @@ Don't mutate state outside the working tree without being told to.
 - Format check: `cargo fmt --all -- --check`
 - Type check: `cargo check --all-targets`
 - Full local CI: `mise run ci`
-- Dev server: Not configured yet; the dashboard does not exist.
+- Dashboard dev: `mise run dev-dashboard`
+- Dashboard watch dev: `mise run dev-dashboard-watch`
+- Remote dashboard dev: set `BINDPORT_DASHBOARD_TOKEN`, then `mise run dev-dashboard-remote`
 
 `bindport -- <command>` currently performs probe-based port selection, child
 process wrapping, optional config discovery, basic project/service and git
@@ -79,6 +81,12 @@ port when the wrapped child fails immediately and the assigned port is then
 occupied. `bindport doctor` reports obvious registry and OS-listener conflicts,
 but not full process ownership diagnostics. Do not claim full process conflict
 diagnostics work until that slice is implemented and verified.
+
+`bindport dashboard` provides a read-only registry dashboard with foreground
+`serve` and background `start` / `status` / `stop` controls. It binds
+`127.0.0.1:27080` by default, supports configurable host/port/static assets,
+and requires token auth for non-loopback binds. Do not describe the dashboard as
+having write actions or service cleanup controls.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.

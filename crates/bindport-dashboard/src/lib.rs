@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    fmt,
+    borrow::Cow,
+    fmt, fs,
     io::{self, BufRead, BufReader, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
+    path::{Path, PathBuf},
     thread,
     time::Duration,
 };
@@ -12,6 +14,7 @@ use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, PortRange};
 use bindport_registry::Registry;
 
 pub const DEFAULT_DASHBOARD_PORT: u16 = 27_080;
+const DASHBOARD_APP_NAME: &str = "BindPort";
 const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
 const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
@@ -22,6 +25,15 @@ pub struct DashboardOptions {
     pub preferred_port: u16,
     pub fallback_range: PortRange,
     pub skip_ports: Vec<u16>,
+    pub allowed_hosts: Vec<String>,
+    pub auth: DashboardAuth,
+    pub static_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DashboardAuth {
+    pub required: bool,
+    pub token: Option<String>,
 }
 
 impl Default for DashboardOptions {
@@ -31,6 +43,9 @@ impl Default for DashboardOptions {
             preferred_port: DEFAULT_DASHBOARD_PORT,
             fallback_range: DEFAULT_PORT_RANGE,
             skip_ports: DEFAULT_SKIP_PORTS.to_vec(),
+            allowed_hosts: default_allowed_hosts(),
+            auth: DashboardAuth::default(),
+            static_dir: None,
         }
     }
 }
@@ -69,7 +84,7 @@ impl std::error::Error for DashboardError {
 
 pub struct DashboardServer {
     listener: TcpListener,
-    host: Ipv4Addr,
+    options: DashboardOptions,
     port: u16,
 }
 
@@ -83,7 +98,7 @@ impl DashboardServer {
 
         Ok(Self {
             listener,
-            host: options.host,
+            options,
             port,
         })
     }
@@ -93,15 +108,17 @@ impl DashboardServer {
     }
 
     pub fn url(&self) -> String {
-        format!("http://{}:{}", self.host, self.port)
+        format!("http://{}:{}", self.options.host, self.port)
     }
 
     pub fn serve(self) -> Result<(), DashboardError> {
+        let options = self.options;
         for stream in self.listener.incoming() {
             match stream {
                 Ok(stream) => {
+                    let options = options.clone();
                     thread::spawn(move || {
-                        if let Err(error) = handle_connection(stream)
+                        if let Err(error) = handle_connection(stream, &options)
                             && !is_routine_client_error(&error)
                         {
                             eprintln!("dashboard: request error: {error}");
@@ -148,6 +165,10 @@ fn bind_dashboard_listener(options: &DashboardOptions) -> Result<TcpListener, Da
     })
 }
 
+fn default_allowed_hosts() -> Vec<String> {
+    vec![String::from("localhost"), Ipv4Addr::LOCALHOST.to_string()]
+}
+
 fn fallback_ports(options: &DashboardOptions) -> impl Iterator<Item = u16> + '_ {
     let range = options.fallback_range;
     (0..range.len()).filter_map(move |offset| {
@@ -158,7 +179,7 @@ fn fallback_ports(options: &DashboardOptions) -> impl Iterator<Item = u16> + '_ 
     })
 }
 
-fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
+fn handle_connection(mut stream: TcpStream, options: &DashboardOptions) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
 
     let request = match read_request(&stream) {
@@ -176,7 +197,7 @@ fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
         }
         Err(error) => return Err(error),
     };
-    let response = response_for_request(&request);
+    let response = response_for_request(&request, options);
 
     write_response(&mut stream, response)
 }
@@ -203,6 +224,7 @@ struct HttpRequest {
     method: String,
     path: String,
     host: Option<String>,
+    authorization: Option<String>,
 }
 
 fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
@@ -213,6 +235,7 @@ fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
     }
 
     let mut host = None;
+    let mut authorization = None;
     let mut header_bytes = 0;
     loop {
         let header = read_limited_line(&mut reader, MAX_HEADER_LINE_BYTES)?;
@@ -230,6 +253,12 @@ fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
         {
             host = Some(value.trim().to_string());
         }
+        if let Some((name, value)) = header.trim_end().split_once(':')
+            && name.eq_ignore_ascii_case("authorization")
+            && authorization.is_none()
+        {
+            authorization = Some(value.trim().to_string());
+        }
     }
 
     let mut parts = request_line.split_whitespace();
@@ -244,6 +273,7 @@ fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
         method: method.to_string(),
         path: path.to_string(),
         host,
+        authorization,
     }))
 }
 
@@ -283,14 +313,30 @@ fn invalid_request_error() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid dashboard request")
 }
 
-fn response_for_request(request: &HttpRequest) -> HttpResponse {
-    if !host_allowed(request.host.as_deref()) {
+fn response_for_request(request: &HttpRequest, options: &DashboardOptions) -> HttpResponse {
+    if !host_allowed(request.host.as_deref(), options) {
         return HttpResponse::forbidden();
     }
 
     match request_path(request) {
-        Some("/") => HttpResponse::ok("text/html; charset=utf-8", DASHBOARD_HTML),
-        Some("/api/status") => status_response(),
+        Some("/") => dashboard_index_response(options),
+        Some("/assets/app.css") => {
+            static_asset_response("app.css", APP_CSS, "text/css; charset=utf-8", options)
+        }
+        Some("/assets/app.js") => {
+            static_asset_response("app.js", APP_JS, "text/javascript; charset=utf-8", options)
+        }
+        #[cfg(debug_assertions)]
+        Some("/assets/dev-reload.js") => static_asset_response(
+            "dev-reload.js",
+            DEV_RELOAD_JS,
+            "text/javascript; charset=utf-8",
+            options,
+        ),
+        #[cfg(debug_assertions)]
+        Some("/assets/dev-version") => dev_version_response(options),
+        Some("/api/status") if request_authorized(request, options) => status_response(),
+        Some("/api/status") => HttpResponse::unauthorized(),
         Some("/healthz") => HttpResponse::ok("text/plain; charset=utf-8", "ok\n"),
         _ => HttpResponse::not_found(),
     }
@@ -300,7 +346,7 @@ fn request_path(request: &HttpRequest) -> Option<&str> {
     (request.method == "GET").then_some(request.path.as_str())
 }
 
-fn host_allowed(host: Option<&str>) -> bool {
+fn host_allowed(host: Option<&str>, options: &DashboardOptions) -> bool {
     let Some(host) = host.map(str::trim).filter(|host| !host.is_empty()) else {
         return false;
     };
@@ -315,7 +361,17 @@ fn host_allowed(host: Option<&str>) -> bool {
         return false;
     }
 
-    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1"
+    if options.auth.required && options.host.is_unspecified() {
+        return true;
+    }
+
+    name.eq_ignore_ascii_case("localhost")
+        || name == "127.0.0.1"
+        || name == options.host.to_string()
+        || options
+            .allowed_hosts
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(name))
 }
 
 fn status_response() -> HttpResponse {
@@ -334,6 +390,160 @@ fn status_response() -> HttpResponse {
 
 fn json_error_body(message: String) -> String {
     format!("{}\n", serde_json::json!({ "error": message }))
+}
+
+fn request_authorized(request: &HttpRequest, options: &DashboardOptions) -> bool {
+    if !options.auth.required {
+        return true;
+    }
+
+    let Some(expected) = options.auth.token.as_deref() else {
+        return false;
+    };
+    let Some(actual) = request
+        .authorization
+        .as_deref()
+        .and_then(authorization_bearer_token)
+    else {
+        return false;
+    };
+
+    constant_time_eq(actual.as_bytes(), expected.as_bytes())
+}
+
+fn authorization_bearer_token(value: &str) -> Option<&str> {
+    let (scheme, token) = value.trim().split_once(' ')?;
+    scheme
+        .eq_ignore_ascii_case("bearer")
+        .then_some(token.trim())
+        .filter(|token| !token.is_empty())
+}
+
+fn constant_time_eq(actual: &[u8], expected: &[u8]) -> bool {
+    if actual.len() != expected.len() {
+        return false;
+    }
+
+    actual
+        .iter()
+        .zip(expected)
+        .fold(0, |diff, (actual, expected)| diff | (actual ^ expected))
+        == 0
+}
+
+fn dashboard_index_response(options: &DashboardOptions) -> HttpResponse {
+    let body = match static_file(options.static_dir.as_deref(), "index.html", INDEX_HTML) {
+        Ok(page) => {
+            maybe_inject_dev_reload(inject_app_metadata(page), options.static_dir.as_deref())
+        }
+        Err(message) => Err(message),
+    };
+    static_response(body, "text/html; charset=utf-8")
+}
+
+fn inject_app_metadata(page: Cow<'static, str>) -> Cow<'static, str> {
+    Cow::Owned(
+        page.replace("{{APP_NAME}}", DASHBOARD_APP_NAME)
+            .replace("{{APP_VERSION}}", env!("CARGO_PKG_VERSION")),
+    )
+}
+
+fn static_asset_response(
+    filename: &'static str,
+    embedded: &'static str,
+    content_type: &'static str,
+    options: &DashboardOptions,
+) -> HttpResponse {
+    static_response(
+        static_file(options.static_dir.as_deref(), filename, embedded),
+        content_type,
+    )
+}
+
+#[cfg(debug_assertions)]
+fn dev_version_response(options: &DashboardOptions) -> HttpResponse {
+    static_response(
+        dev_static_version(options.static_dir.as_deref()),
+        "text/plain; charset=utf-8",
+    )
+}
+
+fn static_response(
+    body: Result<Cow<'static, str>, &'static str>,
+    content_type: &'static str,
+) -> HttpResponse {
+    match body {
+        Ok(body) => HttpResponse::ok(content_type, &body),
+        Err(message) => HttpResponse::internal_error(&json_error_body(message.to_string())),
+    }
+}
+
+fn static_file(
+    static_dir: Option<&Path>,
+    filename: &'static str,
+    embedded: &'static str,
+) -> Result<Cow<'static, str>, &'static str> {
+    if let Some(static_dir) = static_dir {
+        return fs::read_to_string(static_dir.join(filename))
+            .map(Cow::Owned)
+            .map_err(|_| "failed to read dashboard asset");
+    }
+
+    Ok(Cow::Borrowed(embedded))
+}
+
+fn maybe_inject_dev_reload(
+    page: Cow<'static, str>,
+    static_dir: Option<&Path>,
+) -> Result<Cow<'static, str>, &'static str> {
+    #[cfg(debug_assertions)]
+    {
+        if static_dir.is_none() {
+            return Ok(page);
+        }
+
+        let page = page.into_owned();
+        let Some(index) = page.rfind("</body>") else {
+            return Err("dashboard HTML is missing </body>");
+        };
+        let tag = r#"  <script src="/assets/dev-reload.js"></script>
+"#;
+        let mut output = String::with_capacity(page.len() + tag.len());
+        output.push_str(&page[..index]);
+        output.push_str(tag);
+        output.push_str(&page[index..]);
+        Ok(Cow::Owned(output))
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = static_dir;
+        Ok(page)
+    }
+}
+
+#[cfg(debug_assertions)]
+fn dev_static_version(static_dir: Option<&Path>) -> Result<Cow<'static, str>, &'static str> {
+    let Some(static_dir) = static_dir else {
+        return Err("dashboard static directory is not configured");
+    };
+    let version = ["index.html", "app.css", "app.js", "dev-reload.js"]
+        .into_iter()
+        .map(|filename| {
+            fs::metadata(static_dir.join(filename))
+                .and_then(|metadata| metadata.modified())
+                .and_then(|modified| {
+                    modified
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(io::Error::other)
+                })
+                .map(|duration| duration.as_millis().to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "failed to read dashboard asset metadata")?
+        .join(".");
+
+    Ok(Cow::Owned(version))
 }
 
 struct HttpResponse {
@@ -375,6 +585,14 @@ impl HttpResponse {
         }
     }
 
+    fn unauthorized() -> Self {
+        Self {
+            status: "401 Unauthorized",
+            content_type: "application/json; charset=utf-8",
+            body: json_error_body(String::from("dashboard bearer token is required")),
+        }
+    }
+
     fn request_too_large() -> Self {
         Self {
             status: "431 Request Header Fields Too Large",
@@ -413,589 +631,11 @@ impl HttpResponse {
     }
 }
 
-const DASHBOARD_HTML: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BindPort Dashboard</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      font-family: system-ui, sans-serif;
-      --border: color-mix(in srgb, CanvasText 16%, Canvas);
-      --muted: color-mix(in srgb, CanvasText 62%, Canvas);
-      --soft: color-mix(in srgb, CanvasText 5%, Canvas);
-      --active: #138a4b;
-      --stopped: #64748b;
-      --stale: #a15c00;
-      --other: #9f1d20;
-    }
-    body {
-      margin: 0;
-      background: Canvas;
-      color: CanvasText;
-    }
-    main {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    header {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 20px;
-    }
-    h1 {
-      font-size: 1.4rem;
-      margin: 0;
-    }
-    h2 {
-      font-size: 1rem;
-      margin: 0;
-    }
-    .meta {
-      color: var(--muted);
-      font-size: 0.9rem;
-      text-align: right;
-    }
-    .meta-error {
-      color: var(--other);
-    }
-    .controls {
-      align-items: flex-end;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      justify-content: space-between;
-      margin-bottom: 18px;
-    }
-    .search-control {
-      display: grid;
-      flex: 1 1 280px;
-      gap: 5px;
-      max-width: 520px;
-    }
-    .control-label {
-      color: var(--muted);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-    }
-    input[type="search"] {
-      background: Canvas;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: CanvasText;
-      font: inherit;
-      min-height: 38px;
-      padding: 7px 10px;
-    }
-    .state-filter {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .filter-button {
-      background: Canvas;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: CanvasText;
-      cursor: pointer;
-      font-size: 0.84rem;
-      line-height: 1.2;
-      min-height: 38px;
-      padding: 7px 10px;
-      white-space: nowrap;
-    }
-    .filter-button[aria-pressed="true"] {
-      background: Highlight;
-      border-color: Highlight;
-      color: HighlightText;
-    }
-    .summary {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 22px;
-    }
-    .summary-item {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      background: var(--soft);
-    }
-    .summary-label {
-      color: var(--muted);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-    }
-    .summary-value {
-      display: block;
-      font-size: 1.45rem;
-      font-weight: 700;
-      margin-top: 4px;
-    }
-    .service-group {
-      margin-top: 22px;
-    }
-    .group-heading {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-    .group-count {
-      color: var(--muted);
-      font-size: 0.86rem;
-    }
-    .table-wrap {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow-x: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.9rem;
-      min-width: 960px;
-    }
-    th, td {
-      border-bottom: 1px solid var(--border);
-      padding: 10px 8px;
-      text-align: left;
-      vertical-align: top;
-      overflow-wrap: anywhere;
-    }
-    tr:last-child td {
-      border-bottom: 0;
-    }
-    th {
-      color: var(--muted);
-      font-size: 0.72rem;
-      letter-spacing: 0;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    a {
-      color: LinkText;
-    }
-    button {
-      font: inherit;
-    }
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.86rem;
-    }
-    .url-cell {
-      display: grid;
-      gap: 6px;
-    }
-    .url-text {
-      overflow-wrap: anywhere;
-    }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .action-link,
-    .action-button {
-      align-items: center;
-      background: Canvas;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: LinkText;
-      cursor: pointer;
-      display: inline-flex;
-      font-size: 0.78rem;
-      line-height: 1.2;
-      padding: 4px 7px;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .action-button:disabled {
-      color: var(--muted);
-      cursor: default;
-    }
-    .state-pill {
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      display: inline-flex;
-      font-size: 0.78rem;
-      font-weight: 700;
-      padding: 3px 8px;
-      white-space: nowrap;
-    }
-    .state-active { color: var(--active); }
-    .state-stopped { color: var(--stopped); }
-    .state-stale { color: var(--stale); }
-    .state-other { color: var(--other); }
-    .empty, .error {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      background: var(--soft);
-    }
-    .error {
-      color: var(--other);
-    }
-    @media (max-width: 760px) {
-      main { padding: 16px; }
-      header { align-items: flex-start; flex-direction: column; }
-      .meta { text-align: left; }
-      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .table-wrap { border: 0; overflow: visible; }
-      table { min-width: 0; }
-      table, thead, tbody, th, td, tr { display: block; }
-      thead { display: none; }
-      tr { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; padding: 8px 10px; }
-      td { border: 0; padding: 6px 0; }
-      td::before { content: attr(data-label); display: block; font-size: 0.72rem; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <h1>BindPort Dashboard</h1>
-      <div id="generated-at" class="meta" role="status" aria-live="polite"></div>
-    </header>
-    <section class="controls" aria-label="Dashboard filters">
-      <label class="search-control" for="service-search">
-        <span class="control-label">Search</span>
-        <input id="service-search" type="search" autocomplete="off" placeholder="Project, service, branch, command">
-      </label>
-      <div class="state-filter" role="group" aria-label="Filter by state">
-        <button class="filter-button" type="button" data-state-filter="all" aria-pressed="true">All</button>
-        <button class="filter-button" type="button" data-state-filter="active" aria-pressed="false">Active</button>
-        <button class="filter-button" type="button" data-state-filter="stopped" aria-pressed="false">Stopped</button>
-        <button class="filter-button" type="button" data-state-filter="stale" aria-pressed="false">Stale</button>
-        <button class="filter-button" type="button" data-state-filter="other" aria-pressed="false">Other</button>
-      </div>
-    </section>
-    <section id="content" class="empty">Loading...</section>
-  </main>
-  <script>
-    const content = document.getElementById("content");
-    const generatedAt = document.getElementById("generated-at");
-    const serviceSearch = document.getElementById("service-search");
-    const stateFilterButtons = Array.from(document.querySelectorAll("[data-state-filter]"));
-    const REFRESH_INTERVAL_MS = 5000;
-    let lastSnapshot = null;
-    let lastRefreshAt = null;
-    let searchQuery = "";
-    let activeStateFilter = "all";
-    const groups = [
-      { key: "active", label: "Active" },
-      { key: "stopped", label: "Stopped" },
-      { key: "stale", label: "Stale" },
-      { key: "other", label: "Other" }
-    ];
-
-    function text(value) {
-      return value === null || value === undefined || value === "" ? "-" : String(value);
-    }
-
-    function escapeHtml(value) {
-      return text(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll("\"", "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    function serviceUrl(service) {
-      return service.route_url || service.url || "";
-    }
-
-    function safeLink(value) {
-      if (!value) return "";
-      try {
-        const url = new URL(value);
-        return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
-      } catch {
-        return "";
-      }
-    }
-
-    function stateKey(service) {
-      const state = text(service.state).toLowerCase();
-      return ["active", "stopped", "stale"].includes(state) ? state : "other";
-    }
-
-    function groupServices(services) {
-      const grouped = Object.fromEntries(groups.map((group) => [group.key, []]));
-      for (const service of services) {
-        grouped[stateKey(service)].push(service);
-      }
-      return grouped;
-    }
-
-    function refreshSeconds() {
-      return Math.round(REFRESH_INTERVAL_MS / 1000);
-    }
-
-    function formatTime(date) {
-      return date.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      });
-    }
-
-    function setRefreshMeta(message, failed = false) {
-      generatedAt.className = failed ? "meta meta-error" : "meta";
-      generatedAt.textContent = message;
-    }
-
-    function renderRefreshMeta(snapshot) {
-      const parts = [];
-      if (lastRefreshAt) {
-        parts.push(`Updated ${formatTime(lastRefreshAt)}`);
-      }
-      if (snapshot.generated_at) {
-        parts.push(`registry ${snapshot.generated_at}`);
-      }
-      parts.push(`refreshes every ${refreshSeconds()}s`);
-      setRefreshMeta(parts.join(" - "));
-    }
-
-    function serviceSearchText(service) {
-      return [
-        service.state,
-        service.project,
-        service.service,
-        serviceUrl(service),
-        service.worktree_path,
-        service.branch_label,
-        service.branch,
-        service.pid,
-        service.command,
-        service.cwd
-      ].map(text).join(" ").toLowerCase();
-    }
-
-    function matchesFilters(service) {
-      if (activeStateFilter !== "all" && stateKey(service) !== activeStateFilter) {
-        return false;
-      }
-      return !searchQuery || serviceSearchText(service).includes(searchQuery);
-    }
-
-    function filteredServices(services) {
-      return services.filter(matchesFilters);
-    }
-
-    function updateFilterButtons() {
-      for (const button of stateFilterButtons) {
-        button.setAttribute(
-          "aria-pressed",
-          button.dataset.stateFilter === activeStateFilter ? "true" : "false"
-        );
-      }
-    }
-
-    function renderLastSnapshot() {
-      if (lastSnapshot) render(lastSnapshot);
-    }
-
-    function renderSummary(grouped) {
-      return `<section class="summary" aria-label="Service summary">
-        ${groups.map((group) => `
-          <div class="summary-item">
-            <span class="summary-label">${group.label}</span>
-            <span class="summary-value state-${group.key}">${grouped[group.key].length}</span>
-          </div>
-        `).join("")}
-      </section>`;
-    }
-
-    function renderState(state) {
-      const key = ["active", "stopped", "stale"].includes(String(state).toLowerCase())
-        ? String(state).toLowerCase()
-        : "other";
-      return `<span class="state-pill state-${key}">${escapeHtml(state)}</span>`;
-    }
-
-    function renderUrl(service) {
-      const url = serviceUrl(service);
-      const link = safeLink(url);
-      if (!url) return "-";
-      const display = link
-        ? `<a class="url-text" href="${escapeHtml(link)}">${escapeHtml(url)}</a>`
-        : `<span class="url-text">${escapeHtml(url)}</span>`;
-      const open = link
-        ? `<a class="action-link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer noopener">Open</a>`
-        : "";
-      return `<div class="url-cell">
-        ${display}
-        <span class="actions">
-          ${open}
-          <button class="action-button" type="button" data-copy-url="${escapeHtml(url)}">Copy</button>
-        </span>
-      </div>`;
-    }
-
-    function renderServiceRow(service) {
-      return `<tr>
-        <td data-label="State">${renderState(service.state)}</td>
-        <td data-label="Project">${escapeHtml(service.project)}</td>
-        <td data-label="Service">${escapeHtml(service.service)}</td>
-        <td data-label="URL">${renderUrl(service)}</td>
-        <td data-label="Worktree">${escapeHtml(service.worktree_path)}</td>
-        <td data-label="Branch">${escapeHtml(service.branch_label || service.branch)}</td>
-        <td data-label="PID">${escapeHtml(service.pid)}</td>
-        <td data-label="Command"><code>${escapeHtml(service.command)}</code></td>
-      </tr>`;
-    }
-
-    function renderGroup(group, services) {
-      if (services.length === 0) return "";
-      return `<section class="service-group" aria-labelledby="group-${group.key}">
-        <div class="group-heading">
-          <h2 id="group-${group.key}">${group.label}</h2>
-          <span class="group-count">${services.length}</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>State</th>
-                <th>Project</th>
-                <th>Service</th>
-                <th>URL</th>
-                <th>Worktree</th>
-                <th>Branch</th>
-                <th>PID</th>
-                <th>Command</th>
-              </tr>
-            </thead>
-            <tbody>${services.map(renderServiceRow).join("")}</tbody>
-          </table>
-        </div>
-      </section>`;
-    }
-
-    function render(snapshot) {
-      renderRefreshMeta(snapshot);
-      const services = snapshot.services || [];
-      if (services.length === 0) {
-        content.className = "empty";
-        content.textContent = "No BindPort runs recorded yet.";
-        return;
-      }
-
-      const visibleServices = filteredServices(services);
-      if (visibleServices.length === 0) {
-        content.className = "empty";
-        content.textContent = "No services match the current filters.";
-        return;
-      }
-
-      const grouped = groupServices(visibleServices);
-      content.className = "";
-      content.innerHTML = `
-        ${renderSummary(grouped)}
-        ${groups.map((group) => renderGroup(group, grouped[group.key])).join("")}
-      `;
-    }
-
-    async function copyText(value) {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(value);
-        return;
-      }
-
-      const input = document.createElement("textarea");
-      input.value = value;
-      input.setAttribute("readonly", "");
-      input.style.position = "fixed";
-      input.style.left = "-9999px";
-      document.body.appendChild(input);
-      input.select();
-      try {
-        if (!document.execCommand("copy")) {
-          throw new Error("copy failed");
-        }
-      } finally {
-        input.remove();
-      }
-    }
-
-    function resetCopyButton(button, label) {
-      window.setTimeout(() => {
-        button.disabled = false;
-        button.textContent = label;
-      }, 1200);
-    }
-
-    content.addEventListener("click", async (event) => {
-      const button = event.target.closest("[data-copy-url]");
-      if (!button) return;
-
-      const label = button.textContent;
-      button.disabled = true;
-      try {
-        await copyText(button.getAttribute("data-copy-url"));
-        button.textContent = "Copied";
-      } catch {
-        button.textContent = "Failed";
-      }
-      resetCopyButton(button, label);
-    });
-
-    serviceSearch.addEventListener("input", () => {
-      searchQuery = serviceSearch.value.trim().toLowerCase();
-      renderLastSnapshot();
-    });
-
-    for (const button of stateFilterButtons) {
-      button.addEventListener("click", () => {
-        activeStateFilter = button.dataset.stateFilter;
-        updateFilterButtons();
-        renderLastSnapshot();
-      });
-    }
-
-    function renderRefreshError(error) {
-      if (lastSnapshot && lastRefreshAt) {
-        setRefreshMeta(
-          `Refresh failed: ${error.message} - last updated ${formatTime(lastRefreshAt)}`,
-          true
-        );
-        return;
-      }
-
-      setRefreshMeta(`Refresh failed: ${error.message}`, true);
-      content.className = "error";
-      content.textContent = `Dashboard status unavailable: ${error.message}`;
-    }
-
-    async function refreshStatus() {
-      try {
-        const response = await fetch("/api/status", { cache: "no-store" });
-        if (!response.ok) throw new Error(`status ${response.status}`);
-
-        const snapshot = await response.json();
-        lastSnapshot = snapshot;
-        lastRefreshAt = new Date();
-        render(snapshot);
-      } catch (error) {
-        renderRefreshError(error);
-      } finally {
-        window.setTimeout(refreshStatus, REFRESH_INTERVAL_MS);
-      }
-    }
-
-    refreshStatus();
-  </script>
-</body>
-</html>
-"#;
+const INDEX_HTML: &str = include_str!("../static/index.html");
+const APP_CSS: &str = include_str!("../static/app.css");
+const APP_JS: &str = include_str!("../static/app.js");
+#[cfg(debug_assertions)]
+const DEV_RELOAD_JS: &str = include_str!("../static/dev-reload.js");
 
 #[cfg(test)]
 mod tests {
@@ -1004,31 +644,45 @@ mod tests {
 
     #[test]
     fn root_request_serves_dashboard_html() {
-        let response = response_for_request(&test_request("/"));
+        let options = DashboardOptions::default();
+        let response = response_for_request(&test_request("/"), &options);
         let bytes = response.into_bytes();
         let text = String::from_utf8(bytes).expect("response utf8");
 
         assert!(text.starts_with("HTTP/1.1 200 OK"));
         assert!(text.contains("BindPort Dashboard"));
-        assert!(text.contains("/api/status"));
-        assert!(text.contains("Service summary"));
-        assert!(text.contains("<th>Project</th>"));
-        assert!(text.contains("<th>Worktree</th>"));
-        assert!(text.contains("state-active"));
-        assert!(text.contains("data-copy-url"));
-        assert!(text.contains("Open"));
-        assert!(text.contains("Copy"));
-        assert!(text.contains("REFRESH_INTERVAL_MS = 5000"));
-        assert!(text.contains("refreshStatus"));
-        assert!(text.contains("aria-live=\"polite\""));
+        assert!(text.contains("/assets/app.css"));
+        assert!(text.contains("/assets/app.js"));
         assert!(text.contains("service-search"));
         assert!(text.contains("data-state-filter=\"active\""));
-        assert!(text.contains("No services match the current filters."));
+        assert!(text.contains("auth-token"));
+        assert!(text.contains("app-footer"));
+        assert!(text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
+        assert!(!text.contains("{{APP_VERSION}}"));
+    }
+
+    #[test]
+    fn asset_routes_serve_embedded_dashboard_files() {
+        let options = DashboardOptions::default();
+        let css = response_for_request(&test_request("/assets/app.css"), &options);
+        let css = String::from_utf8(css.into_bytes()).expect("css utf8");
+        let js = response_for_request(&test_request("/assets/app.js"), &options);
+        let js = String::from_utf8(js.into_bytes()).expect("js utf8");
+
+        assert!(css.starts_with("HTTP/1.1 200 OK"));
+        assert!(css.contains("text/css"));
+        assert!(css.contains(".state-active"));
+        assert!(js.starts_with("HTTP/1.1 200 OK"));
+        assert!(js.contains("text/javascript"));
+        assert!(js.contains("REFRESH_INTERVAL_MS = 5000"));
+        assert!(js.contains("refreshStatus"));
+        assert!(js.contains("No services match the current filters."));
     }
 
     #[test]
     fn unknown_route_returns_404() {
-        let response = response_for_request(&test_request("/missing"));
+        let options = DashboardOptions::default();
+        let response = response_for_request(&test_request("/missing"), &options);
         let text = String::from_utf8(response.into_bytes()).expect("response utf8");
 
         assert!(text.starts_with("HTTP/1.1 404 Not Found"));
@@ -1036,14 +690,73 @@ mod tests {
 
     #[test]
     fn rejects_unknown_host_header() {
-        let response = response_for_request(&HttpRequest {
-            method: String::from("GET"),
-            path: String::from("/api/status"),
-            host: Some(String::from("example.com:27080")),
-        });
+        let options = DashboardOptions::default();
+        let response = response_for_request(
+            &HttpRequest {
+                method: String::from("GET"),
+                path: String::from("/api/status"),
+                host: Some(String::from("example.com:27080")),
+                authorization: None,
+            },
+            &options,
+        );
         let text = String::from_utf8(response.into_bytes()).expect("response utf8");
 
         assert!(text.starts_with("HTTP/1.1 403 Forbidden"));
+    }
+
+    #[test]
+    fn accepts_configured_allowed_host_header() {
+        let options = DashboardOptions {
+            allowed_hosts: vec![String::from("devbox.test")],
+            ..DashboardOptions::default()
+        };
+
+        assert!(host_allowed(Some("devbox.test:27080"), &options));
+    }
+
+    #[test]
+    fn accepts_arbitrary_host_for_unspecified_bind_with_auth() {
+        let options = DashboardOptions {
+            host: Ipv4Addr::UNSPECIFIED,
+            auth: DashboardAuth {
+                required: true,
+                token: Some(String::from("secret")),
+            },
+            ..DashboardOptions::default()
+        };
+
+        assert!(host_allowed(Some("remote.example:27080"), &options));
+    }
+
+    #[test]
+    fn auth_required_rejects_missing_token() {
+        let options = DashboardOptions {
+            auth: DashboardAuth {
+                required: true,
+                token: Some(String::from("secret")),
+            },
+            ..DashboardOptions::default()
+        };
+        let response = response_for_request(&test_request("/api/status"), &options);
+        let text = String::from_utf8(response.into_bytes()).expect("response utf8");
+
+        assert!(text.starts_with("HTTP/1.1 401 Unauthorized"));
+    }
+
+    #[test]
+    fn auth_required_accepts_bearer_token() {
+        let options = DashboardOptions {
+            auth: DashboardAuth {
+                required: true,
+                token: Some(String::from("secret")),
+            },
+            ..DashboardOptions::default()
+        };
+        let mut request = test_request("/api/status");
+        request.authorization = Some(String::from("Bearer secret"));
+
+        assert!(request_authorized(&request, &options));
     }
 
     #[test]
@@ -1084,6 +797,7 @@ mod tests {
             method: String::from("GET"),
             path: path.to_string(),
             host: Some(String::from("127.0.0.1:27080")),
+            authorization: None,
         }
     }
 }

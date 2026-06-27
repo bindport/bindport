@@ -67,6 +67,7 @@ cargo run -p bindport -- --help
 cargo run -p bindport -- doctor
 cargo run -p bindport -- init
 cargo run -p bindport -- status --json
+cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
 ```
@@ -87,6 +88,7 @@ The same local checks are available through `mise`:
 mise install --locked
 mise run check
 mise run ci
+mise run dev-dashboard
 ```
 
 ## Configuration Examples
@@ -108,11 +110,13 @@ when `XDG_CONFIG_HOME` is unset. The registry database remains state at
 `bindport init` creates the optional user config with default values. Config is
 never required; missing config means built-in defaults are used.
 
-The current implementation reads only top-level `project`, `service`,
-`default_range`, and `skip_ports`. The example `identity`, `services`, and
-`proxy` sections document the intended future shape and are not applied yet;
-`bindport doctor` reports ignored top-level keys so typos and future-only
-sections are visible.
+The current implementation reads top-level `project`, `service`,
+`default_range`, `skip_ports`, and the `[dashboard]` / `[dashboard.auth]`
+settings used by the local dashboard. Dashboard defaults are local-only
+(`127.0.0.1:27080`) with auth disabled; non-loopback dashboard binds require
+auth and a token. The example `identity`, `services`, and `proxy` sections
+document the intended future shape and are not applied yet; `bindport doctor`
+reports ignored top-level keys so typos and future-only sections are visible.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
@@ -122,7 +126,8 @@ service argument in `bindport run <service> -- ...` wins, then
 ## Documentation
 
 - [Dashboard](docs/dashboard.md): local read-only service dashboard, status API,
-  default port, fallback behavior, and security posture.
+  service-style controls, configurable bind/auth options, dev modes, and
+  security posture.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 

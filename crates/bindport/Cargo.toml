@@ -16,7 +16,7 @@ bindport-core.workspace = true
 bindport-dashboard.workspace = true
 bindport-registry.workspace = true
 bindport-runner.workspace = true
+libc.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-libc.workspace = true

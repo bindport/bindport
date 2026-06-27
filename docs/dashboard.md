@@ -3,16 +3,16 @@
 BindPort includes a read-only local dashboard for inspecting the same registry
 state exposed by `bindport status --json`.
 
-Start it from a source checkout with:
+Serve it in the foreground from a source checkout with:
 
 ```sh
-cargo run -p bindport -- dashboard
+cargo run -p bindport -- dashboard serve
 ```
 
 Or, after installing a version that includes the dashboard command:
 
 ```sh
-bindport dashboard
+bindport dashboard serve
 ```
 
 The command prints the URL before serving requests:
@@ -22,6 +22,22 @@ dashboard: http://127.0.0.1:27080
 ```
 
 Stop it with `Ctrl-C`.
+
+For service-style control, use:
+
+```sh
+bindport dashboard start
+bindport dashboard status
+bindport dashboard stop
+```
+
+`start` runs the dashboard in the background and writes a small state file under
+the BindPort state directory. `status` reports the recorded PID and URL, and
+`stop` sends the dashboard process a termination signal. On Linux, BindPort
+checks the recorded PID against `/proc` before signaling it. On other platforms,
+`stop` can only check PID liveness, so stale state after PID reuse may need
+manual cleanup. Background dashboard stderr is written to `dashboard.log` in the
+same state directory, and startup failures include the first logged error.
 
 ## Port Selection
 
@@ -34,6 +50,23 @@ use, BindPort scans the configured BindPort range instead:
 The fallback scan skips configured `skip_ports` and active registry ports. The
 dashboard does not bind privileged ports and does not claim `80` or `443`.
 
+Override the bind IP and preferred port with CLI flags. Non-loopback hosts
+require dashboard auth:
+
+```sh
+BINDPORT_DASHBOARD_TOKEN="change-me" \
+  cargo run -p bindport -- dashboard serve --host 0.0.0.0 --port 27080 --auth required
+```
+
+Or set them in config:
+
+```toml
+[dashboard]
+host = "127.0.0.1"
+port = 27080
+allowed_hosts = ["localhost", "127.0.0.1"]
+```
+
 ## Views
 
 The dashboard groups services by registry state:
@@ -43,24 +76,34 @@ The dashboard groups services by registry state:
 - `stale`
 - other unexpected states
 
-Rows show project, service, URL, worktree, branch, PID, and command. URL cells
-include `Open` and `Copy` actions for quick browser and testing workflows. Only
-`http` and `https` URLs are opened as links; other schemes are displayed as
-plain text.
+Rows show project, service, URL, branch, and root path. State is represented by
+the group heading instead of a repeated row column. URL, branch, and root cells
+include compact copy actions, and `http` / `https` URLs also include an open
+action. Other URL schemes are displayed as plain text.
 
-Use the search field to filter by state, project, service, URL, worktree, branch,
-PID, command, or working directory. State buttons narrow the table to one
-registry state while keeping the text search active.
+Each row has an expand control for secondary details: state, PID, current
+working directory, and command. Expanded rows stay expanded across automatic
+refreshes while the matching service remains in the registry snapshot.
+
+Use the search field to filter by state, project, service, URL, root path,
+branch, PID, command, or working directory. State buttons narrow the table to
+one registry state while keeping the text search active.
 
 The dashboard refreshes its registry snapshot every five seconds and shows the
 last successful refresh time in the header. If a later refresh fails, the last
 successful view stays visible while the header reports the refresh error.
+
+The header shows a lock button when the browser tab has a stored dashboard
+token. Use it to clear the token from `sessionStorage` and return to the token
+prompt. The footer shows the app name and build version.
 
 ## API
 
 The dashboard serves:
 
 - `GET /` - embedded read-only HTML dashboard.
+- `GET /assets/app.css` - embedded dashboard stylesheet.
+- `GET /assets/app.js` - embedded dashboard client script.
 - `GET /api/status` - JSON registry snapshot, matching `bindport status --json`.
 - `GET /healthz` - plain `ok` health response for smoke checks.
 
@@ -77,6 +120,63 @@ The dashboard is local and read-only:
 - does not provide write actions or registry mutation APIs;
 - does not start, stop, clean, or release services.
 
+When `dashboard.auth.required` or `--auth required` is enabled, `/api/status`
+requires `Authorization: Bearer <token>`. The HTML shell remains public so the
+browser can load the token prompt and static assets, but registry data is not
+returned until the token is provided. The browser stores the token in
+`sessionStorage` for the current tab/session only. Prefer `token_env` /
+`--token-env` over `--token` so the secret does not land in shell history or the
+foreground `serve` process list.
+
+When `dashboard start` receives `--token`, BindPort passes it to the detached
+server through the configured token environment variable instead of keeping it
+in the background process arguments.
+
+```toml
+[dashboard.auth]
+required = true
+token_env = "BINDPORT_DASHBOARD_TOKEN"
+```
+
+```sh
+BINDPORT_DASHBOARD_TOKEN="change-me" \
+  cargo run -p bindport -- dashboard serve --host 0.0.0.0 --auth required
+```
+
+Binding `0.0.0.0` with auth enabled accepts arbitrary Host headers so remote
+browser testing works with an IP address or forwarded hostname. BindPort refuses
+non-loopback dashboard binds when auth is disabled. For loopback-only dashboards
+reached through a local hostname or tunnel, configure each non-local Host header
+explicitly with `allowed_hosts` or `--allowed-host`.
+
 Registry data can include project names, branch names, PIDs, command lines, and
 working directories. Avoid putting secrets in local dev command arguments; use
 environment or secret-management tooling instead.
+
+## Development
+
+Dashboard assets live in `crates/bindport-dashboard/static`. Release builds
+embed those files. Debug/dev runs can read them from disk with:
+
+```sh
+cargo run -p bindport -- dashboard serve \
+  --static-dir crates/bindport-dashboard/static
+```
+
+The dev static mode injects a lightweight reload script that refreshes the page
+when those static files change. In debug builds with `--static-dir`, the
+dashboard also exposes `/assets/dev-reload.js` and `/assets/dev-version` for
+that reload loop.
+
+The same workflows are available through `mise`:
+
+```sh
+mise run dev-dashboard
+mise run dev-dashboard-watch
+BINDPORT_DASHBOARD_TOKEN="change-me" mise run dev-dashboard-remote
+```
+
+`dev-dashboard` serves local static assets from disk. `dev-dashboard-watch`
+also restarts the Rust dashboard process when Cargo files or crate sources
+change. `dev-dashboard-remote` binds `0.0.0.0`, requires token auth, and serves
+the same static assets from disk for testing from a remote browser.
