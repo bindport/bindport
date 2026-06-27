@@ -120,6 +120,10 @@ The dashboard is local and read-only:
 - does not provide write actions or registry mutation APIs;
 - does not start, stop, clean, or release services.
 
+Use `bindport clean --dry-run` and then `bindport clean` from the CLI to remove
+stopped or stale registry entries. Cleanup intentionally stays outside the
+dashboard so the UI remains read-only.
+
 When `dashboard.auth.required` or `--auth required` is enabled, `/api/status`
 requires `Authorization: Bearer <token>`. The HTML shell remains public so the
 browser can load the token prompt and static assets, but registry data is not

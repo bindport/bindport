@@ -21,7 +21,8 @@ use bindport_core::{
 };
 use bindport_dashboard::{DashboardOptions, DashboardServer};
 use bindport_registry::{
-    REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, default_registry_path,
+    CleanState, CleanSummary, REGISTRY_PATH_ENV, Registry, RegistryError, RunStart,
+    default_registry_path,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available,
@@ -67,6 +68,7 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
                 print_status()
             }
         }
+        Some("clean") => clean_registry(&args[1..]),
         Some("doctor") => print_doctor(),
         Some("dashboard") => run_dashboard(&args[1..]),
         Some("init") => init_fallback_config(),
@@ -958,6 +960,153 @@ impl From<io::Error> for DashboardCommandError {
     }
 }
 
+#[derive(Debug)]
+struct CleanOptions {
+    dry_run: bool,
+    json: bool,
+    stopped: bool,
+    stale: bool,
+    help: bool,
+}
+
+impl CleanOptions {
+    fn states(&self) -> Vec<CleanState> {
+        let mut states = Vec::new();
+
+        if self.stopped {
+            states.push(CleanState::Stopped);
+        }
+        if self.stale {
+            states.push(CleanState::Stale);
+        }
+
+        states
+    }
+}
+
+fn clean_registry(args: &[String]) -> ExitCode {
+    match clean_registry_result(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(CleanCommandError::InvalidArgument(error)) => {
+            eprintln!("bindport: {error}");
+            eprintln!("usage: bindport clean [--dry-run] [--stopped] [--stale] [--json]");
+            ExitCode::FAILURE
+        }
+        Err(CleanCommandError::Registry(error)) => {
+            print_registry_error(&error);
+            ExitCode::FAILURE
+        }
+        Err(CleanCommandError::Json(error)) => {
+            eprintln!("bindport: failed to serialize clean JSON: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn clean_registry_result(args: &[String]) -> Result<(), CleanCommandError> {
+    let options = parse_clean_options(args)?;
+
+    if options.help {
+        print_clean_help();
+        return Ok(());
+    }
+
+    let states = options.states();
+    let summary = Registry::open_default()
+        .and_then(|mut registry| registry.clean_leases(&states, options.dry_run))?;
+
+    if options.json {
+        print_clean_json(summary, options.dry_run)?;
+    } else {
+        print_clean_summary(summary, options.dry_run);
+    }
+
+    Ok(())
+}
+
+fn parse_clean_options(args: &[String]) -> Result<CleanOptions, CleanCommandError> {
+    let mut options = CleanOptions {
+        dry_run: false,
+        json: false,
+        stopped: false,
+        stale: false,
+        help: false,
+    };
+
+    for arg in args {
+        match arg.as_str() {
+            "--dry-run" => options.dry_run = true,
+            "--json" => options.json = true,
+            "--stopped" => options.stopped = true,
+            "--stale" => options.stale = true,
+            "--all" => {
+                options.stopped = true;
+                options.stale = true;
+            }
+            "--help" | "-h" => options.help = true,
+            unknown => {
+                return Err(CleanCommandError::InvalidArgument(format!(
+                    "unknown clean option `{unknown}`"
+                )));
+            }
+        }
+    }
+
+    if !options.stopped && !options.stale {
+        options.stopped = true;
+        options.stale = true;
+    }
+
+    Ok(options)
+}
+
+fn print_clean_json(summary: CleanSummary, dry_run: bool) -> Result<(), CleanCommandError> {
+    let report = serde_json::json!({
+        "dry_run": dry_run,
+        "leases": summary.total_leases(),
+        "runs": summary.runs,
+        "states": {
+            "stopped": summary.stopped_leases,
+            "stale": summary.stale_leases,
+        },
+    });
+    let json = serde_json::to_string_pretty(&report)?;
+    println!("{json}");
+
+    Ok(())
+}
+
+fn print_clean_summary(summary: CleanSummary, dry_run: bool) {
+    let action = if dry_run { "would clean" } else { "cleaned" };
+
+    println!(
+        "{action} {} registry entries (stopped {}, stale {}, runs {})",
+        summary.total_leases(),
+        summary.stopped_leases,
+        summary.stale_leases,
+        summary.runs
+    );
+}
+
+#[derive(Debug)]
+enum CleanCommandError {
+    InvalidArgument(String),
+    Registry(RegistryError),
+    Json(serde_json::Error),
+}
+
+impl From<RegistryError> for CleanCommandError {
+    fn from(error: RegistryError) -> Self {
+        Self::Registry(error)
+    }
+}
+
+impl From<serde_json::Error> for CleanCommandError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
 fn print_status_json() -> ExitCode {
     match Registry::open_default().and_then(|mut registry| registry.status_snapshot()) {
         Ok(snapshot) => match serde_json::to_string_pretty(&snapshot) {
@@ -1399,6 +1548,7 @@ fn print_help() {
     println!("  bindport run [service] -- <command>");
     println!("                                  Run a command with an optional service name");
     println!("  bindport status [--json]     Show registry status");
+    println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport doctor              Show bootstrap diagnostics");
     println!("  bindport dashboard [serve]   Serve the read-only local dashboard");
     println!("  bindport dashboard start     Start the dashboard in the background");
@@ -1406,6 +1556,20 @@ fn print_help() {
     println!("  bindport dashboard stop      Stop the background dashboard");
     println!("  bindport init                Create optional fallback config");
     println!("  bindport --version           Print version");
+}
+
+fn print_clean_help() {
+    println!("BindPort registry cleanup");
+    println!();
+    println!("Usage:");
+    println!("  bindport clean [options]");
+    println!();
+    println!("Options:");
+    println!("  --dry-run     Show what would be removed without deleting entries");
+    println!("  --stopped     Remove stopped entries only");
+    println!("  --stale       Remove stale entries only");
+    println!("  --all         Remove stopped and stale entries (default)");
+    println!("  --json        Print machine-readable cleanup counts");
 }
 
 fn print_dashboard_help() {

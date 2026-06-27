@@ -122,6 +122,41 @@ pub struct StartedRun {
     pub run_id: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanState {
+    Stopped,
+    Stale,
+}
+
+impl CleanState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Stale => "stale",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CleanSummary {
+    pub stopped_leases: usize,
+    pub stale_leases: usize,
+    pub runs: usize,
+}
+
+impl CleanSummary {
+    pub fn total_leases(self) -> usize {
+        self.stopped_leases + self.stale_leases
+    }
+
+    fn add_leases(&mut self, state: CleanState, count: usize) {
+        match state {
+            CleanState::Stopped => self.stopped_leases += count,
+            CleanState::Stale => self.stale_leases += count,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct StatusSnapshot {
     pub schema_version: &'static str,
@@ -370,6 +405,68 @@ impl Registry {
             services,
             runs,
         })
+    }
+
+    pub fn clean_leases(
+        &mut self,
+        states: &[CleanState],
+        dry_run: bool,
+    ) -> Result<CleanSummary, RegistryError> {
+        self.reconcile_stale_active_leases()?;
+
+        let transaction = self.connection.transaction()?;
+        let mut summary = CleanSummary::default();
+
+        for state in [CleanState::Stopped, CleanState::Stale] {
+            if !states.contains(&state) {
+                continue;
+            }
+
+            let lease_count = transaction.query_row(
+                "SELECT COUNT(*)
+                 FROM leases
+                 WHERE state = ?1",
+                params![state.as_str()],
+                |row| row.get::<_, i64>(0),
+            )? as usize;
+            let run_count = transaction.query_row(
+                "SELECT COUNT(*)
+                 FROM runs
+                 WHERE lease_id IN (
+                    SELECT id
+                    FROM leases
+                    WHERE state = ?1
+                 )",
+                params![state.as_str()],
+                |row| row.get::<_, i64>(0),
+            )? as usize;
+
+            summary.add_leases(state, lease_count);
+            summary.runs += run_count;
+
+            if dry_run {
+                continue;
+            }
+
+            transaction.execute(
+                "DELETE FROM runs
+                 WHERE lease_id IN (
+                    SELECT id
+                    FROM leases
+                    WHERE state = ?1
+                 )",
+                params![state.as_str()],
+            )?;
+            transaction.execute(
+                "DELETE FROM leases
+                 WHERE state = ?1",
+                params![state.as_str()],
+            )?;
+        }
+
+        transaction.commit()?;
+
+        Ok(summary)
     }
 
     fn ensure_schema(&self) -> Result<(), RegistryError> {
@@ -649,6 +746,103 @@ mod tests {
         assert!(snapshot.services[0].proxy.is_none());
         assert_eq!(snapshot.services[0].exit_code, Some(0));
         assert_eq!(snapshot.runs.len(), 1);
+    }
+
+    #[test]
+    fn clean_leases_dry_run_counts_without_deleting_stopped_runs() {
+        let mut registry = Registry::open(temp_registry_path("clean-dry-run")).expect("registry");
+        let started = registry
+            .record_run_started(&RunStart {
+                project: String::from("bindport"),
+                service: String::from("next"),
+                identity: None,
+                host: String::from("127.0.0.1"),
+                port: 29_123,
+                pid: 12_345,
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record start");
+
+        registry
+            .record_run_finished(started, Some(0))
+            .expect("record finish");
+
+        let summary = registry
+            .clean_leases(&[CleanState::Stopped], true)
+            .expect("clean dry-run");
+
+        assert_eq!(summary.stopped_leases, 1);
+        assert_eq!(summary.stale_leases, 0);
+        assert_eq!(summary.runs, 1);
+        assert_eq!(summary.total_leases(), 1);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(snapshot.services.len(), 1);
+        assert_eq!(snapshot.runs.len(), 1);
+    }
+
+    #[test]
+    fn clean_leases_removes_stopped_runs() {
+        let mut registry = Registry::open(temp_registry_path("clean-stopped")).expect("registry");
+        let started = registry
+            .record_run_started(&RunStart {
+                project: String::from("bindport"),
+                service: String::from("next"),
+                identity: None,
+                host: String::from("127.0.0.1"),
+                port: 29_123,
+                pid: 12_345,
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record start");
+
+        registry
+            .record_run_finished(started, Some(0))
+            .expect("record finish");
+
+        let summary = registry
+            .clean_leases(&[CleanState::Stopped, CleanState::Stale], false)
+            .expect("clean");
+
+        assert_eq!(summary.stopped_leases, 1);
+        assert_eq!(summary.stale_leases, 0);
+        assert_eq!(summary.runs, 1);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert!(snapshot.services.is_empty());
+        assert!(snapshot.runs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clean_leases_reconciles_and_removes_stale_runs() {
+        let mut registry = Registry::open(temp_registry_path("clean-stale")).expect("registry");
+        registry
+            .record_run_started(&RunStart {
+                project: String::from("bindport"),
+                service: String::from("web"),
+                identity: None,
+                host: String::from("127.0.0.1"),
+                port: 29_500,
+                pid: 2_000_000_000,
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record start");
+
+        let summary = registry
+            .clean_leases(&[CleanState::Stale], false)
+            .expect("clean stale");
+
+        assert_eq!(summary.stopped_leases, 0);
+        assert_eq!(summary.stale_leases, 1);
+        assert_eq!(summary.runs, 1);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert!(snapshot.services.is_empty());
+        assert!(snapshot.runs.is_empty());
     }
 
     #[test]
