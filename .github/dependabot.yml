@@ -26,6 +26,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    ignore:
+      - dependency-name: "serde_json"
+        versions:
+          - ">= 1.0.147"
     groups:
       cargo-dependencies:
         patterns:
