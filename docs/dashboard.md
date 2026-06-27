@@ -1,7 +1,8 @@
 # Dashboard
 
-BindPort includes a read-only local dashboard for inspecting the same registry
-state exposed by `bindport status --json`.
+BindPort includes a local dashboard for inspecting the same registry state
+exposed by `bindport status --json` and cleaning stopped or stale registry
+entries.
 
 Serve it in the foreground from a source checkout with:
 
@@ -81,6 +82,10 @@ the group heading instead of a repeated row column. URL, branch, and root cells
 include compact copy actions, and `http` / `https` URLs also include an open
 action. Other URL schemes are displayed as plain text.
 
+Stopped and stale groups include a cleanup action in the group header. Cleanup
+removes the matching stopped or stale registry entries and then refreshes the
+dashboard. Active services cannot be removed from the dashboard.
+
 Each row has an expand control for secondary details: state, PID, current
 working directory, and command. Expanded rows stay expanded across automatic
 refreshes while the matching service remains in the registry snapshot.
@@ -101,10 +106,13 @@ prompt. The footer shows the app name and build version.
 
 The dashboard serves:
 
-- `GET /` - embedded read-only HTML dashboard.
+- `GET /` - embedded dashboard HTML shell.
 - `GET /assets/app.css` - embedded dashboard stylesheet.
 - `GET /assets/app.js` - embedded dashboard client script.
 - `GET /api/status` - JSON registry snapshot, matching `bindport status --json`.
+- `POST /api/clean` - remove stopped and stale registry entries.
+- `POST /api/clean/stopped` - remove stopped registry entries.
+- `POST /api/clean/stale` - remove stale registry entries.
 - `GET /healthz` - plain `ok` health response for smoke checks.
 
 `/api/status` returns the registry snapshot with route-oriented fields such as
@@ -113,24 +121,25 @@ proxy adapter renders routes.
 
 ## Security Posture
 
-The dashboard is local and read-only:
+The dashboard is local by default and has a narrow write surface:
 
 - binds only to loopback by default;
 - accepts `Host` headers for `127.0.0.1` and `localhost`;
-- does not provide write actions or registry mutation APIs;
-- does not start, stop, clean, or release services.
+- only exposes write actions for stopped/stale registry cleanup;
+- does not start, stop, run, reserve, or release services;
+- requires the `X-BindPort-Dashboard-Action: clean` header for cleanup requests
+  so simple cross-site form posts cannot trigger cleanup in a browser.
 
-Use `bindport clean --dry-run` and then `bindport clean` from the CLI to remove
-stopped or stale registry entries. Cleanup intentionally stays outside the
-dashboard so the UI remains read-only.
+Use `bindport clean --dry-run` from the CLI when you want to preview cleanup
+counts before removing registry entries.
 
 When `dashboard.auth.required` or `--auth required` is enabled, `/api/status`
-requires `Authorization: Bearer <token>`. The HTML shell remains public so the
-browser can load the token prompt and static assets, but registry data is not
-returned until the token is provided. The browser stores the token in
-`sessionStorage` for the current tab/session only. Prefer `token_env` /
-`--token-env` over `--token` so the secret does not land in shell history or the
-foreground `serve` process list.
+and `/api/clean*` require `Authorization: Bearer <token>`. The HTML shell
+remains public so the browser can load the token prompt and static assets, but
+registry data and cleanup actions are not available until the token is
+provided. The browser stores the token in `sessionStorage` for the current
+tab/session only. Prefer `token_env` / `--token-env` over `--token` so the
+secret does not land in shell history or the foreground `serve` process list.
 
 When `dashboard start` receives `--token`, BindPort passes it to the detached
 server through the configured token environment variable instead of keeping it

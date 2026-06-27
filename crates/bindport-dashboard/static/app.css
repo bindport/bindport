@@ -55,6 +55,14 @@ h2 {
 .meta-error {
   color: var(--other);
 }
+.action-status {
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin: -6px 0 16px;
+}
+.action-status-error {
+  color: var(--other);
+}
 .auth-panel,
 .controls {
   align-items: flex-end;
@@ -178,6 +186,15 @@ input[type="search"] {
 .group-count {
   color: var(--muted);
   font-size: 0.86rem;
+}
+.group-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.group-action-button {
+  color: var(--other);
 }
 .table-wrap {
   border: 1px solid var(--border);

@@ -229,6 +229,34 @@ fn dashboard_serves_status_api() {
 }
 
 #[test]
+fn dashboard_cleans_stopped_entries() {
+    let registry_path = temp_registry_path("dashboard-clean-registry");
+    let output = bindport_with_registry(&registry_path)
+        .env(BINDPORT_PROJECT_ENV, "dashboard-clean-fixture")
+        .args(["run", "web", "--", "sh", "-c", "printf dashboard-clean"])
+        .output()
+        .expect("run bindport fixture");
+
+    assert!(output.status.success());
+
+    let dashboard = start_dashboard(bindport_with_registry(&registry_path));
+    let clean_response = http_post_clean(dashboard.port, "/api/clean/stopped", None);
+
+    assert!(clean_response.starts_with("HTTP/1.1 200 OK"));
+
+    let report = serde_json::from_str::<Value>(http_body(&clean_response)).expect("clean json");
+    assert_eq!(report["leases"], 1);
+    assert_eq!(report["runs"], 1);
+    assert_eq!(report["states"]["stopped"], 1);
+
+    let status_response = http_get(dashboard.port, "/api/status");
+    let status = serde_json::from_str::<Value>(http_body(&status_response)).expect("status json");
+
+    assert_eq!(status["services"].as_array().expect("services").len(), 0);
+    assert_eq!(status["runs"].as_array().expect("runs").len(), 0);
+}
+
+#[test]
 fn dashboard_uses_cli_port_option() {
     let registry_path = temp_registry_path("dashboard-cli-port-registry");
     let port = free_loopback_port();
@@ -277,9 +305,14 @@ fn dashboard_requires_bearer_token_when_auth_is_enabled() {
     );
     let rejected = http_get(dashboard.port, "/api/status");
     let accepted = http_get_with_auth(dashboard.port, "/api/status", "Bearer secret");
+    let clean_rejected = http_post_clean(dashboard.port, "/api/clean/stopped", None);
+    let clean_accepted =
+        http_post_clean(dashboard.port, "/api/clean/stopped", Some("Bearer secret"));
 
     assert!(rejected.starts_with("HTTP/1.1 401 Unauthorized"));
     assert!(accepted.starts_with("HTTP/1.1 200 OK"));
+    assert!(clean_rejected.starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(clean_accepted.starts_with("HTTP/1.1 200 OK"));
 }
 
 #[test]
@@ -1397,11 +1430,34 @@ fn http_get_with_auth(port: u16, path: &str, authorization: &str) -> String {
     )
 }
 
+fn http_post_clean(port: u16, path: &str, authorization: Option<&str>) -> String {
+    let mut headers = vec![("X-BindPort-Dashboard-Action", "clean")];
+    if let Some(authorization) = authorization {
+        headers.push(("Authorization", authorization));
+    }
+
+    http_request_with_headers(port, "POST", path, &format!("127.0.0.1:{port}"), &headers)
+}
+
 fn http_get_with_headers(port: u16, path: &str, host: &str, headers: &[(&str, &str)]) -> String {
+    http_request_with_headers(port, "GET", path, host, headers)
+}
+
+fn http_request_with_headers(
+    port: u16,
+    method: &str,
+    path: &str,
+    host: &str,
+    headers: &[(&str, &str)],
+) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect dashboard");
-    write!(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\n").expect("write dashboard request");
+    write!(stream, "{method} {path} HTTP/1.1\r\nHost: {host}\r\n")
+        .expect("write dashboard request");
     for (name, value) in headers {
         write!(stream, "{name}: {value}\r\n").expect("write dashboard request header");
+    }
+    if method == "POST" {
+        write!(stream, "Content-Length: 0\r\n").expect("write dashboard request body length");
     }
     write!(stream, "Connection: close\r\n\r\n").expect("finish dashboard request");
 
