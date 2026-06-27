@@ -693,6 +693,108 @@ fn status_reports_latest_service_once_and_keeps_run_history() {
 }
 
 #[test]
+fn clean_dry_run_reports_without_removing_stopped_entries() {
+    let registry_path = temp_registry_path("clean-dry-run");
+    let run_output = bindport_with_registry(&registry_path)
+        .args(["--", "sh", "-c", "printf clean"])
+        .output()
+        .expect("run bindport");
+
+    assert!(run_output.status.success());
+
+    let dry_run = bindport_with_registry(&registry_path)
+        .args(["clean", "--dry-run", "--json"])
+        .output()
+        .expect("run bindport clean dry-run");
+
+    assert!(
+        dry_run.status.success(),
+        "clean dry-run failed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+
+    let report = serde_json::from_slice::<Value>(&dry_run.stdout).expect("clean json");
+    assert_eq!(report["dry_run"], true);
+    assert_eq!(report["leases"], 1);
+    assert_eq!(report["runs"], 1);
+    assert_eq!(report["states"]["stopped"], 1);
+    assert_eq!(report["states"]["stale"], 0);
+
+    let status_after_dry_run = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status =
+        serde_json::from_slice::<Value>(&status_after_dry_run.stdout).expect("status json");
+    assert_eq!(status["services"].as_array().expect("services").len(), 1);
+    assert_eq!(status["runs"].as_array().expect("runs").len(), 1);
+
+    let clean = bindport_with_registry(&registry_path)
+        .args(["clean", "--json"])
+        .output()
+        .expect("run bindport clean");
+
+    assert!(
+        clean.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+
+    let report = serde_json::from_slice::<Value>(&clean.stdout).expect("clean json");
+    assert_eq!(report["dry_run"], false);
+    assert_eq!(report["leases"], 1);
+    assert_eq!(report["runs"], 1);
+
+    let status_after_clean = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_after_clean.stdout).expect("status json");
+    assert_eq!(status["services"].as_array().expect("services").len(), 0);
+    assert_eq!(status["runs"].as_array().expect("runs").len(), 0);
+}
+
+#[test]
+fn clean_keeps_active_entries() {
+    let registry_path = temp_registry_path("clean-keeps-active");
+    let run_output = bindport_with_registry(&registry_path)
+        .args(["--", "sh", "-c", "printf clean"])
+        .output()
+        .expect("run bindport");
+
+    assert!(run_output.status.success());
+    reserve_registry_port(&registry_path, 29_501);
+
+    let clean = bindport_with_registry(&registry_path)
+        .args(["clean", "--json"])
+        .output()
+        .expect("run bindport clean");
+
+    assert!(
+        clean.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+
+    let report = serde_json::from_slice::<Value>(&clean.stdout).expect("clean json");
+    assert_eq!(report["leases"], 1);
+    assert_eq!(report["states"]["stopped"], 1);
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    let runs = status["runs"].as_array().expect("runs");
+
+    assert_eq!(services.len(), 1);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(services[0]["state"], "active");
+    assert_eq!(services[0]["port"], 29_501);
+}
+
+#[test]
 fn runner_reuses_previous_identity_port_when_available() {
     let registry_path = temp_registry_path("sticky-registry");
     let root = temp_test_dir("sticky-root");

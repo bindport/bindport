@@ -34,6 +34,8 @@ The current release includes:
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
+- `bindport clean` registry cleanup for stopped and stale entries, with dry-run
+  and JSON output options.
 - MIT license, security policy, third-party notices stub, CI/audit/release
   workflows, and local `mise` tasks.
 - npm wrapper package skeleton. It is not published yet because native binary
@@ -67,6 +69,7 @@ cargo run -p bindport -- --help
 cargo run -p bindport -- doctor
 cargo run -p bindport -- init
 cargo run -p bindport -- status --json
+cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
@@ -122,6 +125,19 @@ Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
 `BINDPORT_PROJECT` / `BINDPORT_SERVICE`, then config, then inference from
 `package.json`, the git worktree path, and command name.
+
+## Registry Cleanup
+
+Stopped and stale entries can be removed from the local registry with:
+
+```sh
+bindport clean --dry-run
+bindport clean
+```
+
+`bindport clean` removes stopped and stale entries by default. Use `--stopped`
+or `--stale` to scope cleanup, and `--json` for machine-readable counts. Active
+services are not removed.
 
 ## Documentation
 

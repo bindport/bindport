@@ -81,6 +81,9 @@ port when the wrapped child fails immediately and the assigned port is then
 occupied. `bindport doctor` reports obvious registry and OS-listener conflicts,
 but not full process ownership diagnostics. Do not claim full process conflict
 diagnostics work until that slice is implemented and verified.
+`bindport clean` removes stopped and stale registry entries, supports
+`--dry-run`, `--stopped`, `--stale`, and `--json`, and never removes active
+entries.
 
 `bindport dashboard` provides a read-only registry dashboard with foreground
 `serve` and background `start` / `status` / `stop` controls. It binds
