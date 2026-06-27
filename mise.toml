@@ -24,6 +24,10 @@ run = "cargo fmt --all -- --check"
 description = "Run Rust lints"
 run = "cargo clippy --all-targets -- -D warnings"
 
+[tasks.platform-guard]
+description = "Catch platform-cfg patterns Linux clippy misses"
+run = "python3 scripts/check-platform-cfg-guards.py"
+
 [tasks.test]
 description = "Run all Rust tests"
 run = "cargo test --all-targets"
@@ -176,6 +180,7 @@ description = "Run the main local CI checks"
 depends = [
     "fmt",
     "clippy",
+    "platform-guard",
     "workflow-lint",
     "audit",
     "dependency-guard",

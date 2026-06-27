@@ -372,15 +372,15 @@ fn dashboard_start_passes_cli_token_outside_child_argv() {
     );
     let stdout = String::from_utf8_lossy(&start.stdout);
     assert!(stdout.contains("dashboard started:"));
-    let pid = stdout
-        .split_whitespace()
-        .last()
-        .expect("dashboard pid")
-        .parse::<u32>()
-        .expect("dashboard pid is numeric");
 
     #[cfg(target_os = "linux")]
     {
+        let pid = stdout
+            .split_whitespace()
+            .last()
+            .expect("dashboard pid")
+            .parse::<u32>()
+            .expect("dashboard pid is numeric");
         let cmdline =
             fs::read(Path::new("/proc").join(pid.to_string()).join("cmdline")).expect("cmdline");
         assert!(
