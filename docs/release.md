@@ -40,7 +40,7 @@ without adding a real Next.js dependency to the repository.
 
 `status --json` exposes route-oriented fields (`hostname`, `route_url`, and
 `proxy`) as `null` until the Traefik adapter begins rendering routes. That keeps
-the v0.1 agent-facing shape explicit without claiming v0.2 proxy behavior.
+the v0.1 agent-facing shape explicit without claiming future proxy behavior.
 
 ## Local Release Checks
 

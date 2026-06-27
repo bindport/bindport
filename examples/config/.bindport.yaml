@@ -12,6 +12,15 @@ skip_ports:
   - 29901
   - 29920
   - 29999
+dashboard:
+  host: 127.0.0.1
+  port: 27080
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+  auth:
+    required: false
+    token_env: BINDPORT_DASHBOARD_TOKEN
 identity:
   strategy: git-worktree
 services:

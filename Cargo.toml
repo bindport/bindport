@@ -5,6 +5,7 @@ members = [
     "crates/bindport",
     "crates/bindport-adapters",
     "crates/bindport-core",
+    "crates/bindport-dashboard",
     "crates/bindport-registry",
     "crates/bindport-runner",
 ]
@@ -21,6 +22,7 @@ readme = "README.md"
 [workspace.dependencies]
 bindport-adapters = { path = "crates/bindport-adapters", version = "0.1.0" }
 bindport-core = { path = "crates/bindport-core", version = "0.1.0" }
+bindport-dashboard = { path = "crates/bindport-dashboard", version = "0.1.0" }
 bindport-registry = { path = "crates/bindport-registry", version = "0.1.0" }
 bindport-runner = { path = "crates/bindport-runner", version = "0.1.0" }
 libc = "0.2.186"
