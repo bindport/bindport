@@ -185,11 +185,18 @@ The same workflows are available through `mise`:
 
 ```sh
 mise run dev-dashboard
-mise run dev-dashboard-watch
+mise run dev-dashboard-static
 BINDPORT_DASHBOARD_TOKEN="change-me" mise run dev-dashboard-remote
+BINDPORT_DASHBOARD_TOKEN="change-me" mise run dev-dashboard-remote-static
 ```
 
-`dev-dashboard` serves local static assets from disk. `dev-dashboard-watch`
-also restarts the Rust dashboard process when Cargo files or crate sources
-change. `dev-dashboard-remote` binds `0.0.0.0`, requires token auth, and serves
-the same static assets from disk for testing from a remote browser.
+`dev-dashboard` serves local static assets from disk and restarts the Rust
+dashboard process when Cargo files or Rust crate sources change. Static asset
+changes still use the lightweight browser reload loop and do not need a server
+restart. `dev-dashboard-static` keeps the previous static-asset-only behavior
+when you want to restart the Rust server manually.
+
+`dev-dashboard-remote` binds `0.0.0.0`, requires token auth, serves the same
+static assets from disk for testing from a remote browser, and restarts on Rust
+server changes. Use `dev-dashboard-remote-static` when you need the remote
+dashboard without Rust server restarts.
