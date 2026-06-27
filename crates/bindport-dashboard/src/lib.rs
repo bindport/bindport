@@ -11,13 +11,14 @@ use std::{
 };
 
 use bindport_core::{DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, PortRange};
-use bindport_registry::Registry;
+use bindport_registry::{CleanState, CleanSummary, Registry};
 
 pub const DEFAULT_DASHBOARD_PORT: u16 = 27_080;
 const DASHBOARD_APP_NAME: &str = "BindPort";
 const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
 const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
+const DASHBOARD_ACTION_HEADER: &str = "X-BindPort-Dashboard-Action";
 
 #[derive(Debug, Clone)]
 pub struct DashboardOptions {
@@ -225,6 +226,7 @@ struct HttpRequest {
     path: String,
     host: Option<String>,
     authorization: Option<String>,
+    dashboard_action: Option<String>,
 }
 
 fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
@@ -236,6 +238,7 @@ fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
 
     let mut host = None;
     let mut authorization = None;
+    let mut dashboard_action = None;
     let mut header_bytes = 0;
     loop {
         let header = read_limited_line(&mut reader, MAX_HEADER_LINE_BYTES)?;
@@ -259,6 +262,12 @@ fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
         {
             authorization = Some(value.trim().to_string());
         }
+        if let Some((name, value)) = header.trim_end().split_once(':')
+            && name.eq_ignore_ascii_case(DASHBOARD_ACTION_HEADER)
+            && dashboard_action.is_none()
+        {
+            dashboard_action = Some(value.trim().to_string());
+        }
     }
 
     let mut parts = request_line.split_whitespace();
@@ -274,6 +283,7 @@ fn read_request(stream: &TcpStream) -> io::Result<Option<HttpRequest>> {
         path: path.to_string(),
         host,
         authorization,
+        dashboard_action,
     }))
 }
 
@@ -318,32 +328,62 @@ fn response_for_request(request: &HttpRequest, options: &DashboardOptions) -> Ht
         return HttpResponse::forbidden();
     }
 
-    match request_path(request) {
-        Some("/") => dashboard_index_response(options),
-        Some("/assets/app.css") => {
+    match request_route(request) {
+        Some(Route::Index) => dashboard_index_response(options),
+        Some(Route::Css) => {
             static_asset_response("app.css", APP_CSS, "text/css; charset=utf-8", options)
         }
-        Some("/assets/app.js") => {
+        Some(Route::Js) => {
             static_asset_response("app.js", APP_JS, "text/javascript; charset=utf-8", options)
         }
         #[cfg(debug_assertions)]
-        Some("/assets/dev-reload.js") => static_asset_response(
+        Some(Route::DevReload) => static_asset_response(
             "dev-reload.js",
             DEV_RELOAD_JS,
             "text/javascript; charset=utf-8",
             options,
         ),
         #[cfg(debug_assertions)]
-        Some("/assets/dev-version") => dev_version_response(options),
-        Some("/api/status") if request_authorized(request, options) => status_response(),
-        Some("/api/status") => HttpResponse::unauthorized(),
-        Some("/healthz") => HttpResponse::ok("text/plain; charset=utf-8", "ok\n"),
+        Some(Route::DevVersion) => dev_version_response(options),
+        Some(Route::Status) if request_authorized(request, options) => status_response(),
+        Some(Route::Status) => HttpResponse::unauthorized(),
+        Some(Route::Clean(states)) => clean_response(request, options, &states),
+        Some(Route::Health) => HttpResponse::ok("text/plain; charset=utf-8", "ok\n"),
         _ => HttpResponse::not_found(),
     }
 }
 
-fn request_path(request: &HttpRequest) -> Option<&str> {
-    (request.method == "GET").then_some(request.path.as_str())
+enum Route {
+    Index,
+    Css,
+    Js,
+    #[cfg(debug_assertions)]
+    DevReload,
+    #[cfg(debug_assertions)]
+    DevVersion,
+    Status,
+    Clean(Vec<CleanState>),
+    Health,
+}
+
+fn request_route(request: &HttpRequest) -> Option<Route> {
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/") => Some(Route::Index),
+        ("GET", "/assets/app.css") => Some(Route::Css),
+        ("GET", "/assets/app.js") => Some(Route::Js),
+        #[cfg(debug_assertions)]
+        ("GET", "/assets/dev-reload.js") => Some(Route::DevReload),
+        #[cfg(debug_assertions)]
+        ("GET", "/assets/dev-version") => Some(Route::DevVersion),
+        ("GET", "/api/status") => Some(Route::Status),
+        ("POST", "/api/clean" | "/api/clean/all") => {
+            Some(Route::Clean(vec![CleanState::Stopped, CleanState::Stale]))
+        }
+        ("POST", "/api/clean/stopped") => Some(Route::Clean(vec![CleanState::Stopped])),
+        ("POST", "/api/clean/stale") => Some(Route::Clean(vec![CleanState::Stale])),
+        ("GET", "/healthz") => Some(Route::Health),
+        _ => None,
+    }
 }
 
 fn host_allowed(host: Option<&str>, options: &DashboardOptions) -> bool {
@@ -388,6 +428,44 @@ fn status_response() -> HttpResponse {
     }
 }
 
+fn clean_response(
+    request: &HttpRequest,
+    options: &DashboardOptions,
+    states: &[CleanState],
+) -> HttpResponse {
+    if !request_authorized(request, options) {
+        return HttpResponse::unauthorized();
+    }
+    if !request_dashboard_action(request, "clean") {
+        return HttpResponse::bad_json_request(&json_error_body(format!(
+            "{DASHBOARD_ACTION_HEADER}: clean is required"
+        )));
+    }
+
+    match Registry::open_default().and_then(|mut registry| registry.clean_leases(states, false)) {
+        Ok(summary) => match serde_json::to_string_pretty(&clean_summary_json(summary)) {
+            Ok(json) => HttpResponse::ok("application/json; charset=utf-8", &json),
+            Err(error) => HttpResponse::internal_error(&json_error_body(format!(
+                "failed to serialize clean JSON: {error}"
+            ))),
+        },
+        Err(error) => HttpResponse::service_unavailable(&json_error_body(format!(
+            "registry unavailable: {error}"
+        ))),
+    }
+}
+
+fn clean_summary_json(summary: CleanSummary) -> serde_json::Value {
+    serde_json::json!({
+        "leases": summary.total_leases(),
+        "runs": summary.runs,
+        "states": {
+            "stopped": summary.stopped_leases,
+            "stale": summary.stale_leases,
+        },
+    })
+}
+
 fn json_error_body(message: String) -> String {
     format!("{}\n", serde_json::json!({ "error": message }))
 }
@@ -409,6 +487,13 @@ fn request_authorized(request: &HttpRequest, options: &DashboardOptions) -> bool
     };
 
     constant_time_eq(actual.as_bytes(), expected.as_bytes())
+}
+
+fn request_dashboard_action(request: &HttpRequest, expected: &str) -> bool {
+    request
+        .dashboard_action
+        .as_deref()
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
 }
 
 fn authorization_bearer_token(value: &str) -> Option<&str> {
@@ -577,6 +662,14 @@ impl HttpResponse {
         }
     }
 
+    fn bad_json_request(body: &str) -> Self {
+        Self {
+            status: "400 Bad Request",
+            content_type: "application/json; charset=utf-8",
+            body: body.to_string(),
+        }
+    }
+
     fn forbidden() -> Self {
         Self {
             status: "403 Forbidden",
@@ -656,6 +749,7 @@ mod tests {
         assert!(text.contains("service-search"));
         assert!(text.contains("data-state-filter=\"active\""));
         assert!(text.contains("auth-token"));
+        assert!(text.contains("action-status"));
         assert!(text.contains("app-footer"));
         assert!(text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
         assert!(!text.contains("{{APP_VERSION}}"));
@@ -676,6 +770,8 @@ mod tests {
         assert!(js.contains("text/javascript"));
         assert!(js.contains("REFRESH_INTERVAL_MS = 5000"));
         assert!(js.contains("refreshStatus"));
+        assert!(js.contains("/api/clean/"));
+        assert!(js.contains("data-clean-state"));
         assert!(js.contains("No services match the current filters."));
     }
 
@@ -697,6 +793,7 @@ mod tests {
                 path: String::from("/api/status"),
                 host: Some(String::from("example.com:27080")),
                 authorization: None,
+                dashboard_action: None,
             },
             &options,
         );
@@ -739,6 +836,49 @@ mod tests {
             ..DashboardOptions::default()
         };
         let response = response_for_request(&test_request("/api/status"), &options);
+        let text = String::from_utf8(response.into_bytes()).expect("response utf8");
+
+        assert!(text.starts_with("HTTP/1.1 401 Unauthorized"));
+    }
+
+    #[test]
+    fn clean_rejects_missing_dashboard_action_header() {
+        let options = DashboardOptions::default();
+        let response = response_for_request(
+            &HttpRequest {
+                method: String::from("POST"),
+                path: String::from("/api/clean/stopped"),
+                host: Some(String::from("127.0.0.1:27080")),
+                authorization: None,
+                dashboard_action: None,
+            },
+            &options,
+        );
+        let text = String::from_utf8(response.into_bytes()).expect("response utf8");
+
+        assert!(text.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(text.contains(DASHBOARD_ACTION_HEADER));
+    }
+
+    #[test]
+    fn clean_requires_auth_when_auth_is_enabled() {
+        let options = DashboardOptions {
+            auth: DashboardAuth {
+                required: true,
+                token: Some(String::from("secret")),
+            },
+            ..DashboardOptions::default()
+        };
+        let response = response_for_request(
+            &HttpRequest {
+                method: String::from("POST"),
+                path: String::from("/api/clean/stopped"),
+                host: Some(String::from("127.0.0.1:27080")),
+                authorization: None,
+                dashboard_action: Some(String::from("clean")),
+            },
+            &options,
+        );
         let text = String::from_utf8(response.into_bytes()).expect("response utf8");
 
         assert!(text.starts_with("HTTP/1.1 401 Unauthorized"));
@@ -798,6 +938,7 @@ mod tests {
             path: path.to_string(),
             host: Some(String::from("127.0.0.1:27080")),
             authorization: None,
+            dashboard_action: None,
         }
     }
 }

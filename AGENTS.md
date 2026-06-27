@@ -85,11 +85,12 @@ diagnostics work until that slice is implemented and verified.
 `--dry-run`, `--stopped`, `--stale`, and `--json`, and never removes active
 entries.
 
-`bindport dashboard` provides a read-only registry dashboard with foreground
-`serve` and background `start` / `status` / `stop` controls. It binds
-`127.0.0.1:27080` by default, supports configurable host/port/static assets,
-and requires token auth for non-loopback binds. Do not describe the dashboard as
-having write actions or service cleanup controls.
+`bindport dashboard` provides a registry dashboard with foreground `serve` and
+background `start` / `status` / `stop` controls. It binds `127.0.0.1:27080` by
+default, supports configurable host/port/static assets, requires token auth for
+non-loopback binds, and exposes dashboard write actions only for stopped/stale
+registry cleanup. Do not describe the dashboard as able to run, reserve, release,
+start, or stop wrapped services.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.

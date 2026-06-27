@@ -1,5 +1,6 @@
 const content = document.getElementById("content");
 const generatedAt = document.getElementById("generated-at");
+const actionStatus = document.getElementById("action-status");
 const serviceSearch = document.getElementById("service-search");
 const stateFilterButtons = Array.from(document.querySelectorAll("[data-state-filter]"));
 const authPanel = document.getElementById("auth-panel");
@@ -8,6 +9,7 @@ const authToken = document.getElementById("auth-token");
 const tokenLogout = document.getElementById("token-logout");
 const REFRESH_INTERVAL_MS = 5000;
 const TOKEN_STORAGE_KEY = "bindport.dashboard.token";
+const CLEAN_ACTION_HEADER = "X-BindPort-Dashboard-Action";
 const HTML_ESCAPES = {
   "&": "&amp;",
   "<": "&lt;",
@@ -34,7 +36,8 @@ const ICONS = {
   chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>',
   copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
   external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
-  lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+  lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>'
 };
 
 tokenLogout.innerHTML = ICONS.lock;
@@ -66,6 +69,15 @@ function stateKey(service) {
   return ["active", "stopped", "stale"].includes(state) ? state : "other";
 }
 
+function stateLabel(state) {
+  return groups.find((group) => group.key === state)?.label.toLowerCase() || state;
+}
+
+function stateCount(state) {
+  if (!lastSnapshot) return 0;
+  return (lastSnapshot.services || []).filter((service) => stateKey(service) === state).length;
+}
+
 function groupServices(services) {
   const grouped = Object.fromEntries(groups.map((group) => [group.key, []]));
   for (const service of services) {
@@ -89,6 +101,12 @@ function formatTime(date) {
 function setRefreshMeta(message, failed = false) {
   generatedAt.className = failed ? "meta meta-error" : "meta";
   generatedAt.textContent = message;
+}
+
+function setActionStatus(message, failed = false) {
+  actionStatus.className = failed ? "action-status action-status-error" : "action-status";
+  actionStatus.textContent = message;
+  actionStatus.hidden = !message;
 }
 
 function setDashboardToken(token) {
@@ -261,10 +279,16 @@ function renderServiceRow(service) {
 
 function renderGroup(group, services) {
   if (services.length === 0) return "";
+  const cleanup = ["stopped", "stale"].includes(group.key)
+    ? `<button class="icon-button group-action-button" type="button" data-clean-state="${group.key}" aria-label="Remove ${group.label} entries" title="Remove ${group.label} entries">${ICONS.trash}</button>`
+    : "";
   return `<section class="service-group" aria-labelledby="group-${group.key}">
     <div class="group-heading">
       <h2 id="group-${group.key}">${group.label}</h2>
-      <span class="group-count">${services.length}</span>
+      <div class="group-actions">
+        <span class="group-count">${services.length}</span>
+        ${cleanup}
+      </div>
     </div>
     <div class="table-wrap">
       <table>
@@ -379,6 +403,12 @@ content.addEventListener("click", async (event) => {
     return;
   }
 
+  const cleanButton = event.target.closest("[data-clean-state]");
+  if (cleanButton) {
+    await cleanRegistryEntries(cleanButton.dataset.cleanState, cleanButton);
+    return;
+  }
+
   const button = event.target.closest("[data-copy-url]");
   if (!button) return;
 
@@ -400,6 +430,54 @@ content.addEventListener("click", async (event) => {
   }
   resetCopyButton(button, previous);
 });
+
+async function cleanRegistryEntries(state, button) {
+  const count = stateCount(state);
+  const label = stateLabel(state);
+  if (count === 0 || !window.confirm(`Remove ${count} ${label} registry entries?`)) {
+    return;
+  }
+
+  const previous = {
+    html: button.innerHTML,
+    label: button.getAttribute("aria-label"),
+    title: button.getAttribute("title")
+  };
+  button.disabled = true;
+  setActionStatus("");
+
+  try {
+    const headers = {
+      [CLEAN_ACTION_HEADER]: "clean"
+    };
+    if (dashboardToken) {
+      headers.Authorization = `Bearer ${dashboardToken}`;
+    }
+    const response = await fetch(`/api/clean/${state}`, {
+      cache: "no-store",
+      headers,
+      method: "POST"
+    });
+    if (!response.ok) {
+      const error = new Error(`clean failed with status ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+
+    const result = await response.json();
+    button.innerHTML = ICONS.check;
+    setActionStatus(`Removed ${result.leases} registry entries`);
+    await refreshStatus();
+  } catch (error) {
+    if (error.status === 401) {
+      authPanel.hidden = false;
+    }
+    button.innerHTML = ICONS.alert;
+    setActionStatus(error.message, true);
+  } finally {
+    resetCopyButton(button, previous);
+  }
+}
 
 serviceSearch.addEventListener("input", () => {
   searchQuery = serviceSearch.value.trim().toLowerCase();

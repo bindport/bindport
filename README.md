@@ -141,9 +141,9 @@ services are not removed.
 
 ## Documentation
 
-- [Dashboard](docs/dashboard.md): local read-only service dashboard, status API,
-  service-style controls, configurable bind/auth options, dev modes, and
-  security posture.
+- [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
+  registry cleanup actions, service-style controls, configurable bind/auth
+  options, dev modes, and security posture.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 
