@@ -41,15 +41,54 @@ description = "Build the release binary"
 run = "cargo build --release --locked"
 
 [tasks.dev-dashboard]
-description = "Run the dashboard with local static assets"
+description = "Run the dashboard with local assets and restart on Rust changes"
+run = "BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static watchexec --restart --clear --watch Cargo.toml --watch Cargo.lock --watch crates/bindport/Cargo.toml --watch crates/bindport/src --watch crates/bindport-adapters/Cargo.toml --watch crates/bindport-adapters/src --watch crates/bindport-core/Cargo.toml --watch crates/bindport-core/src --watch crates/bindport-dashboard/Cargo.toml --watch crates/bindport-dashboard/src --watch crates/bindport-registry/Cargo.toml --watch crates/bindport-registry/src --watch crates/bindport-runner/Cargo.toml --watch crates/bindport-runner/src -- cargo run -p bindport -- dashboard serve --static-dir crates/bindport-dashboard/static"
+
+[tasks.dev-dashboard-static]
+description = "Run the dashboard with static asset reload only"
 run = "BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static cargo run -p bindport -- dashboard serve --static-dir crates/bindport-dashboard/static"
 
 [tasks.dev-dashboard-watch]
-description = "Restart the dashboard when Rust sources change"
-run = "BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static watchexec --restart --clear --watch Cargo.toml --watch Cargo.lock --watch crates -- cargo run -p bindport -- dashboard serve --static-dir crates/bindport-dashboard/static"
+description = "Alias for dev-dashboard"
+run = "mise run dev-dashboard"
 
 [tasks.dev-dashboard-remote]
-description = "Run a remotely reachable dashboard with token auth"
+description = "Run a remotely reachable dashboard with token auth and Rust restarts"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${BINDPORT_DASHBOARD_TOKEN:-}" ]]; then
+  echo "set BINDPORT_DASHBOARD_TOKEN before running remote dashboard dev" >&2
+  exit 1
+fi
+
+BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static \
+  watchexec --restart --clear \
+    --watch Cargo.toml \
+    --watch Cargo.lock \
+    --watch crates/bindport/Cargo.toml \
+    --watch crates/bindport/src \
+    --watch crates/bindport-adapters/Cargo.toml \
+    --watch crates/bindport-adapters/src \
+    --watch crates/bindport-core/Cargo.toml \
+    --watch crates/bindport-core/src \
+    --watch crates/bindport-dashboard/Cargo.toml \
+    --watch crates/bindport-dashboard/src \
+    --watch crates/bindport-registry/Cargo.toml \
+    --watch crates/bindport-registry/src \
+    --watch crates/bindport-runner/Cargo.toml \
+    --watch crates/bindport-runner/src \
+    -- \
+  cargo run -p bindport -- dashboard serve \
+    --host 0.0.0.0 \
+    --auth required \
+    --token-env BINDPORT_DASHBOARD_TOKEN \
+    --static-dir crates/bindport-dashboard/static
+'''
+
+[tasks.dev-dashboard-remote-static]
+description = "Run a remotely reachable dashboard without Rust restarts"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail

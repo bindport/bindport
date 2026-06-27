@@ -68,8 +68,8 @@ Don't mutate state outside the working tree without being told to.
 - Format check: `cargo fmt --all -- --check`
 - Type check: `cargo check --all-targets`
 - Full local CI: `mise run ci`
-- Dashboard dev: `mise run dev-dashboard`
-- Dashboard watch dev: `mise run dev-dashboard-watch`
+- Dashboard dev: `mise run dev-dashboard` (static reload plus Rust server restart)
+- Static-only dashboard dev: `mise run dev-dashboard-static`
 - Remote dashboard dev: set `BINDPORT_DASHBOARD_TOKEN`, then `mise run dev-dashboard-remote`
 
 `bindport -- <command>` currently performs probe-based port selection, child
