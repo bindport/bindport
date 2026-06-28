@@ -751,6 +751,7 @@ mod tests {
         assert!(text.contains("auth-token"));
         assert!(text.contains("action-status"));
         assert!(text.contains("app-footer"));
+        assert!(text.contains("data-state-filter=\"conflict\""));
         assert!(text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
         assert!(!text.contains("{{APP_VERSION}}"));
     }
@@ -766,12 +767,19 @@ mod tests {
         assert!(css.starts_with("HTTP/1.1 200 OK"));
         assert!(css.contains("text/css"));
         assert!(css.contains(".state-active"));
+        assert!(css.contains(".state-conflict"));
         assert!(js.starts_with("HTTP/1.1 200 OK"));
         assert!(js.contains("text/javascript"));
         assert!(js.contains("REFRESH_INTERVAL_MS = 5000"));
         assert!(js.contains("refreshStatus"));
         assert!(js.contains("/api/clean/"));
         assert!(js.contains("data-clean-state"));
+        assert!(js.contains("{ key: \"conflict\", label: \"Conflict\" }"));
+        assert!(js.contains("<dt>Port</dt>"));
+        assert!(js.contains("<dt>Health</dt>"));
+        assert!(js.contains("<dt>Proxy</dt>"));
+        assert!(js.contains("function proxyStatus(service)"));
+        assert!(js.contains("Not rendered"));
         assert!(js.contains("No services match the current filters."));
     }
 

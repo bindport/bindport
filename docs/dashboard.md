@@ -95,7 +95,7 @@ Stopped and stale groups include a cleanup action in the group header. Cleanup
 removes the matching stopped or stale registry entries and then refreshes the
 dashboard. Active services cannot be removed from the dashboard.
 
-Each row has an expand control for secondary details: state, PID, health,
+Each row has an expand control for secondary details: state, PID, port, health,
 proxy render status, current working directory, and command. Health is
 `unknown` until service health checks are implemented. Proxy status is
 `Not rendered` until a future proxy adapter renders routes. Expanded rows stay

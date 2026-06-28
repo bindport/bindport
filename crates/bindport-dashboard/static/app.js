@@ -143,6 +143,7 @@ function serviceSearchText(service) {
     service.state,
     service.project,
     service.service,
+    service.port,
     serviceUrl(service),
     service.worktree_path,
     service.branch_label,
@@ -259,6 +260,10 @@ function renderServiceDetails(service) {
     <div class="detail-item">
       <dt>PID</dt>
       <dd>${escapeHtml(service.pid)}</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Port</dt>
+      <dd>${escapeHtml(service.port)}</dd>
     </div>
     <div class="detail-item">
       <dt>Health</dt>
