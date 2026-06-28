@@ -31,6 +31,8 @@ The current release includes:
 - Basic project/service identity resolution from environment, config,
   `package.json`, command inference, and `bindport run <service> -- ...`, with
   git branch/worktree metadata recorded when available.
+- Service env templates for wrapped commands through `[[services]].env` and
+  `bindport run --env`, including route hostname metadata when configured.
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
@@ -72,6 +74,7 @@ cargo run -p bindport -- status --json
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
+cargo run -p bindport -- run web --env NEXT_PUBLIC_BINDPORT_URL='{route_url}' --hostname '{branch}.{project}.localhost' -- sh -c 'echo "$NEXT_PUBLIC_BINDPORT_URL"'
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
 ```
 
@@ -114,17 +117,41 @@ when `XDG_CONFIG_HOME` is unset. The registry database remains state at
 never required; missing config means built-in defaults are used.
 
 The current implementation reads top-level `project`, `service`,
-`default_range`, `skip_ports`, and the `[dashboard]` / `[dashboard.auth]`
-settings used by the local dashboard. Dashboard defaults are local-only
-(`127.0.0.1:27080`) with auth disabled; non-loopback dashboard binds require
-auth and a token. The example `identity`, `services`, and `proxy` sections
-document the intended future shape and are not applied yet; `bindport doctor`
-reports ignored top-level keys so typos and future-only sections are visible.
+`default_range`, `skip_ports`, `[[services]]` entries, and the `[dashboard]` /
+`[dashboard.auth]` settings used by the local dashboard. Dashboard defaults are
+local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard binds
+require auth and a token. Service entries currently apply `name`, `env`,
+`hostname`, and `route_url`. The example `identity`, `proxy`, and deeper
+service fields such as `command` and `health_url` document the intended future
+shape and are not applied yet; `bindport doctor` reports ignored top-level keys
+so typos and future-only sections are visible.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
 `BINDPORT_PROJECT` / `BINDPORT_SERVICE`, then config, then inference from
 `package.json`, the git worktree path, and command name.
+
+Wrapped commands always receive `PORT=<assigned>`. Service env templates can
+add more variables:
+
+```toml
+[[services]]
+name = "web"
+hostname = "{branch}.{project}.localhost"
+env.PORT = "{port}"
+env.HOSTNAME = "0.0.0.0"
+env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
+```
+
+Supported template placeholders are `{port}`, `{host}`, `{url}`, `{project}`,
+`{service}`, `{hostname}`, `{route_url}`, `{branch}`, `{branch_label}`,
+`{git_branch}`, `{worktree}`, `{worktree_label}`, and `{worktree_hash}`.
+Use `{{` and `}}` when a template value needs literal braces, for example a
+JSON-valued environment variable.
+`bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, and
+`--route-url TEMPLATE` override service config for a single run.
+`BINDPORT_HOSTNAME` and `BINDPORT_ROUTE_URL` can also override the matching
+service config values for wrapper scripts.
 
 ## Registry Cleanup
 

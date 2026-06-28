@@ -39,8 +39,9 @@ registry recording `next dev`. This proves package-manager script dispatch
 without adding a real Next.js dependency to the repository.
 
 `status --json` exposes route-oriented fields (`hostname`, `route_url`, and
-`proxy`) as `null` until the Traefik adapter begins rendering routes. That keeps
-the v0.1 agent-facing shape explicit without claiming future proxy behavior.
+`proxy`). Service config and run options can populate `hostname` and
+`route_url`; `proxy` remains `null` until the Traefik adapter begins rendering
+routes.
 
 ## Local Release Checks
 

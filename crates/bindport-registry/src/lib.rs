@@ -111,6 +111,8 @@ pub struct RunStart {
     pub identity: Option<ServiceIdentity>,
     pub host: String,
     pub port: u16,
+    pub hostname: Option<String>,
+    pub route_url: Option<String>,
     pub pid: u32,
     pub command: String,
     pub cwd: PathBuf,
@@ -331,10 +333,12 @@ impl Registry {
         transaction.execute(
             "INSERT INTO leases (
                 project, service, worktree_path, worktree_hash, git_common_dir,
-                branch, branch_label, git_commit, identity_key, port, host, state,
+                branch, branch_label, git_commit, identity_key, port, host,
+                hostname, route_url, state,
                 allocated_at, last_seen_at
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12, ?12
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                'active', ?14, ?14
              )",
             params![
                 run.project,
@@ -348,6 +352,8 @@ impl Registry {
                 identity_key,
                 run.port,
                 run.host,
+                run.hostname,
+                run.route_url,
                 now
             ],
         )?;
@@ -487,6 +493,8 @@ impl Registry {
                 identity_key TEXT,
                 port INTEGER NOT NULL,
                 host TEXT NOT NULL,
+                hostname TEXT,
+                route_url TEXT,
                 state TEXT NOT NULL,
                 allocated_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
@@ -518,7 +526,7 @@ impl Registry {
             CREATE INDEX IF NOT EXISTS leases_identity_key_idx
             ON leases(identity_key);
 
-            PRAGMA user_version = 2;
+            PRAGMA user_version = 3;
             ",
         )?;
 
@@ -536,6 +544,8 @@ impl Registry {
             ("branch_label", "TEXT"),
             ("git_commit", "TEXT"),
             ("identity_key", "TEXT"),
+            ("hostname", "TEXT"),
+            ("route_url", "TEXT"),
         ] {
             if !existing.iter().any(|existing| existing == column) {
                 self.connection.execute(
@@ -589,6 +599,8 @@ impl Registry {
                 leases.branch_label,
                 leases.git_commit,
                 leases.identity_key,
+                leases.hostname,
+                leases.route_url,
                 runs.pid,
                 runs.command,
                 runs.cwd,
@@ -627,8 +639,6 @@ impl Registry {
                 port,
                 url: format!("http://{host}:{port}"),
                 host,
-                hostname: None,
-                route_url: None,
                 worktree_path: row.get(5)?,
                 worktree_hash: row.get(6)?,
                 git_common_dir: row.get(7)?,
@@ -636,12 +646,14 @@ impl Registry {
                 branch_label: row.get(9)?,
                 commit: row.get(10)?,
                 identity_key: row.get(11)?,
-                pid: row.get(12)?,
-                command: row.get(13)?,
-                cwd: row.get(14)?,
-                started_at: row.get(15)?,
-                exited_at: row.get(16)?,
-                exit_code: row.get(17)?,
+                hostname: row.get(12)?,
+                route_url: row.get(13)?,
+                pid: row.get(14)?,
+                command: row.get(15)?,
+                cwd: row.get(16)?,
+                started_at: row.get(17)?,
+                exited_at: row.get(18)?,
+                exit_code: row.get(19)?,
                 health: String::from("unknown"),
                 proxy: None,
             })
@@ -709,6 +721,21 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn test_run_start(project: &str, service: &str, port: u16, pid: u32) -> RunStart {
+        RunStart {
+            project: String::from(project),
+            service: String::from(service),
+            identity: None,
+            host: String::from("127.0.0.1"),
+            port,
+            hostname: None,
+            route_url: None,
+            pid,
+            command: String::from("next dev"),
+            cwd: PathBuf::from("/tmp/bindport"),
+        }
+    }
+
     #[test]
     fn registry_defaults_are_named_for_bindport() {
         assert_eq!(default_registry_directory_name(), "bindport");
@@ -719,16 +746,7 @@ mod tests {
     fn registry_records_finished_runs_for_status() {
         let mut registry = Registry::open(temp_registry_path("finished")).expect("registry");
         let started = registry
-            .record_run_started(&RunStart {
-                project: String::from("bindport"),
-                service: String::from("next"),
-                identity: None,
-                host: String::from("127.0.0.1"),
-                port: 29_123,
-                pid: 12_345,
-                command: String::from("next dev"),
-                cwd: PathBuf::from("/tmp/bindport"),
-            })
+            .record_run_started(&test_run_start("bindport", "next", 29_123, 12_345))
             .expect("record start");
 
         registry
@@ -752,16 +770,7 @@ mod tests {
     fn clean_leases_dry_run_counts_without_deleting_stopped_runs() {
         let mut registry = Registry::open(temp_registry_path("clean-dry-run")).expect("registry");
         let started = registry
-            .record_run_started(&RunStart {
-                project: String::from("bindport"),
-                service: String::from("next"),
-                identity: None,
-                host: String::from("127.0.0.1"),
-                port: 29_123,
-                pid: 12_345,
-                command: String::from("next dev"),
-                cwd: PathBuf::from("/tmp/bindport"),
-            })
+            .record_run_started(&test_run_start("bindport", "next", 29_123, 12_345))
             .expect("record start");
 
         registry
@@ -786,16 +795,7 @@ mod tests {
     fn clean_leases_removes_stopped_runs() {
         let mut registry = Registry::open(temp_registry_path("clean-stopped")).expect("registry");
         let started = registry
-            .record_run_started(&RunStart {
-                project: String::from("bindport"),
-                service: String::from("next"),
-                identity: None,
-                host: String::from("127.0.0.1"),
-                port: 29_123,
-                pid: 12_345,
-                command: String::from("next dev"),
-                cwd: PathBuf::from("/tmp/bindport"),
-            })
+            .record_run_started(&test_run_start("bindport", "next", 29_123, 12_345))
             .expect("record start");
 
         registry
@@ -820,16 +820,7 @@ mod tests {
     fn clean_leases_reconciles_and_removes_stale_runs() {
         let mut registry = Registry::open(temp_registry_path("clean-stale")).expect("registry");
         registry
-            .record_run_started(&RunStart {
-                project: String::from("bindport"),
-                service: String::from("web"),
-                identity: None,
-                host: String::from("127.0.0.1"),
-                port: 29_500,
-                pid: 2_000_000_000,
-                command: String::from("next dev"),
-                cwd: PathBuf::from("/tmp/bindport"),
-            })
+            .record_run_started(&test_run_start("bindport", "web", 29_500, 2_000_000_000))
             .expect("record start");
 
         let summary = registry
@@ -868,6 +859,8 @@ mod tests {
                 identity: Some(identity),
                 host: String::from("127.0.0.1"),
                 port: 29_124,
+                hostname: Some(String::from("feature-tree.bindport.localhost")),
+                route_url: Some(String::from("http://feature-tree.bindport.localhost")),
                 pid: 12_346,
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport-worktree"),
@@ -890,6 +883,14 @@ mod tests {
         assert_eq!(service.branch_label.as_deref(), Some("feature-tree"));
         assert_eq!(service.commit.as_deref(), Some("1234567"));
         assert_eq!(service.identity_key.as_deref(), Some("v1:identity"));
+        assert_eq!(
+            service.hostname.as_deref(),
+            Some("feature-tree.bindport.localhost")
+        );
+        assert_eq!(
+            service.route_url.as_deref(),
+            Some("http://feature-tree.bindport.localhost")
+        );
     }
 
     #[test]
@@ -904,6 +905,8 @@ mod tests {
                 identity: Some(first_identity.clone()),
                 host: String::from("127.0.0.1"),
                 port: 29_123,
+                hostname: None,
+                route_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),
@@ -919,6 +922,8 @@ mod tests {
                 identity: Some(first_identity.clone()),
                 host: String::from("127.0.0.1"),
                 port: 29_124,
+                hostname: None,
+                route_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),
@@ -934,6 +939,8 @@ mod tests {
                 identity: Some(second_identity),
                 host: String::from("127.0.0.1"),
                 port: 29_125,
+                hostname: None,
+                route_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),
@@ -961,16 +968,12 @@ mod tests {
     fn active_ports_reports_active_and_reserved_leases() {
         let mut registry = Registry::open(temp_registry_path("active")).expect("registry");
         registry
-            .record_run_started(&RunStart {
-                project: String::from("bindport"),
-                service: String::from("web"),
-                identity: None,
-                host: String::from("127.0.0.1"),
-                port: 29_500,
-                pid: std::process::id(),
-                command: String::from("next dev"),
-                cwd: PathBuf::from("/tmp/bindport"),
-            })
+            .record_run_started(&test_run_start(
+                "bindport",
+                "web",
+                29_500,
+                std::process::id(),
+            ))
             .expect("record start");
 
         assert_eq!(registry.active_ports().expect("ports"), vec![29_500]);
@@ -981,16 +984,7 @@ mod tests {
     fn active_ports_marks_dead_pid_stale() {
         let mut registry = Registry::open(temp_registry_path("stale")).expect("registry");
         registry
-            .record_run_started(&RunStart {
-                project: String::from("bindport"),
-                service: String::from("web"),
-                identity: None,
-                host: String::from("127.0.0.1"),
-                port: 29_500,
-                pid: 2_000_000_000,
-                command: String::from("next dev"),
-                cwd: PathBuf::from("/tmp/bindport"),
-            })
+            .record_run_started(&test_run_start("bindport", "web", 29_500, 2_000_000_000))
             .expect("record start");
 
         assert!(registry.active_ports().expect("ports").is_empty());

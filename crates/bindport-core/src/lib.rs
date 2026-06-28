@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
+    collections::BTreeMap,
     fmt, fs, io,
     path::{Path, PathBuf},
     process::Command,
@@ -25,6 +26,7 @@ pub const APPLIED_CONFIG_KEYS: &[&str] = &[
     "service",
     "default_range",
     "skip_ports",
+    "services",
     "dashboard",
 ];
 pub const BINDPORT_PROJECT_ENV: &str = "BINDPORT_PROJECT";
@@ -65,7 +67,36 @@ pub struct BindPortConfig {
     pub service: Option<String>,
     pub default_range: Option<String>,
     pub skip_ports: Option<Vec<u16>>,
+    pub services: Option<Vec<ServiceConfig>>,
     pub dashboard: Option<DashboardConfig>,
+}
+
+impl BindPortConfig {
+    pub fn configured_service_name(&self) -> Option<&str> {
+        self.service.as_deref().or(match self.services.as_deref() {
+            Some([service]) => service.name.as_deref(),
+            _ => None,
+        })
+    }
+
+    pub fn service_config(&self, service_name: &str) -> Option<&ServiceConfig> {
+        self.services.as_deref()?.iter().find(|service| {
+            service
+                .name
+                .as_deref()
+                .is_some_and(|name| name == service_name)
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ServiceConfig {
+    pub name: Option<String>,
+    pub command: Option<String>,
+    pub env: Option<BTreeMap<String, String>>,
+    pub hostname: Option<String>,
+    pub route_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -743,32 +774,46 @@ mod tests {
     fn parses_config_formats() {
         let toml = parse_config(
             ConfigFormat::Toml,
-            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n",
+            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\nhostname = \"{branch}.{project}.localhost\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
         )
         .expect("toml config");
         let json = parse_config(
             ConfigFormat::Json,
-            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}}}"#,
+            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","hostname":"{branch}.{project}.localhost","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
         )
         .expect("json config");
         let yaml = parse_config(
             ConfigFormat::Yaml,
-            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\n",
+            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    hostname: \"{branch}.{project}.localhost\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
         )
         .expect("yaml config");
 
         assert_eq!(toml, json);
         assert_eq!(json, yaml);
-        let dashboard = toml.dashboard.expect("dashboard config");
+        let dashboard = toml.dashboard.as_ref().expect("dashboard config");
         assert_eq!(dashboard.host.as_deref(), Some("127.0.0.1"));
         assert_eq!(dashboard.port, Some(27_080));
         assert_eq!(
             dashboard.allowed_hosts,
             Some(vec![String::from("localhost")])
         );
-        let auth = dashboard.auth.expect("dashboard auth");
+        let auth = dashboard.auth.as_ref().expect("dashboard auth");
         assert_eq!(auth.required, Some(true));
         assert_eq!(auth.token_env.as_deref(), Some("BINDPORT_DASHBOARD_TOKEN"));
+        let service = toml.service_config("web").expect("service config by name");
+        assert_eq!(
+            service.hostname.as_deref(),
+            Some("{branch}.{project}.localhost")
+        );
+        assert_eq!(
+            service
+                .env
+                .as_ref()
+                .and_then(|env| env.get("NEXT_PUBLIC_BINDPORT_URL"))
+                .map(String::as_str),
+            Some("{route_url}")
+        );
+        assert_eq!(toml.configured_service_name(), Some("web"));
     }
 
     #[test]

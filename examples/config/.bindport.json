@@ -20,7 +20,9 @@
       "name": "web",
       "command": "next dev",
       "env": {
-        "PORT": "{port}"
+        "PORT": "{port}",
+        "HOSTNAME": "0.0.0.0",
+        "NEXT_PUBLIC_BINDPORT_URL": "{route_url}"
       },
       "hostname": "{branch}.{project}.localhost",
       "health_url": "http://127.0.0.1:{port}/"
