@@ -28,6 +28,7 @@ const groups = [
   { key: "active", label: "Active" },
   { key: "stopped", label: "Stopped" },
   { key: "stale", label: "Stale" },
+  { key: "conflict", label: "Conflict" },
   { key: "other", label: "Other" }
 ];
 const ICONS = {
@@ -66,7 +67,7 @@ function safeLink(value) {
 
 function stateKey(service) {
   const state = text(service.state).toLowerCase();
-  return ["active", "stopped", "stale"].includes(state) ? state : "other";
+  return ["active", "stopped", "stale", "conflict"].includes(state) ? state : "other";
 }
 
 function stateLabel(state) {
@@ -148,7 +149,9 @@ function serviceSearchText(service) {
     service.branch,
     service.pid,
     service.command,
-    service.cwd
+    service.cwd,
+    service.health,
+    proxyStatus(service)
   ].map(text).join(" ").toLowerCase();
 }
 
@@ -235,6 +238,14 @@ function renderCopyableValue(value, label) {
   </div>`;
 }
 
+function proxyStatus(service) {
+  if (!service.proxy) return "Not rendered";
+  const adapter = service.proxy.adapter || "proxy";
+  const state = service.proxy.rendered ? "rendered" : "pending";
+  const target = service.proxy.target ? ` to ${service.proxy.target}` : "";
+  return `${adapter} ${state}${target}`;
+}
+
 function renderDetailToggle(detailsId, key, expanded) {
   return `<button class="icon-button detail-toggle" type="button" data-details-id="${detailsId}" data-service-key="${escapeHtml(key)}" aria-expanded="${expanded}" aria-label="${expanded ? "Hide details" : "Show details"}" title="${expanded ? "Hide details" : "Show details"}">${ICONS.chevron}</button>`;
 }
@@ -248,6 +259,14 @@ function renderServiceDetails(service) {
     <div class="detail-item">
       <dt>PID</dt>
       <dd>${escapeHtml(service.pid)}</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Health</dt>
+      <dd>${escapeHtml(service.health)}</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Proxy</dt>
+      <dd>${escapeHtml(proxyStatus(service))}</dd>
     </div>
     <div class="detail-item">
       <dt>CWD</dt>

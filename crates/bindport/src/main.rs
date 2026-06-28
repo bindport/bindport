@@ -21,7 +21,7 @@ use bindport_core::{
 };
 use bindport_dashboard::{DashboardOptions, DashboardServer};
 use bindport_registry::{
-    CleanState, CleanSummary, REGISTRY_PATH_ENV, Registry, RegistryError, RunStart,
+    CleanState, CleanSummary, REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, StartedRun,
     default_registry_path,
 };
 use bindport_runner::{
@@ -35,6 +35,7 @@ const MAX_ALLOCATION_RETRIES: usize = 1;
 const DASHBOARD_HOST_ENV: &str = "BINDPORT_DASHBOARD_HOST";
 const DASHBOARD_PORT_ENV: &str = "BINDPORT_DASHBOARD_PORT";
 const DASHBOARD_AUTH_REQUIRED_ENV: &str = "BINDPORT_DASHBOARD_AUTH_REQUIRED";
+const DASHBOARD_REGISTER_SERVICE_ENV: &str = "BINDPORT_DASHBOARD_REGISTER_SERVICE";
 const DASHBOARD_TOKEN_ENV: &str = "BINDPORT_DASHBOARD_TOKEN";
 const DASHBOARD_STATIC_DIR_ENV: &str = "BINDPORT_DASHBOARD_STATIC_DIR";
 const BINDPORT_HOSTNAME_ENV: &str = "BINDPORT_HOSTNAME";
@@ -760,7 +761,10 @@ fn serve_dashboard(options: &DashboardCliOptions) -> Result<(), DashboardCommand
     }
 
     let dashboard = resolve_dashboard_options(&config, options, skip_ports)?;
+    let register_service = resolve_dashboard_registration(&config, options)?;
+    let host = dashboard.host.to_string();
     let server = DashboardServer::bind(dashboard)?;
+    let _registration = register_dashboard_service(register_service, &server, &host, &cwd);
     println!("dashboard: {}", server.url());
     io::stdout().flush().ok();
     server.serve()?;
@@ -782,6 +786,7 @@ struct DashboardCliOptions {
     host: Option<Ipv4Addr>,
     port: Option<u16>,
     auth_required: Option<bool>,
+    register_service: Option<bool>,
     token: Option<String>,
     token_env: Option<String>,
     allowed_hosts: Vec<String>,
@@ -851,6 +856,16 @@ fn parse_dashboard_options(args: &[String]) -> Result<DashboardCliOptions, Dashb
                 options.auth_required = Some(false);
                 options.serve_args.push(String::from("--no-auth"));
             }
+            "--register-service" => {
+                options.register_service = Some(true);
+                options.serve_args.push(String::from("--register-service"));
+            }
+            "--no-register-service" => {
+                options.register_service = Some(false);
+                options
+                    .serve_args
+                    .push(String::from("--no-register-service"));
+            }
             "--token" => {
                 let value = dashboard_option_value(args, &mut index, "--token")?;
                 options.token = Some(value);
@@ -901,11 +916,15 @@ fn dashboard_option_value(
 }
 
 fn parse_dashboard_auth_mode(value: &str) -> Result<bool, DashboardCommandError> {
+    parse_dashboard_bool(value, "dashboard auth mode")
+}
+
+fn parse_dashboard_bool(value: &str, setting: &str) -> Result<bool, DashboardCommandError> {
     match value {
         "required" | "require" | "enabled" | "true" | "1" | "yes" => Ok(true),
         "disabled" | "disable" | "false" | "0" | "no" => Ok(false),
         _ => Err(DashboardCommandError::InvalidArgument(format!(
-            "invalid dashboard auth mode `{value}`"
+            "invalid {setting} `{value}`"
         ))),
     }
 }
@@ -992,6 +1011,23 @@ fn resolve_dashboard_options(
     })
 }
 
+fn resolve_dashboard_registration(
+    config: &ResolvedConfig,
+    cli: &DashboardCliOptions,
+) -> Result<bool, DashboardCommandError> {
+    let dashboard_config = config
+        .loaded
+        .as_ref()
+        .and_then(|loaded| loaded.config.dashboard.as_ref());
+    let env_register_service = env_dashboard_register_service()?;
+
+    Ok(cli
+        .register_service
+        .or(env_register_service)
+        .or_else(|| dashboard_config.and_then(|dashboard| dashboard.register_service))
+        .unwrap_or(false))
+}
+
 fn env_dashboard_host() -> Result<Option<Ipv4Addr>, DashboardCommandError> {
     env::var(DASHBOARD_HOST_ENV)
         .ok()
@@ -1022,6 +1058,13 @@ fn env_dashboard_auth_required() -> Result<Option<bool>, DashboardCommandError> 
     env::var(DASHBOARD_AUTH_REQUIRED_ENV)
         .ok()
         .map(|value| parse_dashboard_auth_mode(&value))
+        .transpose()
+}
+
+fn env_dashboard_register_service() -> Result<Option<bool>, DashboardCommandError> {
+    env::var(DASHBOARD_REGISTER_SERVICE_ENV)
+        .ok()
+        .map(|value| parse_dashboard_bool(&value, DASHBOARD_REGISTER_SERVICE_ENV))
         .transpose()
 }
 
@@ -1129,6 +1172,93 @@ fn stop_dashboard_service() -> Result<(), DashboardCommandError> {
     remove_dashboard_state()?;
 
     Ok(())
+}
+
+struct DashboardRegistration {
+    registry: Option<Registry>,
+    started: Option<StartedRun>,
+}
+
+impl DashboardRegistration {
+    fn inactive() -> Self {
+        Self {
+            registry: None,
+            started: None,
+        }
+    }
+}
+
+impl Drop for DashboardRegistration {
+    fn drop(&mut self) {
+        if let (Some(registry), Some(started)) = (self.registry.as_mut(), self.started)
+            && let Err(error) = registry.record_run_finished(started, None)
+        {
+            print_registry_warning("failed to record dashboard stop", &error);
+        }
+    }
+}
+
+fn register_dashboard_service(
+    enabled: bool,
+    server: &DashboardServer,
+    host: &str,
+    cwd: &Path,
+) -> DashboardRegistration {
+    if !enabled {
+        return DashboardRegistration::inactive();
+    }
+
+    let Some(mut registry) = open_optional_registry() else {
+        return DashboardRegistration::inactive();
+    };
+    let identity = resolve_identity(IdentitySources {
+        cwd,
+        command: &[],
+        cli_project: Some(SERVICE_NAME),
+        cli_service: Some("dashboard"),
+        env_project: None,
+        env_service: None,
+        config_project: None,
+        config_service: None,
+    });
+    let run = RunStart {
+        project: identity.project.clone(),
+        service: identity.service.clone(),
+        identity: Some(identity),
+        host: host.to_string(),
+        port: server.port(),
+        hostname: None,
+        route_url: Some(server.url()),
+        pid: std::process::id(),
+        command: redacted_dashboard_command(),
+        cwd: cwd.to_path_buf(),
+    };
+
+    match registry.record_run_started(&run) {
+        Ok(started) => DashboardRegistration {
+            registry: Some(registry),
+            started: Some(started),
+        },
+        Err(error) => {
+            print_registry_warning("failed to register dashboard service", &error);
+            registry_disabled_warning();
+            DashboardRegistration::inactive()
+        }
+    }
+}
+
+fn redacted_dashboard_command() -> String {
+    let mut args = env::args();
+    let mut redacted = Vec::new();
+
+    while let Some(arg) = args.next() {
+        redacted.push(arg.clone());
+        if arg == "--token" && args.next().is_some() {
+            redacted.push(String::from("***"));
+        }
+    }
+
+    redacted.join(" ")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1921,7 +2051,7 @@ fn print_help() {
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport doctor              Show bootstrap diagnostics");
-    println!("  bindport dashboard [serve]   Serve the read-only local dashboard");
+    println!("  bindport dashboard [serve]   Serve the local dashboard");
     println!("  bindport dashboard start     Start the dashboard in the background");
     println!("  bindport dashboard status    Show background dashboard status");
     println!("  bindport dashboard stop      Stop the background dashboard");
@@ -1963,6 +2093,8 @@ fn print_dashboard_help() {
     println!("  --auth <mode>            required or disabled");
     println!("  --auth-required          Require bearer token access to dashboard data");
     println!("  --no-auth                Disable dashboard bearer token checks");
+    println!("  --register-service       Record the dashboard in BindPort status");
+    println!("  --no-register-service    Do not record the dashboard in BindPort status");
     println!("  --token <token>          Bearer token value (visible in process lists)");
     println!("  --token-env <name>       Environment variable containing the token");
     println!("  --allowed-host <host>    Additional accepted HTTP Host header");

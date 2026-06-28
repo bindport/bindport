@@ -7,6 +7,7 @@
   --active: #138a4b;
   --stopped: #64748b;
   --stale: #a15c00;
+  --conflict: #9f1d20;
   --other: #9f1d20;
 }
 body {
@@ -333,6 +334,7 @@ code {
 .state-active { color: var(--active); }
 .state-stopped { color: var(--stopped); }
 .state-stale { color: var(--stale); }
+.state-conflict { color: var(--conflict); }
 .state-other { color: var(--other); }
 .empty, .error {
   border: 1px solid var(--border);

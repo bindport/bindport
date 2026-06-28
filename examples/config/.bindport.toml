@@ -6,6 +6,7 @@ skip_ports = [29000, 29070, 29118, 29167, 29168, 29169, 29900, 29901, 29920, 299
 [dashboard]
 host = "127.0.0.1"
 port = 27080
+register_service = false
 allowed_hosts = ["localhost", "127.0.0.1"]
 
 [dashboard.auth]
