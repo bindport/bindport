@@ -116,8 +116,9 @@ The dashboard serves:
 - `GET /healthz` - plain `ok` health response for smoke checks.
 
 `/api/status` returns the registry snapshot with route-oriented fields such as
-`hostname`, `route_url`, and `proxy`. Those fields remain `null` until a future
-proxy adapter renders routes.
+`hostname`, `route_url`, and `proxy`. `hostname` and `route_url` are populated
+when a wrapped service config or run option sets them. `proxy` remains `null`
+until a future proxy adapter renders routes.
 
 ## Security Posture
 

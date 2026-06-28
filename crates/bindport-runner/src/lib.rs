@@ -217,8 +217,17 @@ pub fn spawn_child_with_hints(
     skip_ports: &[u16],
     allocation_hints: AllocationHints,
 ) -> Result<RunningChild, RunnerError> {
-    let (program, args) = command.split_first().ok_or(RunnerError::NoCommand)?;
     let port = allocate_port_with_hints(range, skip_ports, allocation_hints)?;
+
+    spawn_child_on_port(command, port, &[])
+}
+
+pub fn spawn_child_on_port(
+    command: &[String],
+    port: u16,
+    extra_env: &[(String, String)],
+) -> Result<RunningChild, RunnerError> {
+    let (program, args) = command.split_first().ok_or(RunnerError::NoCommand)?;
 
     let mut signal_forwarding =
         prepare_signal_forwarding().map_err(|source| RunnerError::SignalForwarding { source })?;
@@ -230,6 +239,7 @@ pub fn spawn_child_with_hints(
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    process.envs(extra_env.iter().map(|(name, value)| (name, value)));
     prepare_child_signal_mask(&mut process, &signal_forwarding);
 
     let child = match process.spawn() {

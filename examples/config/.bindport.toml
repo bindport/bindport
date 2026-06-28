@@ -19,6 +19,8 @@ strategy = "git-worktree"
 name = "web"
 command = "next dev"
 env.PORT = "{port}"
+env.HOSTNAME = "0.0.0.0"
+env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
 hostname = "{branch}.{project}.localhost"
 health_url = "http://127.0.0.1:{port}/"
 

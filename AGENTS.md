@@ -75,12 +75,14 @@ Don't mutate state outside the working tree without being told to.
 `bindport -- <command>` currently performs probe-based port selection, child
 process wrapping, optional config discovery, basic project/service and git
 identity resolution, Unix SIGINT/SIGTERM forwarding, and basic SQLite lease/run
-recording. It reuses the previous free port for the same resolved identity and
-otherwise scans from a stable identity-based offset. It retries once with a new
-port when the wrapped child fails immediately and the assigned port is then
-occupied. `bindport doctor` reports obvious registry and OS-listener conflicts,
-but not full process ownership diagnostics. Do not claim full process conflict
-diagnostics work until that slice is implemented and verified.
+recording. Service config and `bindport run` options can inject templated child
+env vars and route hostname metadata. It reuses the previous free port for the
+same resolved identity and otherwise scans from a stable identity-based offset.
+It retries once with a new port when the wrapped child fails immediately and the
+assigned port is then occupied. `bindport doctor` reports obvious registry and
+OS-listener conflicts, but not full process ownership diagnostics. Do not claim
+full process conflict diagnostics work until that slice is implemented and
+verified.
 `bindport clean` removes stopped and stale registry entries, supports
 `--dry-run`, `--stopped`, `--stale`, and `--json`, and never removes active
 entries.
