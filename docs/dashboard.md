@@ -24,6 +24,13 @@ dashboard: http://127.0.0.1:27080
 
 Stop it with `Ctrl-C`.
 
+Pass `--register-service` when you want the dashboard process itself to appear
+in `bindport status` and `/api/status`:
+
+```sh
+bindport dashboard serve --register-service
+```
+
 For service-style control, use:
 
 ```sh
@@ -65,6 +72,7 @@ Or set them in config:
 [dashboard]
 host = "127.0.0.1"
 port = 27080
+register_service = false
 allowed_hosts = ["localhost", "127.0.0.1"]
 ```
 
@@ -75,6 +83,7 @@ The dashboard groups services by registry state:
 - `active`
 - `stopped`
 - `stale`
+- `conflict`, when a future registry state records a conflict
 - other unexpected states
 
 Rows show project, service, URL, branch, and root path. State is represented by
@@ -86,9 +95,12 @@ Stopped and stale groups include a cleanup action in the group header. Cleanup
 removes the matching stopped or stale registry entries and then refreshes the
 dashboard. Active services cannot be removed from the dashboard.
 
-Each row has an expand control for secondary details: state, PID, current
-working directory, and command. Expanded rows stay expanded across automatic
-refreshes while the matching service remains in the registry snapshot.
+Each row has an expand control for secondary details: state, PID, health,
+proxy render status, current working directory, and command. Health is
+`unknown` until service health checks are implemented. Proxy status is
+`Not rendered` until a future proxy adapter renders routes. Expanded rows stay
+expanded across automatic refreshes while the matching service remains in the
+registry snapshot.
 
 Use the search field to filter by state, project, service, URL, root path,
 branch, PID, command, or working directory. State buttons narrow the table to

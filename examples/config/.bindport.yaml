@@ -15,6 +15,7 @@ skip_ports:
 dashboard:
   host: 127.0.0.1
   port: 27080
+  register_service: false
   allowed_hosts:
     - localhost
     - 127.0.0.1

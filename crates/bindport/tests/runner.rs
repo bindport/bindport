@@ -257,6 +257,127 @@ fn dashboard_cleans_stopped_entries() {
 }
 
 #[test]
+fn dashboard_can_register_itself_as_a_service() {
+    let registry_path = temp_registry_path("dashboard-register-service-registry");
+    let port = free_loopback_port();
+    let dashboard = start_dashboard_with_args(
+        bindport_with_registry(&registry_path),
+        &[
+            "dashboard",
+            "serve",
+            "--port",
+            &port.to_string(),
+            "--register-service",
+        ],
+    );
+    let response = http_get(dashboard.port, "/api/status");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+
+    let body = http_body(&response);
+    let status = serde_json::from_str::<Value>(body).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    let dashboard_service = services
+        .iter()
+        .find(|service| service["project"] == SERVICE_NAME && service["service"] == "dashboard")
+        .expect("dashboard service registration");
+
+    assert_eq!(dashboard_service["state"], "active");
+    assert_eq!(dashboard_service["host"], "127.0.0.1");
+    assert_eq!(dashboard_service["port"], u64::from(port));
+    assert_eq!(
+        dashboard_service["route_url"],
+        format!("http://127.0.0.1:{port}")
+    );
+    assert_eq!(dashboard_service["health"], "unknown");
+    assert_eq!(dashboard_service["proxy"], Value::Null);
+}
+
+#[test]
+fn dashboard_registration_redacts_literal_token_from_command() {
+    let registry_path = temp_registry_path("dashboard-register-token-registry");
+    let port = free_loopback_port();
+    let secret = "secret-in-registry";
+    let dashboard = start_dashboard_with_args(
+        bindport_with_registry(&registry_path),
+        &[
+            "dashboard",
+            "serve",
+            "--port",
+            &port.to_string(),
+            "--register-service",
+            "--auth",
+            "required",
+            "--token",
+            secret,
+        ],
+    );
+    let response = http_get_with_auth(dashboard.port, "/api/status", &format!("Bearer {secret}"));
+
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+
+    let body = http_body(&response);
+    let status = serde_json::from_str::<Value>(body).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    let dashboard_service = services
+        .iter()
+        .find(|service| service["project"] == SERVICE_NAME && service["service"] == "dashboard")
+        .expect("dashboard service registration");
+    let command = dashboard_service["command"].as_str().expect("command");
+
+    assert!(
+        command.contains("--token ***"),
+        "unexpected command: {command}"
+    );
+    assert!(
+        !command.contains(secret),
+        "dashboard token leaked: {command}"
+    );
+}
+
+#[test]
+fn dashboard_status_api_handles_100_services() {
+    let registry_path = temp_registry_path("dashboard-100-services-registry");
+    let mut registry = Registry::open(&registry_path).expect("registry");
+    for index in 0..100 {
+        let service = format!("service-{index:03}");
+        let identity = ServiceIdentity {
+            project: String::from("bulk-project"),
+            service: service.clone(),
+            git: None,
+            identity_key: format!("v1:bulk-{index:03}"),
+        };
+        registry
+            .record_run_started(&RunStart {
+                project: identity.project.clone(),
+                service,
+                identity: Some(identity),
+                host: String::from("127.0.0.1"),
+                port: 29_100 + index,
+                hostname: None,
+                route_url: None,
+                pid: std::process::id(),
+                command: String::from("bulk fixture"),
+                cwd: PathBuf::from("/tmp/bindport-bulk-fixture"),
+            })
+            .expect("record bulk service");
+    }
+    drop(registry);
+
+    let port = free_loopback_port();
+    let dashboard = start_dashboard_with_args(
+        bindport_with_registry(&registry_path),
+        &["dashboard", "serve", "--port", &port.to_string()],
+    );
+    let response = http_get(dashboard.port, "/api/status");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+
+    let status = serde_json::from_str::<Value>(http_body(&response)).expect("status json");
+    assert_eq!(status["services"].as_array().expect("services").len(), 100);
+}
+
+#[test]
 fn dashboard_uses_cli_port_option() {
     let registry_path = temp_registry_path("dashboard-cli-port-registry");
     let port = free_loopback_port();

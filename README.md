@@ -120,7 +120,9 @@ The current implementation reads top-level `project`, `service`,
 `default_range`, `skip_ports`, `[[services]]` entries, and the `[dashboard]` /
 `[dashboard.auth]` settings used by the local dashboard. Dashboard defaults are
 local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard binds
-require auth and a token. Service entries currently apply `name`, `env`,
+require auth and a token. Set `dashboard.register_service = true` or pass
+`bindport dashboard --register-service` when you want the dashboard itself to
+appear in `bindport status`. Service entries currently apply `name`, `env`,
 `hostname`, and `route_url`. The example `identity`, `proxy`, and deeper
 service fields such as `command` and `health_url` document the intended future
 shape and are not applied yet; `bindport doctor` reports ignored top-level keys
