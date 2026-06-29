@@ -585,6 +585,7 @@ pub fn write_render_plan(
     ownership: &[OutputFileOwnership],
 ) -> Result<Vec<WrittenOutputFile>, OutputFileError> {
     let root = output_root(base_dir, &plan.output)?;
+    let symlink_anchor = symlink_check_anchor(base_dir, &root, &plan.output);
     let owned_hashes = ownership
         .iter()
         .map(|owned| (owned.path.clone(), owned.content_hash.clone()))
@@ -593,9 +594,9 @@ pub fn write_render_plan(
 
     for file in &plan.files {
         let path = output_file_path(base_dir, &root, &plan.output, &file.target)?;
-        reject_symlink_components(&path)?;
+        reject_symlink_components(&symlink_anchor, &path)?;
         verify_existing_target(&path, &owned_hashes)?;
-        atomic_write(&path, &file.contents)?;
+        atomic_write(&symlink_anchor, &path, &file.contents)?;
 
         written.push(WrittenOutputFile {
             route_key: file.route_key.clone(),
@@ -701,6 +702,13 @@ fn output_file_path(
     Ok(path)
 }
 
+fn symlink_check_anchor(base_dir: &Path, root: &Path, output: &OutputContext) -> PathBuf {
+    match output.root.as_deref().map(Path::new) {
+        Some(configured_root) if configured_root.is_absolute() => root.to_path_buf(),
+        _ => base_dir.to_path_buf(),
+    }
+}
+
 fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, ()> {
     if relative.is_absolute() {
         return Err(());
@@ -734,10 +742,11 @@ fn clean_components(path: &Path) -> Result<PathBuf, ()> {
     Ok(clean)
 }
 
-fn reject_symlink_components(path: &Path) -> Result<(), OutputFileError> {
-    let mut current = PathBuf::new();
+fn reject_symlink_components(anchor: &Path, path: &Path) -> Result<(), OutputFileError> {
+    let relative = path.strip_prefix(anchor).unwrap_or(path);
+    let mut current = anchor.to_path_buf();
 
-    for component in path.components() {
+    for component in relative.components() {
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -783,7 +792,7 @@ fn verify_existing_target(
     Ok(())
 }
 
-fn atomic_write(path: &Path, contents: &str) -> Result<(), OutputFileError> {
+fn atomic_write(anchor: &Path, path: &Path, contents: &str) -> Result<(), OutputFileError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty());
@@ -792,7 +801,7 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), OutputFileError> {
             path: parent.to_path_buf(),
             source,
         })?;
-        reject_symlink_components(parent)?;
+        reject_symlink_components(anchor, parent)?;
     }
 
     let temp_path = temp_sibling(path);
@@ -1215,6 +1224,45 @@ mod tests {
             "first"
         );
         assert_eq!(written[0].content_hash, content_hash("first"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_render_plan_allows_symlinked_base_directory() {
+        let real_root = temp_test_dir("write-plan-real-base");
+        let link_parent = temp_test_dir("write-plan-link-parent");
+        let link_root = link_parent.join("base-link");
+        std::os::unix::fs::symlink(&real_root, &link_root).expect("symlink base dir");
+        let plan = test_render_plan("routes/demo.yml", "first");
+
+        let written = write_render_plan(&plan, &link_root, &[]).expect("write plan");
+
+        assert_eq!(
+            fs::read_to_string(&written[0].path).expect("rendered file"),
+            "first"
+        );
+        assert_eq!(
+            written[0].path,
+            link_root.join(".bindport/out/routes/demo.yml")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_render_plan_rejects_symlink_below_output_root() {
+        let root = temp_test_dir("write-plan-symlink-target");
+        let outside = temp_test_dir("write-plan-symlink-outside");
+        let symlink_path = root.join(".bindport/out/routes");
+        fs::create_dir_all(symlink_path.parent().expect("parent")).expect("parent dir");
+        std::os::unix::fs::symlink(&outside, &symlink_path).expect("symlink target dir");
+        let plan = test_render_plan("routes/demo.yml", "first");
+
+        let error = write_render_plan(&plan, &root, &[]).expect_err("symlink below root");
+
+        assert!(matches!(
+            error,
+            OutputFileError::SymlinkInPath { path } if path == symlink_path
+        ));
     }
 
     #[test]
