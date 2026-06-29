@@ -81,6 +81,8 @@ cargo run -p bindport -- init
 cargo run -p bindport -- status --json
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- dashboard serve
+cargo run -p bindport -- templates list
+cargo run -p bindport -- templates export bindport-traefik
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
 cargo run -p bindport -- run web --env NEXT_PUBLIC_BINDPORT_URL='{route_url}' --hostname '{branch}.{project}.localhost' -- sh -c 'echo "$NEXT_PUBLIC_BINDPORT_URL"'
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
@@ -131,7 +133,8 @@ The current implementation reads top-level `project`, `service`,
 `default_range`, `skip_ports`, `[[services]]` entries, `[dashboard]` /
 `[dashboard.auth]`, `output_defaults`, and `[[outputs]]`. Output configuration is
 accepted so projects can prepare template-output config, but output rendering is
-implemented in the v0.3 work that follows this config slice. Dashboard defaults
+implemented in later v0.3 work. Template lookup, listing, showing, and export
+are available through `bindport templates`. Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
@@ -186,6 +189,8 @@ services are not removed.
 - [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
+- [Templates](docs/templates.md): output template lookup, built-in Traefik
+  template export, and current template command behavior.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 

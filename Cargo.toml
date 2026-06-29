@@ -26,6 +26,7 @@ bindport-dashboard = { path = "crates/bindport-dashboard", version = "0.2.0" }
 bindport-registry = { path = "crates/bindport-registry", version = "0.2.0" }
 bindport-runner = { path = "crates/bindport-runner", version = "0.2.0" }
 libc = "0.2.186"
+minijinja = "2.21.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "=1.0.146"
