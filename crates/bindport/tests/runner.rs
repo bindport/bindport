@@ -101,6 +101,27 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
     }
 }
 
+fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration) -> String {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if let Ok(contents) = fs::read_to_string(path)
+            && contents.contains(needle)
+        {
+            return contents;
+        }
+
+        if Instant::now() >= deadline {
+            panic!(
+                "{} did not contain `{needle}` within {timeout:?}",
+                path.display()
+            );
+        }
+
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
 #[test]
 fn dash_dash_runs_child_with_assigned_port() {
     let registry_path = temp_registry_path("dash-dash");
@@ -1649,7 +1670,7 @@ fn render_command_writes_config_files_and_records_ownership() {
     fs::write(
         root.join(".bindport.toml"),
         format!(
-            "project = \"render-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"render.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\n"
+            "project = \"render-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"render.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
         ),
     )
     .expect("write render config");
@@ -1719,6 +1740,70 @@ fn render_command_writes_config_files_and_records_ownership() {
         "rerender failed: {}",
         String::from_utf8_lossy(&rerender.stderr)
     );
+}
+
+#[test]
+fn runner_auto_renders_outputs_on_start_and_exit() {
+    let registry_path = temp_registry_path("auto-render-registry");
+    let root = temp_test_dir("auto-render-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"auto-render-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"auto.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\n"
+        ),
+    )
+    .expect("write render config");
+
+    let rendered_path = root
+        .join(".bindport")
+        .join("generated")
+        .join("traefik")
+        .join("web.yml");
+    let mut bindport = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "sleep 2"])
+        .spawn()
+        .expect("spawn bindport");
+
+    let active_contents =
+        wait_for_file_contains(&rendered_path, "routers:", Duration::from_secs(5));
+    assert!(active_contents.contains("Host(`auto.localhost`)"));
+    assert!(active_contents.contains(&format!("url: \"http://127.0.0.1:{port}\"")));
+
+    let status = wait_for_child(&mut bindport, Duration::from_secs(5)).expect("bindport exits");
+    assert!(status.success());
+
+    let stopped_contents =
+        wait_for_file_contains(&rendered_path, "is stopped", Duration::from_secs(5));
+    assert!(!stopped_contents.contains("routers:"));
+}
+
+#[test]
+fn runner_skips_outputs_when_auto_render_is_disabled() {
+    let registry_path = temp_registry_path("auto-render-disabled-registry");
+    let root = temp_test_dir("auto-render-disabled-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"auto-render-disabled\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"disabled.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!root.join(".bindport/generated/traefik/web.yml").exists());
 }
 
 #[test]

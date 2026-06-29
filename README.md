@@ -135,8 +135,9 @@ The current implementation reads top-level `project`, `service`,
 `[dashboard.auth]`, `output_defaults`, and `[[outputs]]`. Output configuration is
 used by `bindport render` to write text output files from the current registry
 snapshot. Template lookup, listing, showing, and export are available through
-`bindport templates`. Automatic rendering on route lifecycle events is later
-v0.3 work. Dashboard defaults
+`bindport templates`. Wrapped command start/exit events auto-render outputs
+when `auto_render = true`; cleanup/deletion rendering remains later v0.3 work.
+Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
