@@ -6,6 +6,7 @@ packages=(
   bindport-adapters
   bindport-runner
   bindport-registry
+  bindport-dashboard
   bindport
 )
 
@@ -16,13 +17,16 @@ Usage: mise run cargo-publish [--execute] [--allow-dirty] [--wait-seconds N] [vX
 
 Publishes BindPort crates to crates.io in dependency order.
 
-Defaults to a cargo publish dry-run for every package. Real publishing requires
---execute and an interactive confirmation unless --yes is also provided.
+Defaults to a cargo publish dry-run for every package that can be verified
+against the current crates.io index. Real publishing requires --execute and an
+interactive confirmation unless --yes is also provided. Already-published crate
+versions are skipped so interrupted publishes can be resumed.
 
 Options:
   --version <x.y.z>      Release version to verify. Also accepted through
                          RELEASE_VERSION.
-  --dry-run              Dry-run every cargo publish command. This is default.
+  --dry-run              Dry-run publish commands that can resolve against the
+                         current crates.io index. This is default.
   --execute, --publish   Actually publish to crates.io.
   --allow-dirty          Pass --allow-dirty to dry-run cargo publish commands.
                          Rejected for real publishing.
@@ -91,6 +95,60 @@ EOF
       exit 0
       ;;
   esac
+}
+
+is_already_published_error() {
+  local output_file="$1"
+  grep -Eiq "(crate version .+ is already (uploaded|published)|previously[[:space:]]+uploaded)" "$output_file"
+}
+
+is_unpublished_workspace_dependency_error() {
+  local output_file="$1"
+  local dependency
+
+  for dependency in "${packages[@]}"; do
+    if grep -Fq 'no matching package named `'"$dependency"'` found' "$output_file" ||
+      grep -Fq 'failed to select a version for the requirement `'"$dependency"' = "^'"$version"'"`' "$output_file"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_cargo_publish() {
+  local package="$1"
+  shift
+  local output_file status
+
+  output_file="$(mktemp)"
+  set +e
+  cargo "$@" 2>&1 | tee "$output_file"
+  status="${PIPESTATUS[0]}"
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    rm -f "$output_file"
+    publish_result="published"
+    return 0
+  fi
+
+  if [[ "$mode" == "publish" ]] && is_already_published_error "$output_file"; then
+    echo "Skipping $package v$version because it is already published."
+    rm -f "$output_file"
+    publish_result="skipped-existing"
+    return 0
+  fi
+
+  if [[ "$mode" == "dry-run" ]] && is_unpublished_workspace_dependency_error "$output_file"; then
+    echo "Skipping $package publish dry-run because crates.io does not have one of its v$version workspace dependencies yet."
+    rm -f "$output_file"
+    publish_result="skipped-unpublished-dependency"
+    return 0
+  fi
+
+  rm -f "$output_file"
+  return "$status"
 }
 
 release_version="${RELEASE_VERSION:-}"
@@ -177,6 +235,9 @@ elif [[ -n "$(git status --porcelain)" && "$allow_dirty" != "true" ]]; then
   die "worktree is dirty; pass --allow-dirty for dry-runs or clean it"
 fi
 
+skipped_existing=()
+skipped_dry_runs=()
+
 for index in "${!packages[@]}"; do
   package="${packages[$index]}"
   args=(publish -p "$package" --locked)
@@ -188,9 +249,19 @@ for index in "${!packages[@]}"; do
   fi
 
   echo "cargo ${args[*]}"
-  cargo "${args[@]}"
+  publish_result=""
+  run_cargo_publish "$package" "${args[@]}"
 
-  if [[ "$mode" == "publish" && "$index" -lt "$((${#packages[@]} - 1))" && "$wait_seconds" -gt 0 ]]; then
+  case "$publish_result" in
+    skipped-existing)
+      skipped_existing+=("$package")
+      ;;
+    skipped-unpublished-dependency)
+      skipped_dry_runs+=("$package")
+      ;;
+  esac
+
+  if [[ "$mode" == "publish" && "$publish_result" == "published" && "$index" -lt "$((${#packages[@]} - 1))" && "$wait_seconds" -gt 0 ]]; then
     echo "Waiting ${wait_seconds}s for crates.io index propagation..."
     sleep "$wait_seconds"
   fi
@@ -198,6 +269,12 @@ done
 
 if [[ "$mode" == "dry-run" ]]; then
   echo "Cargo publish dry-run completed for v$version."
+  if [[ "${#skipped_dry_runs[@]}" -gt 0 ]]; then
+    echo "Skipped dry-runs that require unpublished workspace dependencies: ${skipped_dry_runs[*]}."
+  fi
 else
   echo "Cargo publish completed for v$version."
+  if [[ "${#skipped_existing[@]}" -gt 0 ]]; then
+    echo "Skipped already-published packages: ${skipped_existing[*]}."
+  fi
 fi

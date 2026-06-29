@@ -134,24 +134,52 @@ scripts/release-check.sh --version 0.2.0
 The same validation gate is available as the manual `Release Check` GitHub
 Actions workflow. It never creates tags, publishes npm/Cargo packages, or commits
 version bumps. Use its `publish_ready` input only when checking the Cargo package
-state immediately before a manual crates.io publish. That input dry-runs the
-full workspace publish order through `scripts/cargo-publish.sh`. npm remains a
-separate future publish path while `npm/bindport/package.json` is private.
+state immediately before a manual crates.io publish. That input runs the
+publish helper in dry-run mode. For a new workspace version, crates that depend
+on unpublished internal crate versions may be skipped until their dependencies
+exist on crates.io. npm remains a separate future publish path while
+`npm/bindport/package.json` is private.
 
 ## Stable Release
 
-After the release prep PR is merged, publish the reviewed release metadata with:
+After the release prep PR is merged, finish the release from clean, synced
+`main` with:
+
+```sh
+mise run release-finish v0.2.0
+```
+
+`release-finish` is the normal post-merge path. It verifies the checkout, asks
+for one confirmation, dispatches the real `Release` workflow, waits for that
+workflow to pass, verifies the GitHub Release and tag, and then publishes the
+Cargo crates. If the GitHub Release already exists at the current `main` commit,
+it skips that step and proceeds to Cargo publishing. If Cargo publishing was
+interrupted, rerun the same command; already-published crate versions are
+skipped and the remaining crates continue in order.
+
+Use these options for recovery or non-interactive runs:
+
+```sh
+mise run release-finish --yes v0.2.0
+mise run release-finish --skip-github-release v0.2.0
+mise run release-finish --skip-cargo-publish v0.2.0
+```
+
+`release-finish` waits for the manual `Release` workflow. If the
+`stable-release` environment requires approval, approve the workflow in GitHub;
+the local command continues polling until the workflow completes or times out.
+
+The lower-level release dispatch command remains available:
 
 ```sh
 mise run release-publish --dry-run v0.2.0
 mise run release-publish v0.2.0
 ```
 
-When no version is provided, `release-publish` uses the workspace version in
-`Cargo.toml`. The script requires a clean `main` branch synced with
-`origin/main`, verifies that Cargo and npm versions match, checks that the
-release tag does not already exist at another commit, and asks for confirmation
-before dispatching the manual `Release` workflow.
+When no version is provided, `release-publish` and `release-finish` use the
+workspace version in `Cargo.toml`. Both require a clean `main` branch synced
+with `origin/main`, verify that Cargo and npm versions match, and check that
+the release tag does not already exist at another commit.
 
 The `Release` workflow is manual-only. It verifies that it is running from
 `main`, checks that `vX.Y.Z` matches the Cargo and npm package versions, runs the
@@ -191,9 +219,11 @@ publishes or dry-runs those crates in dependency order:
 2. `bindport-adapters`
 3. `bindport-runner`
 4. `bindport-registry`
-5. `bindport`
+5. `bindport-dashboard`
+6. `bindport`
 
-Run the local dry-run before any crates.io publish:
+`release-finish` runs Cargo publishing automatically after the GitHub Release
+exists. To exercise the Cargo publish helper directly, run the local dry-run:
 
 ```sh
 mise run cargo-publish 0.2.0
@@ -207,9 +237,14 @@ scripts/cargo-publish.sh --version 0.2.0 --dry-run
 
 The dry-run requires the Cargo workspace version and `npm/bindport/package.json`
 version to match the requested release. From a dirty release-prep branch, pass
-`--allow-dirty`; real publishing rejects dirty worktrees.
+`--allow-dirty`; real publishing rejects dirty worktrees. Because
+`cargo publish --dry-run` resolves dependencies from the current crates.io
+index, a new release may not be able to dry-run every crate before its internal
+dependencies are published. The helper reports those skipped dry-runs instead
+of failing the whole preflight.
 
-After the GitHub Release has been created from `main`, publish to crates.io:
+After the GitHub Release has been created from `main`, publish to crates.io
+directly with:
 
 ```sh
 mise run cargo-publish --execute 0.2.0
@@ -220,11 +255,14 @@ Real publishing additionally requires:
 - a clean checkout at `origin/main`;
 - release tag `vX.Y.Z` pointing at `HEAD`;
 - a local `cargo login` token or `CARGO_REGISTRY_TOKEN`;
-- interactive confirmation unless `--yes` is provided.
+- interactive confirmation unless `--yes` is provided. `release-finish` already
+  performs its own confirmation and calls the Cargo publish helper with `--yes`.
 
 The script waits between package publishes so the crates.io index can observe
 new internal crates before dependent crates are uploaded. Override the wait with
-`--wait-seconds N` when needed.
+`--wait-seconds N` when needed. If a publish is interrupted, rerun the same
+command after the failure is corrected; already-published crate versions are
+skipped and the remaining crates continue in order.
 
 The manual `Cargo Publish` GitHub Actions workflow exposes the same flow:
 
@@ -270,9 +308,10 @@ Package name reservation is an external registry action. Do not do it from CI
 and do not do it as part of ordinary bootstrap commits.
 
 For crates.io, the `bindport`, `bindport-core`, `bindport-adapters`,
-`bindport-runner`, and `bindport-registry` names are claimed. Published crate
-versions are permanent and cannot be overwritten or deleted from the archive.
-They can be yanked, but the version number remains used.
+`bindport-dashboard`, `bindport-runner`, and `bindport-registry` names are
+claimed. Published crate versions are permanent and cannot be overwritten or
+deleted from the archive. They can be yanked, but the version number remains
+used.
 
 For npm, the name is claimed by publishing the first package version. Unscoped
 packages such as `bindport` are public. Scoped packages such as `@bindport/cli`
@@ -389,6 +428,8 @@ run:
 
 - `release-prep` may create a branch, commit, push, and open a PR after explicit
   confirmation.
+- `release-finish` may dispatch the real `Release` workflow and publish Cargo
+  crates after explicit confirmation.
 - The `Release` workflow may create a Git tag and GitHub Release when
   `dry_run=false`.
 - The `Release` workflow uploads native binaries and checksums to GitHub
