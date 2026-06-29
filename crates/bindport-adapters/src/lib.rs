@@ -3,7 +3,8 @@
 use std::{
     collections::BTreeMap,
     fmt, fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use bindport_core::{EffectiveOutputConfig, normalize_branch_label};
@@ -420,6 +421,20 @@ pub struct RenderPlan {
     pub files: Vec<RenderedRouteFile>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFileOwnership {
+    pub path: PathBuf,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrittenOutputFile {
+    pub route_key: String,
+    pub path: PathBuf,
+    pub content_hash: String,
+    pub bytes: usize,
+}
+
 #[derive(Debug)]
 pub enum RenderError {
     TargetTemplate {
@@ -434,6 +449,17 @@ pub enum RenderError {
         target: String,
         route_keys: Vec<String>,
     },
+}
+
+#[derive(Debug)]
+pub enum OutputFileError {
+    UnsafeRoot { root: String },
+    UnsafeTarget { target: String },
+    TargetEscapesRoot { target: String, root: PathBuf },
+    SymlinkInPath { path: PathBuf },
+    UnownedTarget { path: PathBuf },
+    ExternalModified { path: PathBuf },
+    Io { path: PathBuf, source: io::Error },
 }
 
 impl fmt::Display for RenderError {
@@ -465,6 +491,43 @@ impl std::error::Error for RenderError {
         match self {
             Self::TargetTemplate { source, .. } | Self::BodyTemplate { source, .. } => Some(source),
             Self::TargetCollision { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for OutputFileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsafeRoot { root } => write!(f, "unsafe output root `{root}`"),
+            Self::UnsafeTarget { target } => write!(f, "unsafe output target `{target}`"),
+            Self::TargetEscapesRoot { target, root } => write!(
+                f,
+                "output target `{target}` escapes output root `{}`",
+                root.display()
+            ),
+            Self::SymlinkInPath { path } => {
+                write!(f, "output path contains a symlink: {}", path.display())
+            }
+            Self::UnownedTarget { path } => write!(
+                f,
+                "refusing to overwrite unowned output file `{}`",
+                path.display()
+            ),
+            Self::ExternalModified { path } => write!(
+                f,
+                "refusing to overwrite externally modified output file `{}`",
+                path.display()
+            ),
+            Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+        }
+    }
+}
+
+impl std::error::Error for OutputFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
         }
     }
 }
@@ -516,6 +579,36 @@ pub fn render_output_routes(
     })
 }
 
+pub fn write_render_plan(
+    plan: &RenderPlan,
+    base_dir: &Path,
+    ownership: &[OutputFileOwnership],
+) -> Result<Vec<WrittenOutputFile>, OutputFileError> {
+    let root = output_root(base_dir, &plan.output)?;
+    let symlink_anchor = symlink_check_anchor(base_dir, &root, &plan.output);
+    let owned_hashes = ownership
+        .iter()
+        .map(|owned| (owned.path.clone(), owned.content_hash.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut written = Vec::with_capacity(plan.files.len());
+
+    for file in &plan.files {
+        let path = output_file_path(base_dir, &root, &plan.output, &file.target)?;
+        reject_symlink_components(&symlink_anchor, &path)?;
+        verify_existing_target(&path, &owned_hashes)?;
+        atomic_write(&symlink_anchor, &path, &file.contents)?;
+
+        written.push(WrittenOutputFile {
+            route_key: file.route_key.clone(),
+            path,
+            content_hash: content_hash(&file.contents),
+            bytes: file.contents.len(),
+        });
+    }
+
+    Ok(written)
+}
+
 fn short_hash(value: &str) -> String {
     let hash = value.chars().take(8).collect::<String>();
 
@@ -535,6 +628,210 @@ fn stable_hash(bytes: &[u8]) -> u64 {
     }
 
     hash
+}
+
+fn content_hash(contents: &str) -> String {
+    format!("{:016x}", stable_hash(contents.as_bytes()))
+}
+
+fn output_root(base_dir: &Path, output: &OutputContext) -> Result<PathBuf, OutputFileError> {
+    if let Some(root) = output.root.as_deref() {
+        return clean_root_path(base_dir, root);
+    }
+
+    let prefix = output.target.split("{{").next().unwrap_or_default();
+    let directory_prefix = literal_directory_prefix(prefix);
+
+    safe_join(base_dir, directory_prefix).map_err(|_| OutputFileError::UnsafeRoot {
+        root: directory_prefix.display().to_string(),
+    })
+}
+
+fn literal_directory_prefix(prefix: &str) -> &Path {
+    let trimmed = prefix.trim_end_matches(['/', '\\']);
+
+    if prefix.ends_with(['/', '\\']) {
+        return Path::new(trimmed);
+    }
+
+    Path::new(trimmed).parent().unwrap_or_else(|| Path::new(""))
+}
+
+fn clean_root_path(base_dir: &Path, root: &str) -> Result<PathBuf, OutputFileError> {
+    let root_path = Path::new(root);
+
+    if root_path.is_absolute() {
+        clean_components(root_path).map_err(|_| OutputFileError::UnsafeRoot {
+            root: root.to_string(),
+        })
+    } else {
+        safe_join(base_dir, root_path).map_err(|_| OutputFileError::UnsafeRoot {
+            root: root.to_string(),
+        })
+    }
+}
+
+fn output_file_path(
+    base_dir: &Path,
+    root: &Path,
+    output: &OutputContext,
+    target: &str,
+) -> Result<PathBuf, OutputFileError> {
+    let target_path = Path::new(target);
+    let path = if output.root.is_some() {
+        safe_join(root, target_path)
+    } else {
+        safe_join(base_dir, target_path)
+    }
+    .map_err(|_| OutputFileError::UnsafeTarget {
+        target: target.to_string(),
+    })?;
+
+    if !path.starts_with(root) {
+        return Err(OutputFileError::TargetEscapesRoot {
+            target: target.to_string(),
+            root: root.to_path_buf(),
+        });
+    }
+    if path.file_name().is_none() {
+        return Err(OutputFileError::UnsafeTarget {
+            target: target.to_string(),
+        });
+    }
+
+    Ok(path)
+}
+
+fn symlink_check_anchor(base_dir: &Path, root: &Path, output: &OutputContext) -> PathBuf {
+    match output.root.as_deref().map(Path::new) {
+        Some(configured_root) if configured_root.is_absolute() => root.to_path_buf(),
+        _ => base_dir.to_path_buf(),
+    }
+}
+
+fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, ()> {
+    if relative.is_absolute() {
+        return Err(());
+    }
+
+    let mut path = base.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(value) => path.push(value),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return Err(()),
+        }
+    }
+
+    Ok(path)
+}
+
+fn clean_components(path: &Path) -> Result<PathBuf, ()> {
+    let mut clean = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::Prefix(_) | Component::Normal(_) => {
+                clean.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => return Err(()),
+        }
+    }
+
+    Ok(clean)
+}
+
+fn reject_symlink_components(anchor: &Path, path: &Path) -> Result<(), OutputFileError> {
+    let relative = path.strip_prefix(anchor).unwrap_or(path);
+    let mut current = anchor.to_path_buf();
+
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(OutputFileError::SymlinkInPath { path: current });
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(OutputFileError::Io {
+                    path: current,
+                    source,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn verify_existing_target(
+    path: &Path,
+    owned_hashes: &BTreeMap<PathBuf, String>,
+) -> Result<(), OutputFileError> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let Some(expected_hash) = owned_hashes.get(path) else {
+        return Err(OutputFileError::UnownedTarget {
+            path: path.to_path_buf(),
+        });
+    };
+    let contents = fs::read_to_string(path).map_err(|source| OutputFileError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    if content_hash(&contents) != *expected_hash {
+        return Err(OutputFileError::ExternalModified {
+            path: path.to_path_buf(),
+        });
+    }
+
+    Ok(())
+}
+
+fn atomic_write(anchor: &Path, path: &Path, contents: &str) -> Result<(), OutputFileError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    if let Some(parent) = parent {
+        fs::create_dir_all(parent).map_err(|source| OutputFileError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+        reject_symlink_components(anchor, parent)?;
+    }
+
+    let temp_path = temp_sibling(path);
+    fs::write(&temp_path, contents).map_err(|source| OutputFileError::Io {
+        path: temp_path.clone(),
+        source,
+    })?;
+    fs::rename(&temp_path, path).map_err(|source| {
+        let _ = fs::remove_file(&temp_path);
+        OutputFileError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
+}
+
+fn temp_sibling(path: &Path) -> PathBuf {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("output");
+
+    path.with_file_name(format!(
+        ".{filename}.bindport-tmp-{}-{now}",
+        std::process::id()
+    ))
 }
 
 fn validate_template_name(name: &str) -> Result<(), TemplateError> {
@@ -913,6 +1210,133 @@ mod tests {
         assert!(!plan.files[0].contents.contains("routers:"));
     }
 
+    #[test]
+    fn write_render_plan_writes_new_files_under_root() {
+        let root = temp_test_dir("write-plan-new");
+        let plan = test_render_plan("routes/demo.yml", "first");
+
+        let written = write_render_plan(&plan, &root, &[]).expect("write plan");
+
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].path, root.join(".bindport/out/routes/demo.yml"));
+        assert_eq!(
+            fs::read_to_string(&written[0].path).expect("rendered file"),
+            "first"
+        );
+        assert_eq!(written[0].content_hash, content_hash("first"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_render_plan_allows_symlinked_base_directory() {
+        let real_root = temp_test_dir("write-plan-real-base");
+        let link_parent = temp_test_dir("write-plan-link-parent");
+        let link_root = link_parent.join("base-link");
+        std::os::unix::fs::symlink(&real_root, &link_root).expect("symlink base dir");
+        let plan = test_render_plan("routes/demo.yml", "first");
+
+        let written = write_render_plan(&plan, &link_root, &[]).expect("write plan");
+
+        assert_eq!(
+            fs::read_to_string(&written[0].path).expect("rendered file"),
+            "first"
+        );
+        assert_eq!(
+            written[0].path,
+            link_root.join(".bindport/out/routes/demo.yml")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_render_plan_rejects_symlink_below_output_root() {
+        let root = temp_test_dir("write-plan-symlink-target");
+        let outside = temp_test_dir("write-plan-symlink-outside");
+        let symlink_path = root.join(".bindport/out/routes");
+        fs::create_dir_all(symlink_path.parent().expect("parent")).expect("parent dir");
+        std::os::unix::fs::symlink(&outside, &symlink_path).expect("symlink target dir");
+        let plan = test_render_plan("routes/demo.yml", "first");
+
+        let error = write_render_plan(&plan, &root, &[]).expect_err("symlink below root");
+
+        assert!(matches!(
+            error,
+            OutputFileError::SymlinkInPath { path } if path == symlink_path
+        ));
+    }
+
+    #[test]
+    fn write_render_plan_refuses_unowned_existing_file() {
+        let root = temp_test_dir("write-plan-unowned");
+        let path = root.join(".bindport/out/routes/demo.yml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        fs::write(&path, "external").expect("external file");
+        let plan = test_render_plan("routes/demo.yml", "first");
+
+        let error = write_render_plan(&plan, &root, &[]).expect_err("unowned file");
+
+        assert!(matches!(
+            error,
+            OutputFileError::UnownedTarget { path: error_path } if error_path == path
+        ));
+    }
+
+    #[test]
+    fn write_render_plan_overwrites_owned_file_when_hash_matches() {
+        let root = temp_test_dir("write-plan-owned");
+        let path = root.join(".bindport/out/routes/demo.yml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        fs::write(&path, "old").expect("old file");
+        let plan = test_render_plan("routes/demo.yml", "new");
+
+        let written = write_render_plan(
+            &plan,
+            &root,
+            &[OutputFileOwnership {
+                path: path.clone(),
+                content_hash: content_hash("old"),
+            }],
+        )
+        .expect("overwrite owned file");
+
+        assert_eq!(written[0].content_hash, content_hash("new"));
+        assert_eq!(fs::read_to_string(&path).expect("rendered file"), "new");
+    }
+
+    #[test]
+    fn write_render_plan_refuses_externally_modified_owned_file() {
+        let root = temp_test_dir("write-plan-modified");
+        let path = root.join(".bindport/out/routes/demo.yml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        fs::write(&path, "changed").expect("changed file");
+        let plan = test_render_plan("routes/demo.yml", "new");
+
+        let error = write_render_plan(
+            &plan,
+            &root,
+            &[OutputFileOwnership {
+                path: path.clone(),
+                content_hash: content_hash("old"),
+            }],
+        )
+        .expect_err("externally modified file");
+
+        assert!(matches!(
+            error,
+            OutputFileError::ExternalModified { path: error_path } if error_path == path
+        ));
+    }
+
+    #[test]
+    fn write_render_plan_rejects_targets_that_escape_root() {
+        let root = temp_test_dir("write-plan-escape");
+        let plan = test_render_plan("../demo.yml", "escape");
+
+        let error = write_render_plan(&plan, &root, &[]).expect_err("unsafe target");
+
+        assert!(matches!(error, OutputFileError::UnsafeTarget { .. }));
+    }
+
     fn temp_test_dir(name: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -921,6 +1345,62 @@ mod tests {
         let path = std::env::temp_dir().join(format!("bindport-{name}-{unique}"));
         fs::create_dir_all(&path).expect("temp dir");
         path
+    }
+
+    fn test_render_plan(target: &str, contents: &str) -> RenderPlan {
+        RenderPlan {
+            output: OutputContext {
+                name: String::from("debug"),
+                template: String::from("debug-template"),
+                root: Some(String::from(".bindport/out")),
+                target: String::from("routes/{{ route.slug }}.yml"),
+                auto_render: true,
+                delete_on: vec![String::from("removed")],
+                on_failure: String::from("warn"),
+            },
+            files: vec![RenderedRouteFile {
+                route_key: String::from("route-1"),
+                target: target.to_string(),
+                contents: contents.to_string(),
+                context: RenderContext {
+                    route: RouteContext {
+                        key: String::from("route-1"),
+                        project: String::from("demo"),
+                        service: String::from("web"),
+                        state: String::from("active"),
+                        health: String::from("unknown"),
+                        port: 29_100,
+                        host: String::from("127.0.0.1"),
+                        url: String::from("http://127.0.0.1:29100"),
+                        hostname: Some(String::from("demo.localhost")),
+                        route_url: Some(String::from("http://demo.localhost")),
+                        target_url: String::from("http://127.0.0.1:29100"),
+                        branch: Some(String::from("feature/tree")),
+                        branch_label: Some(String::from("feature-tree")),
+                        worktree_path: Some(String::from("/workspace/demo-feature-tree")),
+                        worktree_label: String::from("demo-feature-tree"),
+                        worktree_hash: Some(String::from("abc123456789")),
+                        slug: String::from("demo-web-feature-tree"),
+                        unique_slug: String::from("demo-web-feature-tree-abc12345"),
+                        pid: Some(12_345),
+                        command: String::from("next dev"),
+                        cwd: String::from("/workspace/demo-feature-tree"),
+                        started_at: String::from("2026-06-29T00:00:00Z"),
+                        updated_at: String::from("2026-06-29T00:01:00Z"),
+                    },
+                    output: OutputContext {
+                        name: String::from("debug"),
+                        template: String::from("debug-template"),
+                        root: Some(String::from(".bindport/out")),
+                        target: String::from("routes/{{ route.slug }}.yml"),
+                        auto_render: true,
+                        delete_on: vec![String::from("removed")],
+                        on_failure: String::from("warn"),
+                    },
+                    vars: BTreeMap::new(),
+                },
+            }],
+        }
     }
 
     fn test_route(key: &str, state: &str, hostname: Option<&str>) -> RouteRecord {

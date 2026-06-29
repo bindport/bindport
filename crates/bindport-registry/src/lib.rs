@@ -213,6 +213,45 @@ pub struct StatusRun {
     pub exit_code: Option<i32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFileStatus {
+    Pending,
+    Rendered,
+    Removed,
+    Error,
+}
+
+impl OutputFileStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Rendered => "rendered",
+            Self::Removed => "removed",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFileRecord {
+    pub output_name: String,
+    pub route_key: String,
+    pub rendered_path: PathBuf,
+    pub status: OutputFileStatus,
+    pub reason: Option<String>,
+    pub content_hash: Option<String>,
+    pub template_hash: Option<String>,
+    pub lease_id: Option<i64>,
+    pub run_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFileOwnership {
+    pub route_key: String,
+    pub path: PathBuf,
+    pub content_hash: String,
+}
+
 impl Registry {
     pub fn open_default() -> Result<Self, RegistryError> {
         Self::open(default_registry_path()?)
@@ -475,6 +514,66 @@ impl Registry {
         Ok(summary)
     }
 
+    pub fn output_file_ownership(
+        &self,
+        output_name: &str,
+    ) -> Result<Vec<OutputFileOwnership>, RegistryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT route_key, rendered_path, content_hash
+             FROM output_files
+             WHERE output_name = ?1
+             AND status = 'rendered'
+             AND content_hash IS NOT NULL
+             ORDER BY rendered_path, route_key",
+        )?;
+        let rows = statement.query_map(params![output_name], |row| {
+            Ok(OutputFileOwnership {
+                route_key: row.get(0)?,
+                path: PathBuf::from(row.get::<_, String>(1)?),
+                content_hash: row.get(2)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn record_output_file(&mut self, record: &OutputFileRecord) -> Result<(), RegistryError> {
+        let now = utc_now(&self.connection)?;
+        let rendered_path = record.rendered_path.display().to_string();
+
+        self.connection.execute(
+            "INSERT INTO output_files (
+                output_name, route_key, rendered_path, status, reason,
+                content_hash, template_hash, lease_id, run_id, rendered_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10
+             )
+             ON CONFLICT(output_name, route_key) DO UPDATE SET
+                rendered_path = excluded.rendered_path,
+                status = excluded.status,
+                reason = excluded.reason,
+                content_hash = excluded.content_hash,
+                template_hash = excluded.template_hash,
+                lease_id = excluded.lease_id,
+                run_id = excluded.run_id,
+                updated_at = excluded.updated_at",
+            params![
+                &record.output_name,
+                &record.route_key,
+                rendered_path,
+                record.status.as_str(),
+                &record.reason,
+                &record.content_hash,
+                &record.template_hash,
+                record.lease_id,
+                record.run_id,
+                now
+            ],
+        )?;
+
+        Ok(())
+    }
+
     fn ensure_schema(&self) -> Result<(), RegistryError> {
         self.connection.execute_batch(
             "
@@ -526,7 +625,26 @@ impl Registry {
             CREATE INDEX IF NOT EXISTS leases_identity_key_idx
             ON leases(identity_key);
 
-            PRAGMA user_version = 3;
+            CREATE TABLE IF NOT EXISTS output_files (
+                id INTEGER PRIMARY KEY,
+                output_name TEXT NOT NULL,
+                route_key TEXT NOT NULL,
+                rendered_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT,
+                content_hash TEXT,
+                template_hash TEXT,
+                lease_id INTEGER,
+                run_id INTEGER,
+                rendered_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(output_name, route_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS output_files_output_path_idx
+            ON output_files(output_name, rendered_path);
+
+            PRAGMA user_version = 4;
             ",
         )?;
 
@@ -813,6 +931,84 @@ mod tests {
         let snapshot = registry.status_snapshot().expect("snapshot");
         assert!(snapshot.services.is_empty());
         assert!(snapshot.runs.is_empty());
+    }
+
+    #[test]
+    fn output_file_ownership_returns_rendered_files_with_hashes() {
+        let mut registry = Registry::open(temp_registry_path("output-files")).expect("registry");
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key: String::from("route-1"),
+                rendered_path: PathBuf::from("/tmp/bindport/route-1.yml"),
+                status: OutputFileStatus::Rendered,
+                reason: None,
+                content_hash: Some(String::from("hash-1")),
+                template_hash: Some(String::from("template-1")),
+                lease_id: None,
+                run_id: None,
+            })
+            .expect("record rendered file");
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key: String::from("route-2"),
+                rendered_path: PathBuf::from("/tmp/bindport/route-2.yml"),
+                status: OutputFileStatus::Error,
+                reason: Some(String::from("template_error")),
+                content_hash: None,
+                template_hash: Some(String::from("template-1")),
+                lease_id: None,
+                run_id: None,
+            })
+            .expect("record error file");
+
+        let ownership = registry
+            .output_file_ownership("traefik")
+            .expect("ownership records");
+
+        assert_eq!(
+            ownership,
+            vec![OutputFileOwnership {
+                route_key: String::from("route-1"),
+                path: PathBuf::from("/tmp/bindport/route-1.yml"),
+                content_hash: String::from("hash-1")
+            }]
+        );
+    }
+
+    #[test]
+    fn record_output_file_upserts_by_output_and_route() {
+        let mut registry =
+            Registry::open(temp_registry_path("output-files-upsert")).expect("registry");
+        let mut record = OutputFileRecord {
+            output_name: String::from("traefik"),
+            route_key: String::from("route-1"),
+            rendered_path: PathBuf::from("/tmp/bindport/old.yml"),
+            status: OutputFileStatus::Rendered,
+            reason: None,
+            content_hash: Some(String::from("old-hash")),
+            template_hash: Some(String::from("template-1")),
+            lease_id: Some(1),
+            run_id: Some(2),
+        };
+
+        registry
+            .record_output_file(&record)
+            .expect("record first file");
+        record.rendered_path = PathBuf::from("/tmp/bindport/new.yml");
+        record.content_hash = Some(String::from("new-hash"));
+        registry
+            .record_output_file(&record)
+            .expect("record updated file");
+
+        let ownership = registry
+            .output_file_ownership("traefik")
+            .expect("ownership records");
+
+        assert_eq!(ownership.len(), 1);
+        assert_eq!(ownership[0].path, PathBuf::from("/tmp/bindport/new.yml"));
+        assert_eq!(ownership[0].content_hash, "new-hash");
     }
 
     #[cfg(unix)]

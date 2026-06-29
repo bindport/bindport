@@ -83,6 +83,7 @@ cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- templates list
 cargo run -p bindport -- templates export bindport-traefik
+cargo run -p bindport -- render --dry-run
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
 cargo run -p bindport -- run web --env NEXT_PUBLIC_BINDPORT_URL='{route_url}' --hostname '{branch}.{project}.localhost' -- sh -c 'echo "$NEXT_PUBLIC_BINDPORT_URL"'
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
@@ -132,9 +133,10 @@ never required; missing config means built-in defaults are used.
 The current implementation reads top-level `project`, `service`,
 `default_range`, `skip_ports`, `[[services]]` entries, `[dashboard]` /
 `[dashboard.auth]`, `output_defaults`, and `[[outputs]]`. Output configuration is
-accepted so projects can prepare template-output config, but output rendering is
-implemented in later v0.3 work. Template lookup, listing, showing, and export
-are available through `bindport templates`. Dashboard defaults
+used by `bindport render` to write text output files from the current registry
+snapshot. Template lookup, listing, showing, and export are available through
+`bindport templates`. Automatic rendering on route lifecycle events is later
+v0.3 work. Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
@@ -190,7 +192,7 @@ services are not removed.
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
 - [Templates](docs/templates.md): output template lookup, built-in Traefik
-  template export, and current template command behavior.
+  template export, and manual output file rendering.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 
