@@ -11,3 +11,5 @@ readme.workspace = true
 description = "BindPort proxy adapter primitives."
 
 [dependencies]
+minijinja.workspace = true
+serde.workspace = true
