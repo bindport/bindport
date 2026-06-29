@@ -11,12 +11,13 @@ root-owned daemon.
 
 ## Current Status
 
-BindPort v0.1.0 is available through Cargo:
+BindPort v0.2.0 is available through Cargo:
 
 ```sh
 cargo install bindport
 bindport --help
 bindport -- doctor
+bindport dashboard serve
 bindport -- -- sh -c 'echo "$PORT"'
 ```
 
@@ -24,8 +25,8 @@ The current release includes:
 
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
-- Minimal CLI support for `--help`, `--version`, `status`, `doctor`, and
-  one-shot `bindport -- <command>` command wrapping.
+- CLI support for `--help`, `--version`, `status`, `doctor`, `clean`,
+  `dashboard`, and one-shot `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
   `.bindport.yaml`, with a fallback user config in the XDG config directory.
 - Basic project/service identity resolution from environment, config,
@@ -38,31 +39,38 @@ The current release includes:
   active registry ports, OS listener conflicts, and the next candidate port.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
   and JSON output options.
+- Local dashboard API and embedded UI for active, stopped, and stale registry
+  entries, including URL copy/open actions, optional token auth, scoped
+  stopped/stale cleanup, and service-style `start` / `status` / `stop`
+  controls.
 - MIT license, security policy, third-party notices stub, CI/audit/release
   workflows, and local `mise` tasks.
 - npm wrapper package skeleton. It is not published yet because native binary
   dispatch is not wired.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
-The v0.1 support target is Linux and macOS-style local development. Windows is
+The v0.2 support target is Linux and macOS-style local development. Windows is
 not claimed as supported until the cross-platform hardening milestone.
 
-The v0.1 runner is available from Cargo or from a source checkout:
+The v0.2 runner and dashboard are available from Cargo or from a source
+checkout:
 
 ```sh
 bindport -- next dev
+bindport dashboard serve
 cargo run -p bindport -- -- next dev
+cargo run -p bindport -- dashboard serve
 ```
 
 It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
 `29000-29999`, prefers the previous port for the same project/service/worktree
 identity when it is still free, otherwise scans from a stable identity-based
 offset, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
-SIGINT/SIGTERM to the child, and exits with the child process exit code. This
-v0.1 runner is probe-then-spawn, so another process can still claim the port
+SIGINT/SIGTERM to the child, and exits with the child process exit code. The
+runner is probe-then-spawn, so another process can still claim the port
 before the child binds. BindPort retries once with another port when the child
 fails immediately and the assigned port is then occupied; stronger lease-based
-coordination is still future v0.1 work.
+coordination remains future work.
 
 From a source checkout, use Cargo directly:
 
