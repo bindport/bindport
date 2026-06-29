@@ -162,6 +162,46 @@ fi
 scripts/release-publish.sh "${args[@]}"
 '''
 
+[tasks.release-finish]
+description = "Create the GitHub release and publish Cargo crates"
+usage = '''
+arg "[version]" help="Stable release version, for example 0.1.0 or v0.1.0"
+flag "--yes" help="Skip the interactive release confirmation"
+flag "--skip-github-release" help="Skip dispatching or waiting for release.yml"
+flag "--skip-cargo-publish" help="Skip crates.io publishing"
+flag "--cargo-wait-seconds <n>" help="Seconds to wait between Cargo publishes"
+flag "--workflow-timeout-seconds <n>" help="Seconds to wait for release.yml"
+flag "--poll-seconds <n>" help="Seconds between GitHub workflow polls"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=()
+if [[ -n "${usage_version:-}" ]]; then
+  args+=("${usage_version}")
+fi
+if [[ "${usage_yes:-false}" == "true" ]]; then
+  args+=(--yes)
+fi
+if [[ "${usage_skip_github_release:-false}" == "true" ]]; then
+  args+=(--skip-github-release)
+fi
+if [[ "${usage_skip_cargo_publish:-false}" == "true" ]]; then
+  args+=(--skip-cargo-publish)
+fi
+if [[ -n "${usage_cargo_wait_seconds:-}" ]]; then
+  args+=(--cargo-wait-seconds "${usage_cargo_wait_seconds}")
+fi
+if [[ -n "${usage_workflow_timeout_seconds:-}" ]]; then
+  args+=(--workflow-timeout-seconds "${usage_workflow_timeout_seconds}")
+fi
+if [[ -n "${usage_poll_seconds:-}" ]]; then
+  args+=(--poll-seconds "${usage_poll_seconds}")
+fi
+scripts/release-finish.sh "${args[@]}"
+'''
+
 [tasks.cargo-publish]
 description = "Dry-run or execute crates.io publishing in workspace order"
 usage = '''
