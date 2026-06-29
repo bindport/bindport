@@ -1,8 +1,8 @@
 # Output Templates
 
-BindPort resolves output templates by logical name. Template commands are
-available before the file-rendering pipeline so projects can inspect, export,
-and customize templates without writing generated proxy config yet.
+BindPort resolves output templates by logical name. Template commands let
+projects inspect, export, and customize templates, and `bindport render` writes
+configured text output files from the current registry snapshot.
 
 ## Commands
 
@@ -27,6 +27,24 @@ bindport templates export --source built-in bindport-traefik
 
 Use `--source project`, `--source global`, or `--source built-in` to bypass the
 normal first-match lookup and read only one source.
+
+Render every enabled output:
+
+```sh
+bindport render
+```
+
+Render one output by name:
+
+```sh
+bindport render traefik
+```
+
+Preview rendered targets without writing files:
+
+```sh
+bindport render --dry-run
+```
 
 ## Lookup Order
 
@@ -67,8 +85,37 @@ middlewares = []
 
 For an active route with a hostname, the template renders Traefik routers and
 services pointing at `route.target_url`. For stopped, stale, or missing-hostname
-routes, it renders comment-only YAML. File rendering, ownership records, and
-automatic route-state updates are implemented in later v0.3 output slices.
+routes, it renders comment-only YAML.
+
+## Output Files
+
+Each enabled `[[outputs]]` entry provides a template and a target path template:
+
+```toml
+[output_defaults]
+root = ".bindport/generated"
+
+[[outputs]]
+name = "traefik"
+template = "bindport-traefik"
+target = "traefik/{{ route.service }}.yml"
+```
+
+`bindport render` reads the latest route state from the registry, renders one
+text file per route, and records ownership in the registry after a successful
+write. Existing files are overwritten only when BindPort previously rendered
+the same output file and the on-disk content still matches the recorded hash.
+Unowned or externally modified files cause the render to fail instead of being
+overwritten.
+
+Relative `root` values are resolved beside the discovered project config. If no
+project config is discovered, they resolve from the current working directory.
+Relative targets must stay under the output root and may not traverse through
+symlinks. Absolute roots are accepted after path cleanup, but target paths are
+always relative text file paths.
+
+Automatic rendering on route lifecycle events and deletion for removed routes
+are later v0.3 output slices.
 
 ## MiniJinja Behavior
 

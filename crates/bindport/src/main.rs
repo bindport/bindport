@@ -13,18 +13,21 @@ use std::{
 use std::os::unix::process::ExitStatusExt;
 
 use bindport_adapters::{
-    AdapterKind, TemplateError as AdapterTemplateError, TemplateResolver, TemplateSource,
+    AdapterKind, OutputFileError, OutputFileOwnership as AdapterOutputFileOwnership,
+    OutputRenderConfig, RenderError, RouteRecord, TemplateError as AdapterTemplateError,
+    TemplateResolver, TemplateSource, render_output_routes, write_render_plan,
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, ConfigError, ConfigSource,
     DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE, IdentitySources, LoadedConfig,
-    PortRange, SERVICE_NAME, ServiceConfig, ServiceIdentity, default_fallback_config,
-    detect_git_identity, discover_config, normalize_branch_label, resolve_identity,
+    OutputConfigError, PortRange, SERVICE_NAME, ServiceConfig, ServiceIdentity,
+    default_fallback_config, detect_git_identity, discover_config, normalize_branch_label,
+    resolve_identity,
 };
 use bindport_dashboard::{DashboardOptions, DashboardServer};
 use bindport_registry::{
-    CleanState, CleanSummary, REGISTRY_PATH_ENV, Registry, RegistryError, RunStart, StartedRun,
-    default_registry_path,
+    CleanState, CleanSummary, OutputFileRecord, OutputFileStatus, REGISTRY_PATH_ENV, Registry,
+    RegistryError, RunStart, StartedRun, StatusService, default_registry_path,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
@@ -75,6 +78,7 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
         Some("clean") => clean_registry(&args[1..]),
         Some("doctor") => print_doctor(),
         Some("dashboard") => run_dashboard(&args[1..]),
+        Some("render") => run_render_command(&args[1..]),
         Some("templates") => run_template_command(&args[1..]),
         Some("init") => init_fallback_config(),
         Some("--") => run_wrapped_command(&args[1..], RunOptions::default()),
@@ -1465,6 +1469,290 @@ impl From<io::Error> for DashboardCommandError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderCommand {
+    Render,
+    Help,
+}
+
+#[derive(Debug, Default)]
+struct RenderCommandOptions {
+    output: Option<String>,
+    all: bool,
+    dry_run: bool,
+}
+
+fn run_render_command(args: &[String]) -> ExitCode {
+    match run_render_command_result(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(RenderCommandError::Config(error)) => {
+            print_config_error(&error);
+            ExitCode::FAILURE
+        }
+        Err(RenderCommandError::OutputConfig(error)) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
+        Err(RenderCommandError::InvalidArgument(error)) => {
+            eprintln!("bindport: {error}");
+            eprintln!("usage: bindport render [output] [--all] [--dry-run]");
+            ExitCode::FAILURE
+        }
+        Err(RenderCommandError::Registry(error)) => {
+            print_registry_error(&error);
+            ExitCode::FAILURE
+        }
+        Err(RenderCommandError::Template(error)) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
+        Err(RenderCommandError::Render(error)) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
+        Err(RenderCommandError::File(error)) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_render_command_result(args: &[String]) -> Result<(), RenderCommandError> {
+    let (command, options) = parse_render_command(args)?;
+
+    if command == RenderCommand::Help {
+        print_render_help();
+        return Ok(());
+    }
+
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    let config = resolve_config(&cwd)?;
+    let outputs = config
+        .loaded
+        .as_ref()
+        .map(|loaded| loaded.config.effective_outputs())
+        .transpose()?
+        .unwrap_or_default();
+    let outputs = selected_outputs(outputs, &options)?;
+
+    if outputs.is_empty() {
+        println!("No enabled outputs configured.");
+        return Ok(());
+    }
+
+    let resolver = TemplateResolver::new(
+        Some(project_template_dir(&cwd, &config)),
+        global_template_dir(),
+    );
+    let mut registry = Registry::open_default()?;
+    let snapshot = registry.status_snapshot()?;
+    let routes = route_records(snapshot.services);
+    let base_dir = output_base_dir(&cwd, &config);
+
+    for output in outputs {
+        let template = resolver.resolve(&output.template, None)?;
+        let render_config = OutputRenderConfig::from(&output);
+        let plan = render_output_routes(&render_config, &template.contents, &routes)?;
+
+        if options.dry_run {
+            println!("would render {}: {} files", output.name, plan.files.len());
+            for file in &plan.files {
+                println!("  {}", file.target);
+            }
+            continue;
+        }
+
+        let ownership = registry
+            .output_file_ownership(&output.name)?
+            .into_iter()
+            .map(|owned| AdapterOutputFileOwnership {
+                path: owned.path,
+                content_hash: owned.content_hash,
+            })
+            .collect::<Vec<_>>();
+        let written = write_render_plan(&plan, &base_dir, &ownership)?;
+
+        for file in &written {
+            registry.record_output_file(&OutputFileRecord {
+                output_name: output.name.clone(),
+                route_key: file.route_key.clone(),
+                rendered_path: file.path.clone(),
+                status: OutputFileStatus::Rendered,
+                reason: None,
+                content_hash: Some(file.content_hash.clone()),
+                template_hash: None,
+                lease_id: None,
+                run_id: None,
+            })?;
+        }
+
+        println!("rendered {}: {} files", output.name, written.len());
+    }
+
+    Ok(())
+}
+
+fn parse_render_command(
+    args: &[String],
+) -> Result<(RenderCommand, RenderCommandOptions), RenderCommandError> {
+    let mut options = RenderCommandOptions::default();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--help" | "-h" => return Ok((RenderCommand::Help, RenderCommandOptions::default())),
+            "--all" => options.all = true,
+            "--dry-run" => options.dry_run = true,
+            option if option.starts_with("--") => {
+                return Err(RenderCommandError::InvalidArgument(format!(
+                    "unknown render option `{option}`"
+                )));
+            }
+            output => {
+                if options.output.is_some() {
+                    return Err(RenderCommandError::InvalidArgument(String::from(
+                        "only one output name can be provided",
+                    )));
+                }
+                options.output = Some(output.to_string());
+            }
+        }
+
+        index += 1;
+    }
+
+    if options.all && options.output.is_some() {
+        return Err(RenderCommandError::InvalidArgument(String::from(
+            "--all cannot be combined with an output name",
+        )));
+    }
+
+    Ok((RenderCommand::Render, options))
+}
+
+fn selected_outputs(
+    outputs: Vec<bindport_core::EffectiveOutputConfig>,
+    options: &RenderCommandOptions,
+) -> Result<Vec<bindport_core::EffectiveOutputConfig>, RenderCommandError> {
+    let Some(name) = options.output.as_deref() else {
+        return Ok(outputs);
+    };
+
+    let selected = outputs
+        .into_iter()
+        .filter(|output| output.name == name)
+        .collect::<Vec<_>>();
+
+    if selected.is_empty() {
+        return Err(RenderCommandError::InvalidArgument(format!(
+            "output `{name}` is not configured or is disabled"
+        )));
+    }
+
+    Ok(selected)
+}
+
+fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
+    services
+        .into_iter()
+        .map(|service| {
+            let key = service.identity_key.clone().unwrap_or_else(|| {
+                format!(
+                    "{}:{}:{}:{}:{}",
+                    service.project,
+                    service.service,
+                    service.host,
+                    service.port,
+                    service.started_at
+                )
+            });
+            let updated_at = service
+                .exited_at
+                .clone()
+                .unwrap_or_else(|| service.started_at.clone());
+
+            RouteRecord {
+                key,
+                project: service.project,
+                service: service.service,
+                state: service.state,
+                health: service.health,
+                port: service.port,
+                host: service.host,
+                url: service.url,
+                hostname: service.hostname,
+                route_url: service.route_url,
+                branch: service.branch,
+                branch_label: service.branch_label,
+                worktree_path: service.worktree_path,
+                worktree_hash: service.worktree_hash,
+                pid: service.pid,
+                command: service.command,
+                cwd: service.cwd,
+                started_at: service.started_at,
+                updated_at,
+            }
+        })
+        .collect()
+}
+
+fn output_base_dir(cwd: &Path, config: &ResolvedConfig) -> PathBuf {
+    config
+        .loaded
+        .as_ref()
+        .filter(|loaded| loaded.source == ConfigSource::Project)
+        .and_then(|loaded| loaded.path.parent())
+        .unwrap_or(cwd)
+        .to_path_buf()
+}
+
+#[derive(Debug)]
+enum RenderCommandError {
+    Config(ConfigError),
+    OutputConfig(OutputConfigError),
+    InvalidArgument(String),
+    Registry(RegistryError),
+    Template(AdapterTemplateError),
+    Render(RenderError),
+    File(OutputFileError),
+}
+
+impl From<ConfigError> for RenderCommandError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(error)
+    }
+}
+
+impl From<OutputConfigError> for RenderCommandError {
+    fn from(error: OutputConfigError) -> Self {
+        Self::OutputConfig(error)
+    }
+}
+
+impl From<RegistryError> for RenderCommandError {
+    fn from(error: RegistryError) -> Self {
+        Self::Registry(error)
+    }
+}
+
+impl From<AdapterTemplateError> for RenderCommandError {
+    fn from(error: AdapterTemplateError) -> Self {
+        Self::Template(error)
+    }
+}
+
+impl From<RenderError> for RenderCommandError {
+    fn from(error: RenderError) -> Self {
+        Self::Render(error)
+    }
+}
+
+impl From<OutputFileError> for RenderCommandError {
+    fn from(error: OutputFileError) -> Self {
+        Self::File(error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TemplateCommand {
     List,
     Show,
@@ -2305,6 +2593,7 @@ fn print_help() {
     println!("  bindport dashboard start     Start the dashboard in the background");
     println!("  bindport dashboard status    Show background dashboard status");
     println!("  bindport dashboard stop      Stop the background dashboard");
+    println!("  bindport render [output]     Render configured output files");
     println!("  bindport templates list      List resolved output templates");
     println!("  bindport templates show      Show a resolved output template");
     println!("  bindport templates export    Export a resolved output template");
@@ -2315,6 +2604,17 @@ fn print_help() {
     println!("  --env NAME=VALUE             Add a templated child environment variable");
     println!("  --hostname <template>        Set route hostname metadata");
     println!("  --route-url <template>       Set route URL metadata");
+}
+
+fn print_render_help() {
+    println!("BindPort output rendering");
+    println!();
+    println!("Usage:");
+    println!("  bindport render [output] [options]");
+    println!();
+    println!("Options:");
+    println!("  --all        Render every enabled output (default)");
+    println!("  --dry-run    Render templates and print targets without writing files");
 }
 
 fn print_templates_help() {
