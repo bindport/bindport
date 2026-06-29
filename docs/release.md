@@ -10,14 +10,14 @@ binaries.
 
 ## Current Status
 
-BindPort v0.1.0 is released on GitHub and crates.io. Cargo is the supported
+BindPort v0.2.0 is released on GitHub and crates.io. Cargo is the supported
 install path:
 
 ```sh
 cargo install bindport
 ```
 
-The first release targets Linux and macOS-style local development. Windows
+The current release targets Linux and macOS-style local development. Windows
 support remains future/beta until the cross-platform hardening milestone. npm is
 not published yet because the package still needs native binary dispatch.
 
@@ -29,7 +29,13 @@ The minimum release gate is:
 4. SIGINT and SIGTERM are forwarded.
 5. BindPort exits with the child's exit code.
 6. `bindport status --json` reports the latest service plus run history.
-7. Local and CI checks pass.
+7. `bindport dashboard serve` starts on loopback by default and exposes
+   `/api/status`.
+8. The dashboard shows active, stopped, and stale services with URL copy/open
+   actions.
+9. Dashboard cleanup can remove stopped or stale entries but cannot mutate
+   active services.
+10. Local and CI checks pass.
 
 The package-script gate is covered by the
 `package_script_runs_bindport_next_dev_flow` integration test. It runs
@@ -42,6 +48,10 @@ without adding a real Next.js dependency to the repository.
 `proxy`). Service config and run options can populate `hostname` and
 `route_url`; `proxy` remains `null` until the Traefik adapter begins rendering
 routes.
+
+The dashboard gate is covered by integration tests for status API parity,
+static asset serving, token auth, stopped/stale cleanup, self-registration,
+background service controls, and a 100-service registry snapshot.
 
 ## Local Release Checks
 
@@ -225,10 +235,32 @@ The manual `Cargo Publish` GitHub Actions workflow exposes the same flow:
 
 Keep `execute=false` until the local command has been exercised for the release.
 
+## v0.2.0 Manual Acceptance
+
+Before merging the v0.2.0 release prep PR, smoke test the release branch from a
+fresh checkout or clean worktree:
+
+1. Build the release binary with `cargo build --release --locked`.
+2. Run a wrapped command and confirm the child receives `PORT`.
+3. Confirm `bindport status --json` reports the service and run history.
+4. Start `bindport dashboard serve` and verify `/api/status` matches
+   `bindport status --json`.
+5. Verify the dashboard shows active, stopped, and stale groups as applicable.
+6. Verify URL copy/open actions when `hostname` and `route_url` are configured.
+7. Remove stopped or stale entries from the dashboard and confirm active entries
+   remain.
+8. Run `bindport dashboard start`, `bindport dashboard status`, and
+   `bindport dashboard stop`.
+9. For remote browser testing, run the dashboard on `0.0.0.0` with token auth
+   and verify an unauthenticated request is rejected.
+10. Run `mise run dev-dashboard-remote` and confirm Rust server changes restart
+    the dev server while static asset changes refresh the browser.
+
 ## Versioning
 
 - `0.0.x`: unreleased bootstrap only.
 - `0.1.0`: first working runner release.
+- `0.2.0`: local dashboard API, embedded UI, and stopped/stale cleanup.
 - Pre-1.0 minor releases may contain breaking changes.
 - A stable release prep commit should update all package versions together.
 
@@ -348,7 +380,7 @@ run:
     "dev": "bindport -- next dev"
   },
   "devDependencies": {
-    "bindport": "^0.1.0"
+    "bindport": "^0.2.0"
   }
 }
 ```
