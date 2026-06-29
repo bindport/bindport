@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use bindport_core::{EffectiveOutputConfig, normalize_branch_label};
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
+use serde::Serialize;
 
 const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
 
@@ -250,6 +252,291 @@ pub fn render_template<S: serde::Serialize>(
     Ok(environment.render_str(template, context)?)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputRenderConfig {
+    pub context: OutputContext,
+    pub target_host: String,
+    pub target_scheme: String,
+    pub vars: BTreeMap<String, serde_json::Value>,
+}
+
+impl From<&EffectiveOutputConfig> for OutputRenderConfig {
+    fn from(config: &EffectiveOutputConfig) -> Self {
+        Self {
+            context: OutputContext {
+                name: config.name.clone(),
+                template: config.template.clone(),
+                root: config.root.clone(),
+                target: config.target.clone(),
+                auto_render: config.auto_render,
+                delete_on: config
+                    .delete_on
+                    .iter()
+                    .map(|state| state.as_str().to_string())
+                    .collect(),
+                on_failure: config.on_failure.as_str().to_string(),
+            },
+            target_host: config.target_host.clone(),
+            target_scheme: config.target_scheme.clone(),
+            vars: config.vars.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OutputContext {
+    pub name: String,
+    pub template: String,
+    pub root: Option<String>,
+    pub target: String,
+    pub auto_render: bool,
+    pub delete_on: Vec<String>,
+    pub on_failure: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteRecord {
+    pub key: String,
+    pub project: String,
+    pub service: String,
+    pub state: String,
+    pub health: String,
+    pub port: u16,
+    pub host: String,
+    pub url: String,
+    pub hostname: Option<String>,
+    pub route_url: Option<String>,
+    pub branch: Option<String>,
+    pub branch_label: Option<String>,
+    pub worktree_path: Option<String>,
+    pub worktree_hash: Option<String>,
+    pub pid: Option<u32>,
+    pub command: String,
+    pub cwd: String,
+    pub started_at: String,
+    pub updated_at: String,
+}
+
+impl RouteRecord {
+    fn context(&self, output: &OutputRenderConfig) -> RouteContext {
+        let worktree_label = self
+            .worktree_path
+            .as_deref()
+            .and_then(|path| Path::new(path).file_name())
+            .and_then(|name| name.to_str())
+            .map(normalize_branch_label)
+            .unwrap_or_else(|| normalize_branch_label(&self.project));
+        let slug = normalize_branch_label(&format!(
+            "{}-{}-{}",
+            self.project,
+            self.service,
+            self.branch_label.as_deref().unwrap_or(&worktree_label)
+        ));
+        let unique_slug = format!(
+            "{slug}-{}",
+            self.worktree_hash
+                .as_deref()
+                .map(short_hash)
+                .unwrap_or_else(|| format!("{:08x}", stable_hash(self.key.as_bytes()) as u32))
+        );
+        let target_url = format!(
+            "{}://{}:{}",
+            output.target_scheme, output.target_host, self.port
+        );
+
+        RouteContext {
+            key: self.key.clone(),
+            project: self.project.clone(),
+            service: self.service.clone(),
+            state: self.state.clone(),
+            health: self.health.clone(),
+            port: self.port,
+            host: self.host.clone(),
+            url: self.url.clone(),
+            hostname: self.hostname.clone(),
+            route_url: self.route_url.clone(),
+            target_url,
+            branch: self.branch.clone(),
+            branch_label: self.branch_label.clone(),
+            worktree_path: self.worktree_path.clone(),
+            worktree_label,
+            worktree_hash: self.worktree_hash.clone(),
+            slug,
+            unique_slug,
+            pid: self.pid,
+            command: self.command.clone(),
+            cwd: self.cwd.clone(),
+            started_at: self.started_at.clone(),
+            updated_at: self.updated_at.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RouteContext {
+    pub key: String,
+    pub project: String,
+    pub service: String,
+    pub state: String,
+    pub health: String,
+    pub port: u16,
+    pub host: String,
+    pub url: String,
+    pub hostname: Option<String>,
+    pub route_url: Option<String>,
+    pub target_url: String,
+    pub branch: Option<String>,
+    pub branch_label: Option<String>,
+    pub worktree_path: Option<String>,
+    pub worktree_label: String,
+    pub worktree_hash: Option<String>,
+    pub slug: String,
+    pub unique_slug: String,
+    pub pid: Option<u32>,
+    pub command: String,
+    pub cwd: String,
+    pub started_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RenderContext {
+    pub route: RouteContext,
+    pub output: OutputContext,
+    pub vars: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderedRouteFile {
+    pub route_key: String,
+    pub target: String,
+    pub contents: String,
+    pub context: RenderContext,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderPlan {
+    pub output: OutputContext,
+    pub files: Vec<RenderedRouteFile>,
+}
+
+#[derive(Debug)]
+pub enum RenderError {
+    TargetTemplate {
+        route_key: String,
+        source: TemplateError,
+    },
+    BodyTemplate {
+        route_key: String,
+        source: TemplateError,
+    },
+    TargetCollision {
+        target: String,
+        route_keys: Vec<String>,
+    },
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TargetTemplate { route_key, source } => {
+                write!(
+                    f,
+                    "failed to render target for route `{route_key}`: {source}"
+                )
+            }
+            Self::BodyTemplate { route_key, source } => {
+                write!(
+                    f,
+                    "failed to render template for route `{route_key}`: {source}"
+                )
+            }
+            Self::TargetCollision { target, route_keys } => write!(
+                f,
+                "multiple routes render to target `{target}`: {}",
+                route_keys.join(", ")
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RenderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::TargetTemplate { source, .. } | Self::BodyTemplate { source, .. } => Some(source),
+            Self::TargetCollision { .. } => None,
+        }
+    }
+}
+
+pub fn render_output_routes(
+    output: &OutputRenderConfig,
+    template: &str,
+    routes: &[RouteRecord],
+) -> Result<RenderPlan, RenderError> {
+    let mut targets = BTreeMap::<String, String>::new();
+    let mut files = Vec::with_capacity(routes.len());
+
+    for route in routes {
+        let context = RenderContext {
+            route: route.context(output),
+            output: output.context.clone(),
+            vars: output.vars.clone(),
+        };
+        let target = render_template(&output.context.target, &context).map_err(|source| {
+            RenderError::TargetTemplate {
+                route_key: route.key.clone(),
+                source,
+            }
+        })?;
+
+        if let Some(existing) = targets.insert(target.clone(), route.key.clone()) {
+            return Err(RenderError::TargetCollision {
+                target,
+                route_keys: vec![existing, route.key.clone()],
+            });
+        }
+
+        let contents =
+            render_template(template, &context).map_err(|source| RenderError::BodyTemplate {
+                route_key: route.key.clone(),
+                source,
+            })?;
+        files.push(RenderedRouteFile {
+            route_key: route.key.clone(),
+            target,
+            contents,
+            context,
+        });
+    }
+
+    Ok(RenderPlan {
+        output: output.context.clone(),
+        files,
+    })
+}
+
+fn short_hash(value: &str) -> String {
+    let hash = value.chars().take(8).collect::<String>();
+
+    if hash.is_empty() {
+        String::from("00000000")
+    } else {
+        hash
+    }
+}
+
+fn stable_hash(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    hash
+}
+
 fn validate_template_name(name: &str) -> Result<(), TemplateError> {
     let invalid = name.is_empty()
         || name.trim() != name
@@ -414,6 +701,8 @@ fn resolve_built_in(name: &str) -> Option<ResolvedTemplate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bindport_core::{OutputDeleteState, OutputFailurePolicy};
+    use std::collections::BTreeMap;
 
     #[test]
     fn traefik_is_first_adapter_name() {
@@ -529,6 +818,101 @@ mod tests {
         assert!(rendered.contains("url: \"http://127.0.0.1:29100\""));
     }
 
+    #[test]
+    fn render_output_routes_builds_targets_and_context() {
+        let mut vars = BTreeMap::new();
+        vars.insert(String::from("mode"), serde_json::json!("dev"));
+        let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+            name: String::from("debug"),
+            template: String::from("debug-template"),
+            root: Some(String::from(".bindport/generated")),
+            target: String::from("debug/{{ route.slug }}.txt"),
+            target_host: String::from("host.docker.internal"),
+            target_scheme: String::from("https"),
+            auto_render: true,
+            delete_on: vec![OutputDeleteState::Removed],
+            on_failure: OutputFailurePolicy::Warn,
+            debounce_ms: 250,
+            vars,
+        });
+        let route = test_route("route-1", "active", Some("feature-tree.demo.localhost"));
+
+        let plan = render_output_routes(
+            &output,
+            "target={{ route.target_url }} mode={{ vars.mode }} output={{ output.name }}",
+            &[route],
+        )
+        .expect("render plan");
+
+        assert_eq!(plan.output.name, "debug");
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].target, "debug/demo-web-feature-tree.txt");
+        assert_eq!(
+            plan.files[0].contents,
+            "target=https://host.docker.internal:29100 mode=dev output=debug"
+        );
+        assert_eq!(
+            plan.files[0].context.route.unique_slug,
+            "demo-web-feature-tree-abc12345"
+        );
+        assert_eq!(plan.files[0].context.output.delete_on, vec!["removed"]);
+    }
+
+    #[test]
+    fn render_output_routes_reports_target_collisions() {
+        let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+            name: String::from("debug"),
+            template: String::from("debug-template"),
+            root: None,
+            target: String::from("debug/{{ route.service }}.txt"),
+            target_host: String::from("127.0.0.1"),
+            target_scheme: String::from("http"),
+            auto_render: true,
+            delete_on: vec![OutputDeleteState::Removed],
+            on_failure: OutputFailurePolicy::Warn,
+            debounce_ms: 250,
+            vars: BTreeMap::new(),
+        });
+        let first = test_route("route-1", "active", Some("first.demo.localhost"));
+        let second = test_route("route-2", "active", Some("second.demo.localhost"));
+
+        let error = render_output_routes(&output, "ok", &[first, second]).expect_err("collision");
+
+        assert!(matches!(
+            error,
+            RenderError::TargetCollision { ref target, ref route_keys }
+                if target == "debug/web.txt"
+                    && route_keys == &vec![String::from("route-1"), String::from("route-2")]
+        ));
+    }
+
+    #[test]
+    fn built_in_traefik_plan_renders_comment_for_stopped_route() {
+        let template = TemplateResolver::new(None, None)
+            .resolve("bindport-traefik", None)
+            .expect("built-in template");
+        let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+            name: String::from("traefik"),
+            template: String::from("bindport-traefik"),
+            root: None,
+            target: String::from("traefik/{{ route.slug }}.yml"),
+            target_host: String::from("127.0.0.1"),
+            target_scheme: String::from("http"),
+            auto_render: true,
+            delete_on: vec![OutputDeleteState::Removed],
+            on_failure: OutputFailurePolicy::Warn,
+            debounce_ms: 250,
+            vars: BTreeMap::new(),
+        });
+        let route = test_route("route-1", "stopped", Some("feature-tree.demo.localhost"));
+
+        let plan = render_output_routes(&output, &template.contents, &[route]).expect("plan");
+
+        assert_eq!(plan.files[0].target, "traefik/demo-web-feature-tree.yml");
+        assert!(plan.files[0].contents.contains("is stopped"));
+        assert!(!plan.files[0].contents.contains("routers:"));
+    }
+
     fn temp_test_dir(name: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -537,5 +921,29 @@ mod tests {
         let path = std::env::temp_dir().join(format!("bindport-{name}-{unique}"));
         fs::create_dir_all(&path).expect("temp dir");
         path
+    }
+
+    fn test_route(key: &str, state: &str, hostname: Option<&str>) -> RouteRecord {
+        RouteRecord {
+            key: key.to_string(),
+            project: String::from("demo"),
+            service: String::from("web"),
+            state: state.to_string(),
+            health: String::from("unknown"),
+            port: 29_100,
+            host: String::from("127.0.0.1"),
+            url: String::from("http://127.0.0.1:29100"),
+            hostname: hostname.map(str::to_string),
+            route_url: hostname.map(|hostname| format!("http://{hostname}")),
+            branch: Some(String::from("feature/tree")),
+            branch_label: Some(String::from("feature-tree")),
+            worktree_path: Some(String::from("/workspace/demo-feature-tree")),
+            worktree_hash: Some(String::from("abc123456789")),
+            pid: Some(12_345),
+            command: String::from("next dev"),
+            cwd: String::from("/workspace/demo-feature-tree"),
+            started_at: String::from("2026-06-29T00:00:00Z"),
+            updated_at: String::from("2026-06-29T00:01:00Z"),
+        }
     }
 }

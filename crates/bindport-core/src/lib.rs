@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt, fs, io,
     path::{Path, PathBuf},
     process::Command,
@@ -19,6 +19,10 @@ pub const DEFAULT_PORT_RANGE: PortRange = PortRange {
 pub const DEFAULT_SKIP_PORTS: &[u16] = &[
     29_000, 29_070, 29_118, 29_167, 29_168, 29_169, 29_900, 29_901, 29_920, 29_999,
 ];
+pub const DEFAULT_OUTPUT_TARGET_HOST: &str = "127.0.0.1";
+pub const DEFAULT_OUTPUT_TARGET_SCHEME: &str = "http";
+pub const DEFAULT_OUTPUT_AUTO_RENDER: bool = true;
+pub const DEFAULT_OUTPUT_DEBOUNCE_MS: u64 = 250;
 pub const CONFIG_FILENAMES: &[&str] = &[".bindport.toml", ".bindport.json", ".bindport.yaml"];
 pub const LOCAL_CONFIG_FILENAMES: &[&str] = &[
     ".bindport.local.toml",
@@ -111,6 +115,88 @@ impl BindPortConfig {
         })
     }
 
+    pub fn effective_outputs(&self) -> Result<Vec<EffectiveOutputConfig>, OutputConfigError> {
+        let Some(outputs) = self.outputs.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let defaults = self.output_defaults.as_ref();
+        let mut seen_names = BTreeSet::new();
+        let mut effective = Vec::new();
+
+        for (index, output) in outputs.iter().enumerate() {
+            let name = output
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .ok_or(OutputConfigError::MissingName { index })?;
+            let name = name.to_string();
+
+            if !seen_names.insert(name.clone()) {
+                return Err(OutputConfigError::DuplicateName { name });
+            }
+
+            let enabled = output.enabled.unwrap_or(true);
+            if !enabled {
+                continue;
+            }
+
+            let template = output
+                .template
+                .as_ref()
+                .filter(|template| !template.trim().is_empty())
+                .cloned()
+                .ok_or_else(|| OutputConfigError::MissingTemplate { name: name.clone() })?;
+            let target = output
+                .target
+                .as_ref()
+                .filter(|target| !target.trim().is_empty())
+                .cloned()
+                .ok_or_else(|| OutputConfigError::MissingTarget { name: name.clone() })?;
+
+            effective.push(EffectiveOutputConfig {
+                name,
+                template,
+                root: output
+                    .root
+                    .clone()
+                    .or_else(|| defaults.and_then(|defaults| defaults.root.clone())),
+                target,
+                target_host: output
+                    .target_host
+                    .clone()
+                    .or_else(|| defaults.and_then(|defaults| defaults.target_host.clone()))
+                    .unwrap_or_else(|| DEFAULT_OUTPUT_TARGET_HOST.to_string()),
+                target_scheme: output
+                    .target_scheme
+                    .clone()
+                    .or_else(|| defaults.and_then(|defaults| defaults.target_scheme.clone()))
+                    .unwrap_or_else(|| DEFAULT_OUTPUT_TARGET_SCHEME.to_string()),
+                auto_render: output
+                    .auto_render
+                    .or_else(|| defaults.and_then(|defaults| defaults.auto_render))
+                    .unwrap_or(DEFAULT_OUTPUT_AUTO_RENDER),
+                delete_on: output
+                    .delete_on
+                    .clone()
+                    .or_else(|| defaults.and_then(|defaults| defaults.delete_on.clone()))
+                    .unwrap_or_else(|| vec![OutputDeleteState::Removed]),
+                on_failure: output
+                    .on_failure
+                    .clone()
+                    .or_else(|| defaults.and_then(|defaults| defaults.on_failure.clone()))
+                    .unwrap_or(OutputFailurePolicy::Warn),
+                debounce_ms: output
+                    .debounce_ms
+                    .or_else(|| defaults.and_then(|defaults| defaults.debounce_ms))
+                    .unwrap_or(DEFAULT_OUTPUT_DEBOUNCE_MS),
+                vars: output.vars.clone().unwrap_or_default(),
+            });
+        }
+
+        Ok(effective)
+    }
+
     pub fn merge_local_override(&mut self, local: BindPortConfig) {
         override_option(&mut self.project, local.project);
         override_option(&mut self.service, local.service);
@@ -185,6 +271,50 @@ pub struct OutputDefaultsConfig {
     pub debounce_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveOutputConfig {
+    pub name: String,
+    pub template: String,
+    pub root: Option<String>,
+    pub target: String,
+    pub target_host: String,
+    pub target_scheme: String,
+    pub auto_render: bool,
+    pub delete_on: Vec<OutputDeleteState>,
+    pub on_failure: OutputFailurePolicy,
+    pub debounce_ms: u64,
+    pub vars: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputConfigError {
+    MissingName { index: usize },
+    DuplicateName { name: String },
+    MissingTemplate { name: String },
+    MissingTarget { name: String },
+}
+
+impl fmt::Display for OutputConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingName { index } => {
+                write!(f, "outputs[{index}] is missing required `name`")
+            }
+            Self::DuplicateName { name } => {
+                write!(f, "output `{name}` is defined more than once")
+            }
+            Self::MissingTemplate { name } => {
+                write!(f, "output `{name}` is missing required `template`")
+            }
+            Self::MissingTarget { name } => {
+                write!(f, "output `{name}` is missing required `target`")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OutputConfigError {}
+
 impl OutputDefaultsConfig {
     fn merge(&mut self, local: Self) {
         override_option(&mut self.root, local.root);
@@ -205,11 +335,30 @@ pub enum OutputDeleteState {
     Removed,
 }
 
+impl OutputDeleteState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Stale => "stale",
+            Self::Removed => "removed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputFailurePolicy {
     Warn,
     Block,
+}
+
+impl OutputFailurePolicy {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Warn => "warn",
+            Self::Block => "block",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -1143,6 +1292,89 @@ mod tests {
         );
         assert!(loaded.config.output_config("debug").is_some());
         assert!(loaded.config.output_config("extra").is_some());
+    }
+
+    #[test]
+    fn effective_outputs_apply_defaults_and_skip_disabled_entries() {
+        let config = parse_config(
+            ConfigFormat::Toml,
+            "project = \"demo\"\n[output_defaults]\nroot = \".bindport/generated\"\ntarget_host = \"host.docker.internal\"\ntarget_scheme = \"https\"\nauto_render = false\ndelete_on = [\"stopped\", \"removed\"]\non_failure = \"block\"\ndebounce_ms = 500\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\ntarget = \"traefik/{{ route.slug }}.yml\"\n[outputs.vars]\nentrypoints = [\"websecure\"]\n[[outputs]]\nname = \"disabled\"\nenabled = false\n",
+        )
+        .expect("config");
+
+        let outputs = config.effective_outputs().expect("effective outputs");
+
+        assert_eq!(outputs.len(), 1);
+        let output = &outputs[0];
+        assert_eq!(output.name, "traefik");
+        assert_eq!(output.template, "bindport-traefik");
+        assert_eq!(output.root.as_deref(), Some(".bindport/generated"));
+        assert_eq!(output.target, "traefik/{{ route.slug }}.yml");
+        assert_eq!(output.target_host, "host.docker.internal");
+        assert_eq!(output.target_scheme, "https");
+        assert!(!output.auto_render);
+        assert_eq!(
+            output.delete_on,
+            vec![OutputDeleteState::Stopped, OutputDeleteState::Removed]
+        );
+        assert_eq!(output.on_failure, OutputFailurePolicy::Block);
+        assert_eq!(output.debounce_ms, 500);
+        assert_eq!(
+            output.vars.get("entrypoints"),
+            Some(&serde_json::json!(["websecure"]))
+        );
+    }
+
+    #[test]
+    fn effective_outputs_use_builtin_defaults() {
+        let config = parse_config(
+            ConfigFormat::Toml,
+            "[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\ntarget = \"{{ route.slug }}.yml\"\n",
+        )
+        .expect("config");
+
+        let output = config
+            .effective_outputs()
+            .expect("effective outputs")
+            .pop()
+            .expect("output");
+
+        assert_eq!(output.root, None);
+        assert_eq!(output.target_host, DEFAULT_OUTPUT_TARGET_HOST);
+        assert_eq!(output.target_scheme, DEFAULT_OUTPUT_TARGET_SCHEME);
+        assert_eq!(output.auto_render, DEFAULT_OUTPUT_AUTO_RENDER);
+        assert_eq!(output.delete_on, vec![OutputDeleteState::Removed]);
+        assert_eq!(output.on_failure, OutputFailurePolicy::Warn);
+        assert_eq!(output.debounce_ms, DEFAULT_OUTPUT_DEBOUNCE_MS);
+    }
+
+    #[test]
+    fn effective_outputs_report_required_field_errors() {
+        let missing_name = BindPortConfig {
+            outputs: Some(vec![OutputConfig {
+                template: Some(String::from("bindport-traefik")),
+                target: Some(String::from("{{ route.slug }}.yml")),
+                ..OutputConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        };
+        assert!(matches!(
+            missing_name.effective_outputs(),
+            Err(OutputConfigError::MissingName { index: 0 })
+        ));
+
+        let missing_template = BindPortConfig {
+            outputs: Some(vec![OutputConfig {
+                name: Some(String::from("traefik")),
+                target: Some(String::from("{{ route.slug }}.yml")),
+                ..OutputConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        };
+        assert!(matches!(
+            missing_template.effective_outputs(),
+            Err(OutputConfigError::MissingTemplate { name }) if name == "traefik"
+        ));
     }
 
     #[test]
