@@ -108,14 +108,20 @@ the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
 
+Wrapped command start and exit events automatically render outputs where
+`auto_render = true`, which is the default. The start render records the active
+route after the child process is spawned; the exit render records the stopped
+route after the registry is updated. Auto-render failures are warnings and do
+not change the wrapped command's exit code.
+
 Relative `root` values are resolved beside the discovered project config. If no
 project config is discovered, they resolve from the current working directory.
 Relative targets must stay under the output root and may not traverse through
 symlinks. Absolute roots are accepted after path cleanup, but target paths are
 always relative text file paths.
 
-Automatic rendering on route lifecycle events and deletion for removed routes
-are later v0.3 output slices.
+Automatic rendering for registry cleanup and deletion for removed routes are
+later v0.3 output slices.
 
 ## MiniJinja Behavior
 

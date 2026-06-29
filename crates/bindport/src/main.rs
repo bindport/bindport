@@ -19,10 +19,10 @@ use bindport_adapters::{
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, ConfigError, ConfigSource,
-    DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, FALLBACK_CONFIG_FILE, IdentitySources, LoadedConfig,
-    OutputConfigError, PortRange, SERVICE_NAME, ServiceConfig, ServiceIdentity,
-    default_fallback_config, detect_git_identity, discover_config, normalize_branch_label,
-    resolve_identity,
+    DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, EffectiveOutputConfig, FALLBACK_CONFIG_FILE,
+    IdentitySources, LoadedConfig, OutputConfigError, PortRange, SERVICE_NAME, ServiceConfig,
+    ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
+    normalize_branch_label, resolve_identity,
 };
 use bindport_dashboard::{DashboardOptions, DashboardServer};
 use bindport_registry::{
@@ -281,7 +281,12 @@ fn run_wrapped_command_result(
 
         let started = if let Some(registry) = registry.as_mut() {
             match registry.record_run_started(&run) {
-                Ok(started) => Some(started),
+                Ok(started) => {
+                    if let Err(error) = auto_render_outputs(&cwd, &config, registry) {
+                        print_auto_render_warning("route start", &error);
+                    }
+                    Some(started)
+                }
                 Err(error) => {
                     print_registry_warning("failed to record run start", &error);
                     registry_disabled_warning();
@@ -296,10 +301,15 @@ fn run_wrapped_command_result(
         let attempt_elapsed = attempt_started_at.elapsed();
         let exit_code = status_registry_exit_code(&status);
 
-        if let (Some(registry), Some(started)) = (registry.as_mut(), started)
-            && let Err(error) = registry.record_run_finished(started, exit_code)
-        {
-            print_registry_warning("failed to record run finish", &error);
+        if let (Some(registry), Some(started)) = (registry.as_mut(), started) {
+            match registry.record_run_finished(started, exit_code) {
+                Ok(()) => {
+                    if let Err(error) = auto_render_outputs(&cwd, &config, registry) {
+                        print_auto_render_warning("route finish", &error);
+                    }
+                }
+                Err(error) => print_registry_warning("failed to record run finish", &error),
+            }
         }
 
         if retries < MAX_ALLOCATION_RETRIES
@@ -1481,6 +1491,12 @@ struct RenderCommandOptions {
     dry_run: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderReport {
+    Print,
+    Quiet,
+}
+
 fn run_render_command(args: &[String]) -> ExitCode {
     match run_render_command_result(args) {
         Ok(()) => ExitCode::SUCCESS,
@@ -1526,69 +1542,42 @@ fn run_render_command_result(args: &[String]) -> Result<(), RenderCommandError> 
 
     let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
     let config = resolve_config(&cwd)?;
-    let outputs = config
-        .loaded
-        .as_ref()
-        .map(|loaded| loaded.config.effective_outputs())
-        .transpose()?
-        .unwrap_or_default();
-    let outputs = selected_outputs(outputs, &options)?;
+    let outputs = configured_outputs(&config)?;
+    let outputs = selected_outputs(outputs, options.output.as_deref())?;
 
     if outputs.is_empty() {
         println!("No enabled outputs configured.");
         return Ok(());
     }
 
-    let resolver = TemplateResolver::new(
-        Some(project_template_dir(&cwd, &config)),
-        global_template_dir(),
-    );
     let mut registry = Registry::open_default()?;
-    let snapshot = registry.status_snapshot()?;
-    let routes = route_records(snapshot.services);
-    let base_dir = output_base_dir(&cwd, &config);
-
-    for output in outputs {
-        let template = resolver.resolve(&output.template, None)?;
-        let render_config = OutputRenderConfig::from(&output);
-        let plan = render_output_routes(&render_config, &template.contents, &routes)?;
-
-        if options.dry_run {
-            println!("would render {}: {} files", output.name, plan.files.len());
-            for file in &plan.files {
-                println!("  {}", file.target);
-            }
-            continue;
-        }
-
-        let ownership = registry
-            .output_file_ownership(&output.name)?
-            .into_iter()
-            .map(|owned| AdapterOutputFileOwnership {
-                path: owned.path,
-                content_hash: owned.content_hash,
-            })
-            .collect::<Vec<_>>();
-        let written = write_render_plan(&plan, &base_dir, &ownership)?;
-
-        for file in &written {
-            registry.record_output_file(&OutputFileRecord {
-                output_name: output.name.clone(),
-                route_key: file.route_key.clone(),
-                rendered_path: file.path.clone(),
-                status: OutputFileStatus::Rendered,
-                reason: None,
-                content_hash: Some(file.content_hash.clone()),
-                template_hash: None,
-                lease_id: None,
-                run_id: None,
-            })?;
-        }
-
-        println!("rendered {}: {} files", output.name, written.len());
-    }
+    render_outputs(
+        &cwd,
+        &config,
+        &mut registry,
+        outputs,
+        options.dry_run,
+        RenderReport::Print,
+    )?;
 
     Ok(())
+}
+
+fn auto_render_outputs(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    registry: &mut Registry,
+) -> Result<usize, RenderCommandError> {
+    let outputs = configured_outputs(config)?
+        .into_iter()
+        .filter(|output| output.auto_render)
+        .collect::<Vec<_>>();
+
+    if outputs.is_empty() {
+        return Ok(0);
+    }
+
+    render_outputs(cwd, config, registry, outputs, false, RenderReport::Quiet)
 }
 
 fn parse_render_command(
@@ -1629,11 +1618,22 @@ fn parse_render_command(
     Ok((RenderCommand::Render, options))
 }
 
+fn configured_outputs(
+    config: &ResolvedConfig,
+) -> Result<Vec<EffectiveOutputConfig>, OutputConfigError> {
+    config
+        .loaded
+        .as_ref()
+        .map(|loaded| loaded.config.effective_outputs())
+        .transpose()
+        .map(|outputs| outputs.unwrap_or_default())
+}
+
 fn selected_outputs(
-    outputs: Vec<bindport_core::EffectiveOutputConfig>,
-    options: &RenderCommandOptions,
-) -> Result<Vec<bindport_core::EffectiveOutputConfig>, RenderCommandError> {
-    let Some(name) = options.output.as_deref() else {
+    outputs: Vec<EffectiveOutputConfig>,
+    output_name: Option<&str>,
+) -> Result<Vec<EffectiveOutputConfig>, RenderCommandError> {
+    let Some(name) = output_name else {
         return Ok(outputs);
     };
 
@@ -1649,6 +1649,72 @@ fn selected_outputs(
     }
 
     Ok(selected)
+}
+
+fn render_outputs(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    registry: &mut Registry,
+    outputs: Vec<EffectiveOutputConfig>,
+    dry_run: bool,
+    report: RenderReport,
+) -> Result<usize, RenderCommandError> {
+    let resolver = TemplateResolver::new(
+        Some(project_template_dir(cwd, config)),
+        global_template_dir(),
+    );
+    let snapshot = registry.status_snapshot()?;
+    let routes = route_records(snapshot.services);
+    let base_dir = output_base_dir(cwd, config);
+    let mut rendered = 0;
+
+    for output in outputs {
+        let template = resolver.resolve(&output.template, None)?;
+        let render_config = OutputRenderConfig::from(&output);
+        let plan = render_output_routes(&render_config, &template.contents, &routes)?;
+
+        if dry_run {
+            if report == RenderReport::Print {
+                println!("would render {}: {} files", output.name, plan.files.len());
+                for file in &plan.files {
+                    println!("  {}", file.target);
+                }
+            }
+            rendered += plan.files.len();
+            continue;
+        }
+
+        let ownership = registry
+            .output_file_ownership(&output.name)?
+            .into_iter()
+            .map(|owned| AdapterOutputFileOwnership {
+                path: owned.path,
+                content_hash: owned.content_hash,
+            })
+            .collect::<Vec<_>>();
+        let written = write_render_plan(&plan, &base_dir, &ownership)?;
+
+        for file in &written {
+            registry.record_output_file(&OutputFileRecord {
+                output_name: output.name.clone(),
+                route_key: file.route_key.clone(),
+                rendered_path: file.path.clone(),
+                status: OutputFileStatus::Rendered,
+                reason: None,
+                content_hash: Some(file.content_hash.clone()),
+                template_hash: None,
+                lease_id: None,
+                run_id: None,
+            })?;
+        }
+
+        if report == RenderReport::Print {
+            println!("rendered {}: {} files", output.name, written.len());
+        }
+        rendered += written.len();
+    }
+
+    Ok(rendered)
 }
 
 fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
@@ -1715,6 +1781,22 @@ enum RenderCommandError {
     Render(RenderError),
     File(OutputFileError),
 }
+
+impl std::fmt::Display for RenderCommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Config(error) => write!(f, "{error}"),
+            Self::OutputConfig(error) => write!(f, "{error}"),
+            Self::InvalidArgument(error) => write!(f, "{error}"),
+            Self::Registry(error) => write!(f, "{error}"),
+            Self::Template(error) => write!(f, "{error}"),
+            Self::Render(error) => write!(f, "{error}"),
+            Self::File(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for RenderCommandError {}
 
 impl From<ConfigError> for RenderCommandError {
     fn from(error: ConfigError) -> Self {
@@ -2571,6 +2653,10 @@ fn print_registry_error(error: &RegistryError) {
 
 fn print_registry_warning(context: &str, error: &RegistryError) {
     eprintln!("bindport: warning: {context}: {error}");
+}
+
+fn print_auto_render_warning(context: &str, error: &RenderCommandError) {
+    eprintln!("bindport: warning: output auto-render failed after {context}: {error}");
 }
 
 fn registry_disabled_warning() {
