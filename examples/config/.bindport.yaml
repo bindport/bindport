@@ -24,6 +24,15 @@ dashboard:
     token_env: BINDPORT_DASHBOARD_TOKEN
 identity:
   strategy: git-worktree
+output_defaults:
+  root: .bindport/generated
+  target_host: 127.0.0.1
+  target_scheme: http
+  auto_render: true
+  delete_on:
+    - removed
+  on_failure: warn
+  debounce_ms: 250
 services:
   - name: web
     command: next dev
@@ -33,8 +42,12 @@ services:
       NEXT_PUBLIC_BINDPORT_URL: "{route_url}"
     hostname: "{branch}.{project}.localhost"
     health_url: "http://127.0.0.1:{port}/"
-proxy:
-  traefik:
-    enabled: true
-    directory: /path/to/traefik/dynamic/bindport
-    entrypoint: websecure
+outputs:
+  - name: traefik
+    template: bindport-traefik
+    target: traefik/{{ route.slug }}.yml
+    vars:
+      entrypoints:
+        - web
+      tls: false
+      middlewares: []

@@ -1730,12 +1730,22 @@ fn print_git_diagnostics(cwd: &Path) {
 
 fn print_config_diagnostics(config: &ResolvedConfig) {
     match config.loaded.as_ref() {
-        Some(loaded) => println!(
-            "config: {} ({} {})",
-            loaded.path.display(),
-            loaded.source.as_str(),
-            loaded.format.as_str()
-        ),
+        Some(loaded) => {
+            println!(
+                "config: {} ({} {})",
+                loaded.path.display(),
+                loaded.source.as_str(),
+                loaded.format.as_str()
+            );
+            if let Some(local) = loaded.local_override.as_ref() {
+                println!(
+                    "config local override: {} ({} {})",
+                    local.path.display(),
+                    loaded.source.as_str(),
+                    local.format.as_str()
+                );
+            }
+        }
         None => match config.fallback_path.as_ref() {
             Some(path) => println!("config: none (optional fallback: {})", path.display()),
             None => println!("config: none (optional fallback unavailable)"),

@@ -27,6 +27,8 @@ Thumbs.db
 # Environment / secrets
 .env
 .env.local
+.bindport.local.*
+bindport.local.*
 *.pem
 *.key
 
