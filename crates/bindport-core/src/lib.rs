@@ -20,6 +20,16 @@ pub const DEFAULT_SKIP_PORTS: &[u16] = &[
     29_000, 29_070, 29_118, 29_167, 29_168, 29_169, 29_900, 29_901, 29_920, 29_999,
 ];
 pub const CONFIG_FILENAMES: &[&str] = &[".bindport.toml", ".bindport.json", ".bindport.yaml"];
+pub const LOCAL_CONFIG_FILENAMES: &[&str] = &[
+    ".bindport.local.toml",
+    ".bindport.local.json",
+    ".bindport.local.yaml",
+    ".bindport.local.yml",
+    "bindport.local.toml",
+    "bindport.local.json",
+    "bindport.local.yaml",
+    "bindport.local.yml",
+];
 pub const FALLBACK_CONFIG_FILE: &str = "config.toml";
 pub const APPLIED_CONFIG_KEYS: &[&str] = &[
     "project",
@@ -28,6 +38,8 @@ pub const APPLIED_CONFIG_KEYS: &[&str] = &[
     "skip_ports",
     "services",
     "dashboard",
+    "output_defaults",
+    "outputs",
 ];
 pub const BINDPORT_PROJECT_ENV: &str = "BINDPORT_PROJECT";
 pub const BINDPORT_SERVICE_ENV: &str = "BINDPORT_SERVICE";
@@ -69,6 +81,8 @@ pub struct BindPortConfig {
     pub skip_ports: Option<Vec<u16>>,
     pub services: Option<Vec<ServiceConfig>>,
     pub dashboard: Option<DashboardConfig>,
+    pub output_defaults: Option<OutputDefaultsConfig>,
+    pub outputs: Option<Vec<OutputConfig>>,
 }
 
 impl BindPortConfig {
@@ -86,6 +100,30 @@ impl BindPortConfig {
                 .as_deref()
                 .is_some_and(|name| name == service_name)
         })
+    }
+
+    pub fn output_config(&self, output_name: &str) -> Option<&OutputConfig> {
+        self.outputs.as_deref()?.iter().find(|output| {
+            output
+                .name
+                .as_deref()
+                .is_some_and(|name| name == output_name)
+        })
+    }
+
+    pub fn merge_local_override(&mut self, local: BindPortConfig) {
+        override_option(&mut self.project, local.project);
+        override_option(&mut self.service, local.service);
+        override_option(&mut self.default_range, local.default_range);
+        override_option(&mut self.skip_ports, local.skip_ports);
+        override_option(&mut self.services, local.services);
+        merge_option_with(&mut self.dashboard, local.dashboard, DashboardConfig::merge);
+        merge_option_with(
+            &mut self.output_defaults,
+            local.output_defaults,
+            OutputDefaultsConfig::merge,
+        );
+        merge_outputs(&mut self.outputs, local.outputs);
     }
 }
 
@@ -115,6 +153,149 @@ pub struct DashboardAuthConfig {
     pub required: Option<bool>,
     pub token: Option<String>,
     pub token_env: Option<String>,
+}
+
+impl DashboardConfig {
+    fn merge(&mut self, local: Self) {
+        override_option(&mut self.host, local.host);
+        override_option(&mut self.port, local.port);
+        override_option(&mut self.register_service, local.register_service);
+        override_option(&mut self.allowed_hosts, local.allowed_hosts);
+        merge_option_with(&mut self.auth, local.auth, DashboardAuthConfig::merge);
+    }
+}
+
+impl DashboardAuthConfig {
+    fn merge(&mut self, local: Self) {
+        override_option(&mut self.required, local.required);
+        override_option(&mut self.token, local.token);
+        override_option(&mut self.token_env, local.token_env);
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OutputDefaultsConfig {
+    pub root: Option<String>,
+    pub target_host: Option<String>,
+    pub target_scheme: Option<String>,
+    pub auto_render: Option<bool>,
+    pub delete_on: Option<Vec<OutputDeleteState>>,
+    pub on_failure: Option<OutputFailurePolicy>,
+    pub debounce_ms: Option<u64>,
+}
+
+impl OutputDefaultsConfig {
+    fn merge(&mut self, local: Self) {
+        override_option(&mut self.root, local.root);
+        override_option(&mut self.target_host, local.target_host);
+        override_option(&mut self.target_scheme, local.target_scheme);
+        override_option(&mut self.auto_render, local.auto_render);
+        override_option(&mut self.delete_on, local.delete_on);
+        override_option(&mut self.on_failure, local.on_failure);
+        override_option(&mut self.debounce_ms, local.debounce_ms);
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputDeleteState {
+    Stopped,
+    Stale,
+    Removed,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputFailurePolicy {
+    Warn,
+    Block,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OutputConfig {
+    pub enabled: Option<bool>,
+    pub name: Option<String>,
+    pub template: Option<String>,
+    pub root: Option<String>,
+    pub target: Option<String>,
+    pub target_host: Option<String>,
+    pub target_scheme: Option<String>,
+    pub auto_render: Option<bool>,
+    pub delete_on: Option<Vec<OutputDeleteState>>,
+    pub on_failure: Option<OutputFailurePolicy>,
+    pub debounce_ms: Option<u64>,
+    pub vars: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+impl OutputConfig {
+    fn merge(&mut self, local: Self) {
+        override_option(&mut self.enabled, local.enabled);
+        override_option(&mut self.template, local.template);
+        override_option(&mut self.root, local.root);
+        override_option(&mut self.target, local.target);
+        override_option(&mut self.target_host, local.target_host);
+        override_option(&mut self.target_scheme, local.target_scheme);
+        override_option(&mut self.auto_render, local.auto_render);
+        override_option(&mut self.delete_on, local.delete_on);
+        override_option(&mut self.on_failure, local.on_failure);
+        override_option(&mut self.debounce_ms, local.debounce_ms);
+        merge_map_option(&mut self.vars, local.vars);
+    }
+}
+
+fn override_option<T>(base: &mut Option<T>, local: Option<T>) {
+    if local.is_some() {
+        *base = local;
+    }
+}
+
+fn merge_option_with<T>(base: &mut Option<T>, local: Option<T>, merge: impl FnOnce(&mut T, T)) {
+    match (base.as_mut(), local) {
+        (Some(base), Some(local)) => merge(base, local),
+        (None, Some(local)) => *base = Some(local),
+        (_, None) => {}
+    }
+}
+
+fn merge_map_option<T>(base: &mut Option<BTreeMap<String, T>>, local: Option<BTreeMap<String, T>>) {
+    let Some(local) = local else {
+        return;
+    };
+
+    if let Some(base) = base {
+        base.extend(local);
+    } else {
+        *base = Some(local);
+    }
+}
+
+fn merge_outputs(base: &mut Option<Vec<OutputConfig>>, local: Option<Vec<OutputConfig>>) {
+    let Some(local_outputs) = local else {
+        return;
+    };
+
+    let Some(base_outputs) = base else {
+        *base = Some(local_outputs);
+        return;
+    };
+
+    for local_output in local_outputs {
+        let Some(local_name) = local_output.name.as_deref() else {
+            base_outputs.push(local_output);
+            continue;
+        };
+
+        if let Some(base_output) = base_outputs
+            .iter_mut()
+            .find(|output| output.name.as_deref() == Some(local_name))
+        {
+            base_output.merge(local_output);
+        } else {
+            base_outputs.push(local_output);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +347,7 @@ impl ConfigFormat {
             Some("toml") => Some(Self::Toml),
             Some("json") => Some(Self::Json),
             Some("yaml") => Some(Self::Yaml),
+            Some("yml") => Some(Self::Yaml),
             _ => None,
         }
     }
@@ -199,7 +381,15 @@ pub struct LoadedConfig {
     pub path: PathBuf,
     pub format: ConfigFormat,
     pub source: ConfigSource,
+    pub local_override: Option<LoadedLocalConfig>,
     pub config: BindPortConfig,
+    pub unknown_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedLocalConfig {
+    pub path: PathBuf,
+    pub format: ConfigFormat,
     pub unknown_keys: Vec<String>,
 }
 
@@ -321,7 +511,9 @@ pub fn discover_config(
             let path = directory.join(filename);
 
             if path.is_file() {
-                return load_config(path, ConfigSource::Project).map(Some);
+                return load_config(path, ConfigSource::Project)
+                    .and_then(load_project_local_override)
+                    .map(Some);
             }
         }
     }
@@ -331,6 +523,43 @@ pub fn discover_config(
     }
 
     Ok(None)
+}
+
+fn load_project_local_override(mut loaded: LoadedConfig) -> Result<LoadedConfig, ConfigError> {
+    if loaded.source != ConfigSource::Project {
+        return Ok(loaded);
+    }
+
+    let Some(directory) = loaded.path.parent() else {
+        return Ok(loaded);
+    };
+
+    for filename in LOCAL_CONFIG_FILENAMES {
+        let path = directory.join(filename);
+
+        if path.is_file() {
+            let local = load_config(path, ConfigSource::Project)?;
+            let LoadedConfig {
+                path,
+                format,
+                config,
+                unknown_keys,
+                ..
+            } = local;
+            loaded.config.merge_local_override(config);
+            loaded.unknown_keys.extend(unknown_keys.clone());
+            loaded.unknown_keys.sort();
+            loaded.unknown_keys.dedup();
+            loaded.local_override = Some(LoadedLocalConfig {
+                path,
+                format,
+                unknown_keys,
+            });
+            return Ok(loaded);
+        }
+    }
+
+    Ok(loaded)
 }
 
 pub fn load_config(
@@ -360,6 +589,7 @@ pub fn load_config(
         path,
         format,
         source,
+        local_override: None,
         config,
         unknown_keys,
     })
@@ -817,6 +1047,119 @@ mod tests {
             Some("{route_url}")
         );
         assert_eq!(toml.configured_service_name(), Some("web"));
+    }
+
+    #[test]
+    fn parses_output_config_formats() {
+        let toml = parse_config(
+            ConfigFormat::Toml,
+            "project = \"demo\"\n[output_defaults]\nroot = \".bindport/generated\"\ntarget_host = \"127.0.0.1\"\ntarget_scheme = \"http\"\nauto_render = true\ndelete_on = [\"removed\"]\non_failure = \"warn\"\ndebounce_ms = 250\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\ntarget = \"traefik/{{ route.slug }}.yml\"\n[outputs.vars]\nentrypoints = [\"web\"]\ntls = false\n",
+        )
+        .expect("toml config");
+        let json = parse_config(
+            ConfigFormat::Json,
+            r#"{"project":"demo","output_defaults":{"root":".bindport/generated","target_host":"127.0.0.1","target_scheme":"http","auto_render":true,"delete_on":["removed"],"on_failure":"warn","debounce_ms":250},"outputs":[{"name":"traefik","template":"bindport-traefik","target":"traefik/{{ route.slug }}.yml","vars":{"entrypoints":["web"],"tls":false}}]}"#,
+        )
+        .expect("json config");
+        let yaml = parse_config(
+            ConfigFormat::Yaml,
+            "project: demo\noutput_defaults:\n  root: .bindport/generated\n  target_host: 127.0.0.1\n  target_scheme: http\n  auto_render: true\n  delete_on:\n    - removed\n  on_failure: warn\n  debounce_ms: 250\noutputs:\n  - name: traefik\n    template: bindport-traefik\n    target: traefik/{{ route.slug }}.yml\n    vars:\n      entrypoints:\n        - web\n      tls: false\n",
+        )
+        .expect("yaml config");
+
+        assert_eq!(toml, json);
+        assert_eq!(json, yaml);
+        let defaults = toml.output_defaults.as_ref().expect("output defaults");
+        assert_eq!(defaults.root.as_deref(), Some(".bindport/generated"));
+        assert_eq!(defaults.delete_on, Some(vec![OutputDeleteState::Removed]));
+        assert_eq!(defaults.on_failure, Some(OutputFailurePolicy::Warn));
+        assert_eq!(defaults.debounce_ms, Some(250));
+
+        let output = toml.output_config("traefik").expect("output by name");
+        assert_eq!(output.template.as_deref(), Some("bindport-traefik"));
+        assert_eq!(
+            output
+                .vars
+                .as_ref()
+                .and_then(|vars| vars.get("entrypoints")),
+            Some(&serde_json::json!(["web"]))
+        );
+        assert_eq!(
+            output.vars.as_ref().and_then(|vars| vars.get("tls")),
+            Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn local_override_merges_output_config_by_name() {
+        let root = temp_test_dir("local-output-override");
+        fs::write(
+            root.join(".bindport.toml"),
+            "project = \"base-project\"\n[output_defaults]\nroot = \".bindport/generated\"\ndebounce_ms = 250\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\ntarget = \"traefik/{{ route.slug }}.yml\"\n[outputs.vars]\nentrypoints = [\"web\"]\ntls = false\n[[outputs]]\nname = \"debug\"\ntemplate = \"debug-route\"\ntarget = \"debug/{{ route.slug }}.txt\"\n",
+        )
+        .expect("write base config");
+        fs::write(
+            root.join(".bindport.local.toml"),
+            "project = \"local-project\"\n[output_defaults]\nroot = \"/tmp/bindport-traefik\"\n[[outputs]]\nname = \"traefik\"\ntarget = \"{{ route.slug }}.yml\"\n[outputs.vars]\nentrypoints = [\"websecure\"]\n[[outputs]]\nname = \"extra\"\ntemplate = \"extra-template\"\ntarget = \"extra/{{ route.slug }}.txt\"\n",
+        )
+        .expect("write local override");
+
+        let loaded = discover_config(&root, None)
+            .expect("discover config")
+            .expect("loaded config");
+
+        assert_eq!(loaded.config.project.as_deref(), Some("local-project"));
+        assert_eq!(
+            loaded
+                .local_override
+                .as_ref()
+                .map(|local| local.path.as_path()),
+            Some(root.join(".bindport.local.toml").as_path())
+        );
+        let defaults = loaded
+            .config
+            .output_defaults
+            .as_ref()
+            .expect("output defaults");
+        assert_eq!(defaults.root.as_deref(), Some("/tmp/bindport-traefik"));
+        assert_eq!(defaults.debounce_ms, Some(250));
+
+        let traefik = loaded
+            .config
+            .output_config("traefik")
+            .expect("merged traefik output");
+        assert_eq!(traefik.template.as_deref(), Some("bindport-traefik"));
+        assert_eq!(traefik.target.as_deref(), Some("{{ route.slug }}.yml"));
+        assert_eq!(
+            traefik
+                .vars
+                .as_ref()
+                .and_then(|vars| vars.get("entrypoints")),
+            Some(&serde_json::json!(["websecure"]))
+        );
+        assert_eq!(
+            traefik.vars.as_ref().and_then(|vars| vars.get("tls")),
+            Some(&serde_json::json!(false))
+        );
+        assert!(loaded.config.output_config("debug").is_some());
+        assert!(loaded.config.output_config("extra").is_some());
+    }
+
+    #[test]
+    fn local_override_filenames_preserve_format_precedence() {
+        assert_eq!(
+            LOCAL_CONFIG_FILENAMES,
+            [
+                ".bindport.local.toml",
+                ".bindport.local.json",
+                ".bindport.local.yaml",
+                ".bindport.local.yml",
+                "bindport.local.toml",
+                "bindport.local.json",
+                "bindport.local.yaml",
+                "bindport.local.yml"
+            ]
+        );
     }
 
     #[test]

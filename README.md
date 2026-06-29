@@ -115,8 +115,11 @@ Starter config examples live in [examples/config](examples/config):
 
 TOML is the reference format. When equivalent config files exist, discovery
 prefers TOML, then JSON, then YAML. BindPort walks upward from the current
-directory and uses the first project config it finds. If no project config
-exists, it falls back to the optional user config at
+directory and uses the first project config it finds. A matching
+`.bindport.local.*` or `bindport.local.*` file in the same directory can provide
+machine-local overrides and should stay untracked. If no project config exists,
+it falls back to the
+optional user config at
 `$XDG_CONFIG_HOME/bindport/config.toml`, or `~/.config/bindport/config.toml`
 when `XDG_CONFIG_HOME` is unset. The registry database remains state at
 `$XDG_STATE_HOME/bindport/registry.sqlite`, or
@@ -125,16 +128,18 @@ when `XDG_CONFIG_HOME` is unset. The registry database remains state at
 never required; missing config means built-in defaults are used.
 
 The current implementation reads top-level `project`, `service`,
-`default_range`, `skip_ports`, `[[services]]` entries, and the `[dashboard]` /
-`[dashboard.auth]` settings used by the local dashboard. Dashboard defaults are
-local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard binds
-require auth and a token. Set `dashboard.register_service = true` or pass
+`default_range`, `skip_ports`, `[[services]]` entries, `[dashboard]` /
+`[dashboard.auth]`, `output_defaults`, and `[[outputs]]`. Output configuration is
+accepted so projects can prepare template-output config, but output rendering is
+implemented in the v0.3 work that follows this config slice. Dashboard defaults
+are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
+binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
 appear in `bindport status`. Service entries currently apply `name`, `env`,
-`hostname`, and `route_url`. The example `identity`, `proxy`, and deeper
-service fields such as `command` and `health_url` document the intended future
-shape and are not applied yet; `bindport doctor` reports ignored top-level keys
-so typos and future-only sections are visible.
+`hostname`, and `route_url`. The example `identity` and deeper service fields
+such as `command` and `health_url` document the intended future shape and are
+not applied yet; `bindport doctor` reports ignored top-level keys so typos and
+future-only sections are visible.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
