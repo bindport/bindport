@@ -1,0 +1,7 @@
+{
+  "name": "@orderful/api",
+  "private": true,
+  "scripts": {
+    "dev": "bindport -- cargo run"
+  }
+}

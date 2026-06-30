@@ -1,0 +1,20 @@
+# Copy to .bindport.local.toml for machine-specific settings.
+# Keep the real local override untracked.
+
+[output_defaults]
+# Use this when a containerized proxy cannot reach host loopback.
+target_host = "host.docker.internal"
+
+[dashboard]
+# Binding outside loopback requires auth.
+host = "0.0.0.0"
+allowed_hosts = ["localhost", "127.0.0.1", "devbox.example.test"]
+
+[dashboard.auth]
+required = true
+token_env = "BINDPORT_DASHBOARD_TOKEN"
+
+[[outputs]]
+name = "env-local"
+# Enable only on machines where overwriting DB-owned .env.local files is useful.
+enabled = false

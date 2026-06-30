@@ -9,6 +9,7 @@ preferred dashboard port, allowed Host headers, and token-env based auth.
 - [`.bindport.toml`](config/.bindport.toml)
 - [`.bindport.json`](config/.bindport.json)
 - [`.bindport.yaml`](config/.bindport.yaml)
+- [monorepo fixture](monorepo)
 
 The TOML example renders one Traefik file-provider config per route under
 `.bindport/generated/traefik`. Its service hostname template:
@@ -48,3 +49,7 @@ path = "apps/web"
 name = "api"
 path = "apps/api"
 ```
+
+See [monorepo](monorepo) for a complete two-service example with service env
+templates, Traefik output, opt-in `.env.local` output, workspace metadata, and a
+local override sample.

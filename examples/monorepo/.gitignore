@@ -1,0 +1,5 @@
+.bindport/generated/
+.bindport.local.*
+!.bindport.local.toml.sample
+bindport.local.*
+apps/*/.env.local

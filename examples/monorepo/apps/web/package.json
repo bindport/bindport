@@ -1,0 +1,7 @@
+{
+  "name": "@orderful/web",
+  "private": true,
+  "scripts": {
+    "dev": "bindport -- next dev"
+  }
+}

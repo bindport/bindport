@@ -2,8 +2,8 @@
 
 BindPort is a proxy-neutral local development port registry, allocator, and
 runner. It is meant to wrap development commands, assign a stable local port,
-record which project/service/worktree owns that port, and eventually emit config
-fragments for an existing proxy such as Traefik.
+record which project/service/worktree owns that port, and emit config fragments
+for an existing proxy such as Traefik.
 
 BindPort does not aim to become the local edge proxy. By default it should not
 bind 80/443, install certificates, mutate DNS, edit `/etc/hosts`, or require a
@@ -11,7 +11,7 @@ root-owned daemon.
 
 ## Current Status
 
-BindPort v0.2.0 is available through Cargo:
+BindPort v0.3.0 is the latest released version available through Cargo:
 
 ```sh
 cargo install bindport
@@ -21,7 +21,7 @@ bindport dashboard serve
 bindport -- -- sh -c 'echo "$PORT"'
 ```
 
-The current release includes:
+The current source tree is preparing v0.4.0 and includes:
 
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
@@ -55,11 +55,10 @@ The current release includes:
   dispatch is not wired.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
-The v0.2 support target is Linux and macOS-style local development. Windows is
-not claimed as supported until the cross-platform hardening milestone.
+The current support target is Linux and macOS-style local development. Windows
+is not claimed as supported until the cross-platform hardening milestone.
 
-The v0.2 runner and dashboard are available from Cargo or from a source
-checkout:
+The runner and dashboard are available from Cargo or from a source checkout:
 
 ```sh
 bindport -- next dev
@@ -118,11 +117,13 @@ mise run dev-dashboard
 
 ## Configuration Examples
 
-Starter config examples live in [examples/config](examples/config):
+Starter config examples live in [examples/config](examples/config), and a
+multi-service monorepo fixture lives in [examples/monorepo](examples/monorepo):
 
 - [`.bindport.toml`](examples/config/.bindport.toml)
 - [`.bindport.json`](examples/config/.bindport.json)
 - [`.bindport.yaml`](examples/config/.bindport.yaml)
+- [monorepo `.bindport.toml`](examples/monorepo/.bindport.toml)
 
 TOML is the reference format. When equivalent config files exist, discovery
 prefers TOML, then JSON, then YAML. BindPort walks upward from the current
@@ -228,11 +229,15 @@ services are not removed.
 
 ## Documentation
 
+- [Config](docs/config.md): config discovery, precedence, service entries,
+  local overrides, validation, and supported placeholders.
 - [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
 - [Templates](docs/templates.md): output template lookup, built-in Traefik
   file-provider setup, custom templates, render lifecycle, and troubleshooting.
+- [Monorepos](docs/monorepos.md): root config, path-scoped services, workspace
+  inference, local overrides, and output examples for multi-package repos.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 
