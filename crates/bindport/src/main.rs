@@ -304,8 +304,14 @@ fn run_wrapped_command_result(
         let started = if let Some(registry) = registry.as_mut() {
             match registry.record_run_started(&run) {
                 Ok(started) => {
-                    if let Err(error) = auto_render_outputs(&cwd, &config, registry) {
-                        print_auto_render_warning("route start", &error);
+                    let events = RouteEventCollector::single(
+                        RouteEventSource::CliRunner,
+                        RouteEventKind::RouteStarted,
+                    );
+                    if let Err(error) =
+                        auto_render_outputs_for_events(&cwd, &config, registry, &events)
+                    {
+                        print_auto_render_warning(&events.warning_context(), &error);
                     }
                     Some(started)
                 }
@@ -326,8 +332,14 @@ fn run_wrapped_command_result(
         if let (Some(registry), Some(started)) = (registry.as_mut(), started) {
             match registry.record_run_finished(started, exit_code) {
                 Ok(()) => {
-                    if let Err(error) = auto_render_outputs(&cwd, &config, registry) {
-                        print_auto_render_warning("route finish", &error);
+                    let events = RouteEventCollector::single(
+                        RouteEventSource::CliRunner,
+                        RouteEventKind::RouteFinished,
+                    );
+                    if let Err(error) =
+                        auto_render_outputs_for_events(&cwd, &config, registry, &events)
+                    {
+                        print_auto_render_warning(&events.warning_context(), &error);
                     }
                 }
                 Err(error) => print_registry_warning("failed to record run finish", &error),
@@ -1477,7 +1489,12 @@ fn terminate_process(pid: u32) -> io::Result<()> {
 
 fn dashboard_clean_callback(cwd: PathBuf, config: ResolvedConfig) -> DashboardCleanCallback {
     Arc::new(move |registry, _summary| {
-        auto_render_outputs(&cwd, &config, registry)
+        let events = RouteEventCollector::single(
+            RouteEventSource::DashboardClean,
+            RouteEventKind::RoutesRemoved,
+        );
+
+        auto_render_outputs_for_events(&cwd, &config, registry, &events)
             .map(|_| ())
             .map_err(|error| error.to_string())
     })
@@ -1543,6 +1560,110 @@ enum RenderMode {
     Repair,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RouteEventSource {
+    CliRunner,
+    CliClean,
+    DashboardClean,
+    ManualRender,
+    StaleReconcile,
+}
+
+impl RouteEventSource {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::CliRunner => "cli_runner",
+            Self::CliClean => "cli_clean",
+            Self::DashboardClean => "dashboard_clean",
+            Self::ManualRender => "manual_render",
+            Self::StaleReconcile => "stale_reconcile",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RouteEventKind {
+    RouteStarted,
+    RouteFinished,
+    RoutesRemoved,
+    RoutesMarkedStale,
+    RenderRequested,
+}
+
+impl RouteEventKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::RouteStarted => "route_started",
+            Self::RouteFinished => "route_finished",
+            Self::RoutesRemoved => "routes_removed",
+            Self::RoutesMarkedStale => "routes_marked_stale",
+            Self::RenderRequested => "render_requested",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RouteEvent {
+    source: RouteEventSource,
+    kind: RouteEventKind,
+}
+
+impl RouteEvent {
+    const fn new(source: RouteEventSource, kind: RouteEventKind) -> Self {
+        Self { source, kind }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct RouteEventCollector {
+    events: Vec<RouteEvent>,
+}
+
+struct RenderInvocation<'a> {
+    outputs: Vec<EffectiveOutputConfig>,
+    dry_run: bool,
+    mode: RenderMode,
+    report: RenderReport,
+    events: &'a RouteEventCollector,
+}
+
+impl RouteEventCollector {
+    fn single(source: RouteEventSource, kind: RouteEventKind) -> Self {
+        let mut collector = Self::default();
+        collector.record(source, kind);
+        collector
+    }
+
+    fn record(&mut self, source: RouteEventSource, kind: RouteEventKind) {
+        self.events.push(RouteEvent::new(source, kind));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.events().is_empty()
+    }
+
+    fn warning_context(&self) -> String {
+        match self.events.as_slice() {
+            [event] => format!("{} {}", event.source.as_str(), event.kind.as_str()),
+            [] => String::from("route event"),
+            events => {
+                let sources = events
+                    .iter()
+                    .map(|event| event.source.as_str())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("route events from {sources}")
+            }
+        }
+    }
+
+    fn events(&self) -> &[RouteEvent] {
+        &self.events
+    }
+}
+
 fn run_render_command(args: &[String]) -> ExitCode {
     match run_render_command_result(args) {
         Ok(()) => ExitCode::SUCCESS,
@@ -1602,24 +1723,36 @@ fn run_render_command_result(args: &[String]) -> Result<(), RenderCommandError> 
     } else {
         RenderMode::Normal
     };
-    render_outputs(
+    let events = RouteEventCollector::single(
+        RouteEventSource::ManualRender,
+        RouteEventKind::RenderRequested,
+    );
+    render_outputs_for_events(
         &cwd,
         &config,
         &mut registry,
-        outputs,
-        options.dry_run,
-        mode,
-        RenderReport::Print,
+        RenderInvocation {
+            outputs,
+            dry_run: options.dry_run,
+            mode,
+            report: RenderReport::Print,
+            events: &events,
+        },
     )?;
 
     Ok(())
 }
 
-fn auto_render_outputs(
+fn auto_render_outputs_for_events(
     cwd: &Path,
     config: &ResolvedConfig,
     registry: &mut Registry,
+    events: &RouteEventCollector,
 ) -> Result<usize, RenderCommandError> {
+    if events.is_empty() {
+        return Ok(0);
+    }
+
     let mut outputs = Vec::new();
     for output in configured_outputs(config)?
         .into_iter()
@@ -1636,15 +1769,32 @@ fn auto_render_outputs(
         return Ok(0);
     }
 
-    render_outputs(
+    render_outputs_for_events(
         cwd,
         config,
         registry,
-        outputs,
-        false,
-        RenderMode::Normal,
-        RenderReport::Quiet,
+        RenderInvocation {
+            outputs,
+            dry_run: false,
+            mode: RenderMode::Normal,
+            report: RenderReport::Quiet,
+            events,
+        },
     )
+}
+
+fn collect_stale_reconcile_event(
+    registry: &mut Registry,
+    events: &mut RouteEventCollector,
+) -> Result<(), RegistryError> {
+    if registry.reconcile_stale_active_leases()? > 0 {
+        events.record(
+            RouteEventSource::StaleReconcile,
+            RouteEventKind::RoutesMarkedStale,
+        );
+    }
+
+    Ok(())
 }
 
 fn has_blocking_auto_outputs(config: &ResolvedConfig) -> Result<bool, RenderCommandError> {
@@ -1789,6 +1939,30 @@ fn selected_outputs(
     }
 
     Ok(selected)
+}
+
+fn render_outputs_for_events(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    registry: &mut Registry,
+    invocation: RenderInvocation<'_>,
+) -> Result<usize, RenderCommandError> {
+    if invocation.events.is_empty() {
+        return Ok(0);
+    }
+
+    let mut events = invocation.events.clone();
+    collect_stale_reconcile_event(registry, &mut events)?;
+
+    render_outputs(
+        cwd,
+        config,
+        registry,
+        invocation.outputs,
+        invocation.dry_run,
+        invocation.mode,
+        invocation.report,
+    )
 }
 
 fn render_outputs(
@@ -2481,11 +2655,12 @@ fn clean_registry_result(args: &[String]) -> Result<(), CleanCommandError> {
     let mut registry = Registry::open_default()?;
     let summary = registry.clean_leases(&states, options.dry_run)?;
 
-    if !options.dry_run
-        && summary.total_leases() > 0
-        && let Err(error) = auto_render_outputs_for_current_dir(&mut registry)
-    {
-        print_auto_render_warning("registry cleanup", &error);
+    if !options.dry_run && summary.total_leases() > 0 {
+        let events =
+            RouteEventCollector::single(RouteEventSource::CliClean, RouteEventKind::RoutesRemoved);
+        if let Err(error) = auto_render_outputs_for_current_dir(&mut registry, &events) {
+            print_auto_render_warning(&events.warning_context(), &error);
+        }
     }
 
     if options.json {
@@ -2499,11 +2674,12 @@ fn clean_registry_result(args: &[String]) -> Result<(), CleanCommandError> {
 
 fn auto_render_outputs_for_current_dir(
     registry: &mut Registry,
+    events: &RouteEventCollector,
 ) -> Result<usize, RenderCommandError> {
     let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
     let config = resolve_config(&cwd)?;
 
-    auto_render_outputs(&cwd, &config, registry)
+    auto_render_outputs_for_events(&cwd, &config, registry, events)
 }
 
 fn parse_clean_options(args: &[String]) -> Result<CleanOptions, CleanCommandError> {
@@ -3329,5 +3505,30 @@ mod tests {
     #[test]
     fn empty_runner_command_fails() {
         assert_eq!(run([String::from("--")]), ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn route_event_collector_retains_source_and_kind() {
+        let mut collector =
+            RouteEventCollector::single(RouteEventSource::CliRunner, RouteEventKind::RouteStarted);
+        collector.record(
+            RouteEventSource::StaleReconcile,
+            RouteEventKind::RoutesMarkedStale,
+        );
+
+        assert_eq!(
+            collector.events(),
+            &[
+                RouteEvent::new(RouteEventSource::CliRunner, RouteEventKind::RouteStarted),
+                RouteEvent::new(
+                    RouteEventSource::StaleReconcile,
+                    RouteEventKind::RoutesMarkedStale,
+                )
+            ]
+        );
+        assert_eq!(
+            collector.warning_context(),
+            "route events from cli_runner,stale_reconcile"
+        );
     }
 }
