@@ -1170,6 +1170,13 @@ mod tests {
     }
 
     #[test]
+    fn template_sources_have_stable_display_names() {
+        assert_eq!(TemplateSource::Project.to_string(), "project");
+        assert_eq!(TemplateSource::Global.to_string(), "global");
+        assert_eq!(TemplateSource::BuiltIn.to_string(), "built-in");
+    }
+
+    #[test]
     fn rejects_unsafe_template_names() {
         for name in [
             "",
@@ -1186,6 +1193,76 @@ mod tests {
         }
 
         validate_template_name("bindport-traefik").expect("safe template name");
+    }
+
+    #[test]
+    fn resolver_reports_missing_templates_by_source() {
+        let resolver = TemplateResolver::new(None, None);
+
+        let global_error = resolver
+            .resolve("missing", Some(TemplateSource::Global))
+            .expect_err("missing global template");
+        assert!(matches!(
+            global_error,
+            TemplateError::NotFound {
+                ref name,
+                source: Some(TemplateSource::Global),
+            } if name == "missing"
+        ));
+        assert_eq!(
+            global_error.to_string(),
+            "template `missing` not found in global templates"
+        );
+
+        let any_error = resolver
+            .resolve("missing", None)
+            .expect_err("missing template");
+        assert_eq!(any_error.to_string(), "template `missing` not found");
+    }
+
+    #[test]
+    fn template_errors_expose_io_and_render_sources() {
+        let root = temp_test_dir("template-error-sources");
+        let io_error = read_template(
+            "broken",
+            TemplateSource::Project,
+            root.join("missing.j2"),
+            Vec::new(),
+        )
+        .expect_err("missing template file");
+        assert!(std::error::Error::source(&io_error).is_some());
+        assert!(io_error.to_string().contains("missing.j2"));
+
+        let render_error =
+            render_template("{{ missing }}", minijinja::context! {}).expect_err("render error");
+        assert!(std::error::Error::source(&render_error).is_some());
+        assert!(!render_error.to_string().is_empty());
+
+        let invalid = validate_template_name("../x").expect_err("invalid name");
+        assert_eq!(
+            invalid.to_string(),
+            "invalid template name `../x`; use a safe relative name with no path separators or `..`"
+        );
+        assert!(std::error::Error::source(&invalid).is_none());
+    }
+
+    #[test]
+    fn resolver_directory_errors_include_template_source_path() {
+        let root = temp_test_dir("resolver-directory-errors");
+        let file_path = root.join("not-a-directory");
+        fs::write(&file_path, "template").expect("template marker");
+        let resolver = TemplateResolver::new(Some(file_path.clone()), None);
+
+        let resolve_error = resolver
+            .resolve("app", Some(TemplateSource::Project))
+            .expect_err("resolve from file path fails");
+        assert!(matches!(resolve_error, TemplateError::Io { ref path, .. } if path == &file_path));
+        assert!(std::error::Error::source(&resolve_error).is_some());
+
+        let list_error = resolver
+            .list(Some(TemplateSource::Project))
+            .expect_err("list from file path fails");
+        assert!(matches!(list_error, TemplateError::Io { ref path, .. } if path == &file_path));
     }
 
     #[test]
@@ -1221,6 +1298,54 @@ mod tests {
 
         assert_eq!(resolved.source, TemplateSource::Global);
         assert_eq!(resolved.contents, "global template");
+    }
+
+    #[test]
+    fn lists_templates_with_first_match_precedence_and_source_filters() {
+        let root = temp_test_dir("resolver-list");
+        let project = root.join("project");
+        let global = root.join("global");
+        fs::create_dir_all(project.join("nested")).expect("project nested dir");
+        fs::create_dir_all(&global).expect("global dir");
+        fs::write(project.join("app.yaml.j2"), "app").expect("project app");
+        fs::write(project.join("bindport-traefik.j2"), "project traefik").expect("project traefik");
+        fs::write(project.join(".hidden.j2"), "hidden").expect("hidden template");
+        fs::write(project.join("bad..name.j2"), "bad").expect("bad template");
+        fs::write(global.join("bindport-traefik.j2"), "global traefik").expect("global traefik");
+        fs::write(global.join("global-only.j2"), "global").expect("global only");
+
+        let resolver = TemplateResolver::new(Some(project.clone()), Some(global.clone()));
+        let summaries = resolver.list(None).expect("template summaries");
+        let by_name = summaries
+            .into_iter()
+            .map(|summary| (summary.name.clone(), summary))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(by_name["app"].source, TemplateSource::Project);
+        assert_eq!(by_name["app"].path, Some(project.join("app.yaml.j2")));
+        assert_eq!(by_name["bindport-traefik"].source, TemplateSource::Project);
+        assert_eq!(by_name["global-only"].source, TemplateSource::Global);
+        assert_eq!(
+            by_name["bindport-env-local"].source,
+            TemplateSource::BuiltIn
+        );
+        assert_eq!(by_name["bad"].source, TemplateSource::Project);
+        assert!(!by_name.contains_key(".hidden"));
+
+        let global_summaries = resolver
+            .list(Some(TemplateSource::Global))
+            .expect("global summaries");
+        let global_names = global_summaries
+            .into_iter()
+            .map(|summary| (summary.name, summary.source))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            global_names,
+            BTreeMap::from([
+                (String::from("bindport-traefik"), TemplateSource::Global),
+                (String::from("global-only"), TemplateSource::Global),
+            ])
+        );
     }
 
     #[test]
@@ -1376,6 +1501,57 @@ mod tests {
                 if target == "debug/web.txt"
                     && route_keys == &vec![String::from("route-1"), String::from("route-2")]
         ));
+        assert!(std::error::Error::source(&error).is_none());
+        assert_eq!(
+            error.to_string(),
+            "multiple routes render to target `debug/web.txt`: route-1, route-2"
+        );
+    }
+
+    #[test]
+    fn render_output_routes_reports_template_errors_with_sources() {
+        let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+            name: String::from("debug"),
+            template: String::from("debug-template"),
+            root: None,
+            target: String::from("debug/{{ missing }}.txt"),
+            target_host: String::from("127.0.0.1"),
+            target_scheme: String::from("http"),
+            auto_render: true,
+            delete_on: vec![OutputDeleteState::Removed],
+            on_failure: OutputFailurePolicy::Warn,
+            debounce_ms: 250,
+            vars: BTreeMap::new(),
+        });
+        let route = test_route("route-1", "active", Some("first.demo.localhost"));
+
+        let target_error =
+            render_output_routes(&output, "ok", std::slice::from_ref(&route)).expect_err("target");
+        assert!(matches!(
+            target_error,
+            RenderError::TargetTemplate { ref route_key, .. } if route_key == "route-1"
+        ));
+        assert!(std::error::Error::source(&target_error).is_some());
+        assert!(
+            target_error
+                .to_string()
+                .starts_with("failed to render target for route `route-1`")
+        );
+
+        let mut output = output;
+        output.context.target = String::from("debug/{{ route.service }}.txt");
+        let body_error =
+            render_output_routes(&output, "{{ missing }}", &[route]).expect_err("body");
+        assert!(matches!(
+            body_error,
+            RenderError::BodyTemplate { ref route_key, .. } if route_key == "route-1"
+        ));
+        assert!(std::error::Error::source(&body_error).is_some());
+        assert!(
+            body_error
+                .to_string()
+                .starts_with("failed to render template for route `route-1`")
+        );
     }
 
     #[test]
@@ -1499,6 +1675,37 @@ mod tests {
     }
 
     #[test]
+    fn verify_render_plan_targets_checks_ownership_without_writing() {
+        let root = temp_test_dir("verify-plan-owned");
+        let path = root.join(".bindport/out/routes/demo.yml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        fs::write(&path, "old").expect("old file");
+        let plan = test_render_plan("routes/demo.yml", "new");
+
+        let planned = verify_render_plan_targets(
+            &plan,
+            &root,
+            &[OutputFileOwnership {
+                path: path.clone(),
+                content_hash: content_hash("old"),
+            }],
+        )
+        .expect("owned target verifies");
+
+        assert_eq!(planned[0].path, path);
+        assert_eq!(
+            fs::read_to_string(&planned[0].path).expect("unchanged"),
+            "old"
+        );
+
+        let unowned = verify_render_plan_targets(&plan, &root, &[]).expect_err("unowned target");
+        assert!(matches!(
+            unowned,
+            OutputFileError::UnownedTarget { path: error_path } if error_path == planned[0].path
+        ));
+    }
+
+    #[test]
     fn write_render_plan_refuses_externally_modified_owned_file() {
         let root = temp_test_dir("write-plan-modified");
         let path = root.join(".bindport/out/routes/demo.yml");
@@ -1519,6 +1726,40 @@ mod tests {
         assert!(matches!(
             error,
             OutputFileError::ExternalModified { path: error_path } if error_path == path
+        ));
+    }
+
+    #[test]
+    fn render_plan_paths_support_rootless_targets_and_report_escapes() {
+        let root = temp_test_dir("plan-path-rootless");
+        let mut plan = test_render_plan("routes/demo.yml", "body");
+        plan.output.root = None;
+        plan.output.target = String::from("routes/{{ route.slug }}.yml");
+
+        let planned = render_plan_paths(&plan, &root).expect("rootless path");
+        assert_eq!(planned[0].path, root.join("routes/demo.yml"));
+
+        plan.files[0].target = String::from("other/demo.yml");
+        let error = render_plan_paths(&plan, &root).expect_err("target escapes literal root");
+        assert!(matches!(
+            error,
+            OutputFileError::TargetEscapesRoot { ref target, root: ref error_root }
+                if target == "other/demo.yml" && error_root == &root.join("routes")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn render_plan_paths_rejects_directory_root_as_target() {
+        let root = temp_test_dir("plan-path-root-target");
+        let mut plan = test_render_plan("", "body");
+        plan.output.root = Some(String::from("/"));
+
+        let error = render_plan_paths(&plan, &root).expect_err("directory target");
+
+        assert!(matches!(
+            error,
+            OutputFileError::UnsafeTarget { ref target } if target.is_empty()
         ));
     }
 
@@ -1567,6 +1808,50 @@ mod tests {
 
         assert_eq!(removed[0].status, OutputFileRemovalStatus::Missing);
         assert_eq!(removed[0].path, path);
+    }
+
+    #[test]
+    fn remove_owned_output_files_rejects_targets_outside_root() {
+        let root = temp_test_dir("remove-outside-root");
+        let output = test_render_plan("routes/demo.yml", "owned").output;
+        let outside = root.join("outside/demo.yml");
+
+        let error = remove_owned_output_files(
+            &[RemovableOutputFile {
+                route_key: String::from("route-1"),
+                path: outside.clone(),
+                content_hash: content_hash("owned"),
+            }],
+            &root,
+            &output,
+        )
+        .expect_err("outside root");
+
+        assert!(matches!(
+            error,
+            OutputFileError::TargetEscapesRoot { ref target, .. } if target == &outside.display().to_string()
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_owned_output_files_rejects_directory_target() {
+        let root = temp_test_dir("remove-directory-target");
+        let mut output = test_render_plan("routes/demo.yml", "owned").output;
+        output.root = Some(String::from("/"));
+
+        let error = remove_owned_output_files(
+            &[RemovableOutputFile {
+                route_key: String::from("route-1"),
+                path: PathBuf::from("/"),
+                content_hash: content_hash("owned"),
+            }],
+            &root,
+            &output,
+        )
+        .expect_err("directory target");
+
+        assert!(matches!(error, OutputFileError::UnsafeTarget { .. }));
     }
 
     #[test]
@@ -1637,6 +1922,44 @@ mod tests {
         let error = write_render_plan(&plan, &root, &[]).expect_err("unsafe target");
 
         assert!(matches!(error, OutputFileError::UnsafeTarget { .. }));
+    }
+
+    #[test]
+    fn output_file_errors_have_readable_display_and_io_sources() {
+        let root = PathBuf::from("/tmp/bindport-test-root");
+        let errors = [
+            OutputFileError::UnsafeRoot {
+                root: String::from("../root"),
+            },
+            OutputFileError::UnsafeTarget {
+                target: String::from("../target"),
+            },
+            OutputFileError::TargetEscapesRoot {
+                target: String::from("other/demo.yml"),
+                root: root.clone(),
+            },
+            OutputFileError::SymlinkInPath {
+                path: root.join("link"),
+            },
+            OutputFileError::UnownedTarget {
+                path: root.join("route.yml"),
+            },
+            OutputFileError::ExternalModified {
+                path: root.join("route.yml"),
+            },
+        ];
+
+        for error in errors {
+            assert!(!error.to_string().is_empty());
+            assert!(std::error::Error::source(&error).is_none());
+        }
+
+        let io_error = OutputFileError::Io {
+            path: root.join("route.yml"),
+            source: io::Error::other("disk full"),
+        };
+        assert!(io_error.to_string().contains("disk full"));
+        assert!(std::error::Error::source(&io_error).is_some());
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {

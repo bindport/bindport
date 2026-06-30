@@ -1602,6 +1602,76 @@ mod tests {
     }
 
     #[test]
+    fn configured_service_precedence_covers_path_ties_and_single_service() {
+        let root = temp_test_dir("service-precedence");
+        let web_src = root.join("apps").join("web").join("src");
+        fs::create_dir_all(&web_src).expect("web src");
+        let config = BindPortConfig {
+            services: Some(vec![
+                ServiceConfig {
+                    path: Some(String::from("apps/web")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("empty-path")),
+                    path: Some(String::from(" ")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("first-web")),
+                    path: Some(String::from("apps/web")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("second-web")),
+                    path: Some(String::from("apps/web")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("apps")),
+                    path: Some(String::from("apps")),
+                    ..ServiceConfig::default()
+                },
+            ]),
+            ..BindPortConfig::default()
+        };
+
+        let matched = config
+            .configured_service_for_cwd(&root, &web_src)
+            .expect("matched first web service");
+        assert_eq!(matched.name, "first-web");
+        assert_eq!(matched.source, ConfiguredServiceSource::PathMatch);
+
+        let explicit = BindPortConfig {
+            service: Some(String::from("explicit")),
+            services: config.services.clone(),
+            ..BindPortConfig::default()
+        };
+        assert_eq!(
+            explicit.configured_service_for_cwd(&root, &web_src),
+            Some(ConfiguredService {
+                name: "explicit",
+                source: ConfiguredServiceSource::ServiceField
+            })
+        );
+
+        let single = BindPortConfig {
+            services: Some(vec![ServiceConfig {
+                name: Some(String::from("solo")),
+                ..ServiceConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        };
+        assert_eq!(
+            single.configured_service_for_cwd(&root, &root),
+            Some(ConfiguredService {
+                name: "solo",
+                source: ConfiguredServiceSource::SingleService
+            })
+        );
+    }
+
+    #[test]
     fn parses_output_config_formats() {
         let toml = parse_config(
             ConfigFormat::Toml,
@@ -1698,6 +1768,82 @@ mod tests {
     }
 
     #[test]
+    fn local_override_merges_dashboard_defaults_and_output_edges() {
+        let mut config = BindPortConfig {
+            dashboard: Some(DashboardConfig {
+                host: Some(String::from("127.0.0.1")),
+                port: Some(27_080),
+                register_service: Some(false),
+                auth: Some(DashboardAuthConfig {
+                    required: Some(false),
+                    token_env: Some(String::from("OLD_TOKEN")),
+                    ..DashboardAuthConfig::default()
+                }),
+                ..DashboardConfig::default()
+            }),
+            output_defaults: Some(OutputDefaultsConfig {
+                root: Some(String::from(".bindport/generated")),
+                target_host: Some(String::from("127.0.0.1")),
+                ..OutputDefaultsConfig::default()
+            }),
+            ..BindPortConfig::default()
+        };
+
+        config.merge_local_override(BindPortConfig {
+            dashboard: Some(DashboardConfig {
+                port: Some(27_081),
+                allowed_hosts: Some(vec![String::from("localhost")]),
+                auth: Some(DashboardAuthConfig {
+                    required: Some(true),
+                    token: Some(String::from("test-token")),
+                    ..DashboardAuthConfig::default()
+                }),
+                ..DashboardConfig::default()
+            }),
+            output_defaults: Some(OutputDefaultsConfig {
+                target_scheme: Some(String::from("https")),
+                ..OutputDefaultsConfig::default()
+            }),
+            outputs: Some(vec![OutputConfig {
+                name: Some(String::from("traefik")),
+                template: Some(String::from("bindport-traefik")),
+                target: Some(String::from("{{ route.slug }}.yml")),
+                ..OutputConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        });
+
+        let dashboard = config.dashboard.as_ref().expect("dashboard");
+        assert_eq!(dashboard.host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(dashboard.port, Some(27_081));
+        assert_eq!(dashboard.register_service, Some(false));
+        assert_eq!(
+            dashboard.allowed_hosts,
+            Some(vec![String::from("localhost")])
+        );
+        let auth = dashboard.auth.as_ref().expect("auth");
+        assert_eq!(auth.required, Some(true));
+        assert_eq!(auth.token.as_deref(), Some("test-token"));
+        assert_eq!(auth.token_env.as_deref(), Some("OLD_TOKEN"));
+
+        let defaults = config.output_defaults.as_ref().expect("output defaults");
+        assert_eq!(defaults.root.as_deref(), Some(".bindport/generated"));
+        assert_eq!(defaults.target_host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(defaults.target_scheme.as_deref(), Some("https"));
+        assert!(config.output_config("traefik").is_some());
+
+        config.merge_local_override(BindPortConfig {
+            outputs: Some(vec![OutputConfig {
+                template: Some(String::from("nameless")),
+                target: Some(String::from("nameless.txt")),
+                ..OutputConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        });
+        assert_eq!(config.outputs.as_ref().expect("outputs").len(), 2);
+    }
+
+    #[test]
     fn effective_outputs_apply_defaults_and_skip_disabled_entries() {
         let config = parse_config(
             ConfigFormat::Toml,
@@ -1778,6 +1924,45 @@ mod tests {
             missing_template.effective_outputs(),
             Err(OutputConfigError::MissingTemplate { name }) if name == "traefik"
         ));
+
+        let missing_target = BindPortConfig {
+            outputs: Some(vec![OutputConfig {
+                name: Some(String::from("traefik")),
+                template: Some(String::from("bindport-traefik")),
+                ..OutputConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        };
+        let error = missing_target
+            .effective_outputs()
+            .expect_err("missing target error");
+        assert_eq!(
+            error.to_string(),
+            "output `traefik` is missing required `target`"
+        );
+
+        let duplicate = BindPortConfig {
+            outputs: Some(vec![
+                OutputConfig {
+                    name: Some(String::from("traefik")),
+                    template: Some(String::from("bindport-traefik")),
+                    target: Some(String::from("{{ route.slug }}.yml")),
+                    ..OutputConfig::default()
+                },
+                OutputConfig {
+                    name: Some(String::from("traefik")),
+                    template: Some(String::from("bindport-traefik")),
+                    target: Some(String::from("{{ route.slug }}.yml")),
+                    ..OutputConfig::default()
+                },
+            ]),
+            ..BindPortConfig::default()
+        };
+        let error = duplicate.effective_outputs().expect_err("duplicate error");
+        assert_eq!(
+            error.to_string(),
+            "output `traefik` is defined more than once"
+        );
     }
 
     #[test]
@@ -1786,6 +1971,11 @@ mod tests {
             services: Some(vec![
                 ServiceConfig {
                     path: Some(String::from("../api")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("worker")),
+                    path: Some(String::from(" ")),
                     ..ServiceConfig::default()
                 },
                 ServiceConfig {
@@ -1815,13 +2005,23 @@ mod tests {
                     target: Some(String::from("debug/{{ route.slug }}.txt")),
                     ..OutputConfig::default()
                 },
+                OutputConfig {
+                    enabled: Some(false),
+                    name: Some(String::from("disabled")),
+                    ..OutputConfig::default()
+                },
+                OutputConfig {
+                    template: Some(String::from("nameless")),
+                    target: Some(String::from("nameless.txt")),
+                    ..OutputConfig::default()
+                },
             ]),
             ..BindPortConfig::default()
         };
 
         let issues = config.validate();
 
-        assert_eq!(issues.len(), 7);
+        assert_eq!(issues.len(), 9);
         assert!(issues.iter().any(|issue| {
             issue.field == "services[0].name" && issue.message == "service name is required"
         }));
@@ -1832,13 +2032,16 @@ mod tests {
                     .contains("must be relative to the config file")
         }));
         assert!(issues.iter().any(|issue| {
-            issue.field == "services[1].path"
+            issue.field == "services[1].path" && issue.message == "service path must not be empty"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[2].path"
                 && issue
                     .message
                     .contains("must be relative to the config file")
         }));
         assert!(issues.iter().any(|issue| {
-            issue.field == "services[2].name"
+            issue.field == "services[3].name"
                 && issue.message.contains("duplicate service name `web`")
         }));
         assert!(issues.iter().any(|issue| {
@@ -1857,6 +2060,14 @@ mod tests {
             issue.field == "outputs[2].name"
                 && issue.message.contains("duplicate output name `debug`")
         }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "outputs[4].name" && issue.message == "output name is required"
+        }));
+        assert!(BindPortConfig::default().validate().is_empty());
+        assert_eq!(
+            ConfigValidationIssue::new("field", "message").to_string(),
+            "field: message"
+        );
     }
 
     #[test]
@@ -1885,6 +2096,14 @@ mod tests {
         .expect("unknown keys");
 
         assert_eq!(keys, ["defaultrange", "proxy"]);
+        assert_eq!(
+            unknown_top_level_config_keys(ConfigFormat::Json, "[]").expect("json array"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            unknown_top_level_config_keys(ConfigFormat::Yaml, "[]").expect("yaml array"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -2180,6 +2399,29 @@ mod tests {
     }
 
     #[test]
+    fn package_identity_handles_scoped_names_and_workspace_fallbacks() {
+        assert_eq!(
+            package_identity_name("@scope/web"),
+            Some(String::from("web"))
+        );
+        assert_eq!(package_identity_name("@scope/"), None);
+        assert_eq!(package_identity_name(" "), None);
+        assert_eq!(
+            directory_identity_name(Path::new("/")),
+            String::from("workspace")
+        );
+
+        let root = temp_test_dir("workspace-name-fallback");
+        fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - apps/*\n")
+            .expect("write pnpm workspace");
+        let metadata = workspace_root_metadata(&root);
+        assert_eq!(
+            metadata.identity_name,
+            root.file_name().unwrap().to_str().unwrap()
+        );
+    }
+
+    #[test]
     fn identity_key_delimits_project_and_service_values() {
         let cwd = Path::new("/tmp/bindport");
         let command = [String::from("next")];
@@ -2262,10 +2504,71 @@ mod tests {
                 end: 29_199
             }
         );
+        assert_eq!(
+            parse_port_range("29100")
+                .expect_err("missing separator")
+                .to_string(),
+            "expected START-END"
+        );
+        assert_eq!(
+            parse_port_range("start-29199")
+                .expect_err("invalid start")
+                .to_string(),
+            "invalid range start `start`"
+        );
+        assert_eq!(
+            parse_port_range("29100-end")
+                .expect_err("invalid end")
+                .to_string(),
+            "invalid range end `end`"
+        );
         assert!(matches!(
             parse_port_range("29199-29100"),
             Err(PortRangeParseError::Empty(_))
         ));
+    }
+
+    #[test]
+    fn config_errors_preserve_display_and_sources() {
+        let path = PathBuf::from("/tmp/bindport.toml");
+        let read = ConfigError::Read {
+            path: path.clone(),
+            source: io::Error::new(io::ErrorKind::NotFound, "missing"),
+        };
+        assert!(read.to_string().contains("failed to read config"));
+        assert!(std::error::Error::source(&read).is_some());
+
+        let unknown = ConfigError::UnknownFormat {
+            path: PathBuf::from("/tmp/bindport.txt"),
+        };
+        assert_eq!(
+            unknown.to_string(),
+            "unsupported config format `/tmp/bindport.txt`"
+        );
+        assert!(std::error::Error::source(&unknown).is_none());
+
+        let parse = ConfigError::Parse {
+            path: path.clone(),
+            format: ConfigFormat::Json,
+            source: String::from("bad json"),
+        };
+        assert!(
+            parse
+                .to_string()
+                .contains("failed to parse json config `/tmp/bindport.toml`")
+        );
+        assert!(std::error::Error::source(&parse).is_none());
+
+        let range = ConfigError::InvalidPortRange {
+            path,
+            source: PortRangeParseError::MissingSeparator,
+        };
+        assert!(
+            range
+                .to_string()
+                .contains("invalid default_range in config `/tmp/bindport.toml`")
+        );
+        assert!(std::error::Error::source(&range).is_some());
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {

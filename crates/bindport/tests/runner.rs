@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
+    collections::BTreeSet,
     fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
@@ -906,6 +907,67 @@ fn run_subcommand_accepts_dash_dash_separator() {
 }
 
 #[test]
+fn command_surface_reports_invalid_arguments() {
+    let registry_path = temp_registry_path("invalid-command-surface-registry");
+    let cases: &[(&[&str], &str)] = &[
+        (&["unknown"], "unknown bindport command: unknown"),
+        (&["run"], "missing `--` before wrapped command"),
+        (&["run", "--"], "no command provided after `--`"),
+        (
+            &["run", "web", "api", "--", "true"],
+            "only one service name can be provided",
+        ),
+        (
+            &["run", "--unknown", "--", "true"],
+            "unknown run option `--unknown`",
+        ),
+        (
+            &["run", "--env", "PORT", "--", "true"],
+            "invalid env assignment `PORT`; expected NAME=VALUE",
+        ),
+        (
+            &["run", "--env", "1PORT=3000", "--", "true"],
+            "invalid env variable name `1PORT`",
+        ),
+        (
+            &["run", "--hostname", "--", "true"],
+            "--hostname requires a value",
+        ),
+        (
+            &["run", "--route-url", "--", "true"],
+            "--route-url requires a value",
+        ),
+        (
+            &["config", "explain", "extra"],
+            "config explain does not take arguments",
+        ),
+        (&["config", "missing"], "unknown config command `missing`"),
+        (
+            &["doctor", "outputs", "extra"],
+            "doctor outputs does not take arguments",
+        ),
+        (&["doctor", "missing"], "unknown doctor command `missing`"),
+    ];
+
+    for (args, expected_error) in cases {
+        let output = bindport_with_registry(&registry_path)
+            .args(*args)
+            .output()
+            .expect("run bindport");
+
+        assert!(
+            !output.status.success(),
+            "expected failure for args {args:?}"
+        );
+        let stderr = String::from_utf8(output.stderr).expect("stderr");
+        assert!(
+            stderr.contains(expected_error),
+            "stderr for args {args:?} did not contain `{expected_error}`:\n{stderr}"
+        );
+    }
+}
+
+#[test]
 fn run_subcommand_service_argument_overrides_env_and_config() {
     let registry_path = temp_registry_path("identity-precedence");
     let root = temp_test_dir("identity-precedence-root");
@@ -1623,6 +1685,43 @@ fn config_validate_reports_actionable_errors() {
 }
 
 #[test]
+fn checked_in_monorepo_example_resolves_services() {
+    let registry_path = temp_registry_path("monorepo-example-registry");
+    let root = workspace_root().join("examples").join("monorepo");
+
+    let validate = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["config", "validate"])
+        .output()
+        .expect("validate monorepo example");
+    assert!(
+        validate.status.success(),
+        "config validate failed: {}",
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    let validate_stdout = String::from_utf8(validate.stdout).expect("validate stdout");
+    assert!(validate_stdout.contains("validation: ok"));
+
+    for (path, service) in [("apps/web", "web"), ("apps/api", "api")] {
+        let explain = bindport_with_registry(&registry_path)
+            .current_dir(root.join(path))
+            .args(["config", "explain"])
+            .output()
+            .expect("explain monorepo service");
+        assert!(
+            explain.status.success(),
+            "config explain failed for {path}: {}",
+            String::from_utf8_lossy(&explain.stderr)
+        );
+        let stdout = String::from_utf8(explain.stdout).expect("explain stdout");
+        assert!(stdout.contains("project: orderful (project config `project`)"));
+        assert!(stdout.contains(&format!(
+            "service: {service} (project config `[[services]].path`)"
+        )));
+    }
+}
+
+#[test]
 fn local_project_config_overrides_base_project_config() {
     let registry_path = temp_registry_path("local-project-config-registry");
     let root = temp_test_dir("local-project-config-root");
@@ -1703,6 +1802,91 @@ fn status_json_reports_git_identity() {
             .expect("identity key")
             .starts_with("v1:")
     );
+}
+
+#[test]
+fn same_service_in_distinct_worktrees_keeps_distinct_identities() {
+    let registry_path = temp_registry_path("worktree-collision-registry");
+    let first_root = temp_test_dir("worktree-collision-first");
+    let second_root = temp_test_dir("worktree-collision-second");
+    let config = "project = \"monorepo\"\ndefault_range = \"29440-29449\"\nskip_ports = []\n[[services]]\nname = \"web\"\npath = \"apps/web\"\n";
+
+    for root in [&first_root, &second_root] {
+        fs::create_dir_all(root.join("apps").join("web")).expect("service dir");
+        fs::write(root.join(".bindport.toml"), config).expect("write config");
+        init_git_repo(root, "feature/tree");
+    }
+
+    let first_marker = temp_path("worktree-collision-first-port");
+    let first_marker_arg = first_marker.display().to_string();
+    let mut first = bindport_with_registry(&registry_path)
+        .current_dir(first_root.join("apps").join("web"))
+        .args([
+            "--",
+            "sh",
+            "-c",
+            "printf '%s' \"$PORT\" > \"$1\"; sleep 2",
+            "sh",
+            &first_marker_arg,
+        ])
+        .spawn()
+        .expect("start first service");
+    let first_port = wait_for_file_contains(&first_marker, "", Duration::from_secs(5))
+        .parse::<u16>()
+        .expect("first port");
+
+    let second_output = bindport_with_registry(&registry_path)
+        .current_dir(second_root.join("apps").join("web"))
+        .args(["--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run second service");
+    assert!(
+        second_output.status.success(),
+        "second service failed: {}",
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let second_port = String::from_utf8(second_output.stdout)
+        .expect("second stdout")
+        .parse::<u16>()
+        .expect("second port");
+
+    assert_ne!(first_port, second_port);
+    assert!((29440..=29449).contains(&first_port));
+    assert!((29440..=29449).contains(&second_port));
+
+    let first_status = wait_for_child(&mut first, Duration::from_secs(5)).expect("first exits");
+    assert!(first_status.success());
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    assert!(status_output.status.success());
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    assert_eq!(services.len(), 2);
+
+    let identity_keys = services
+        .iter()
+        .map(|service| service["identity_key"].as_str().expect("identity key"))
+        .collect::<BTreeSet<_>>();
+    let worktree_paths = services
+        .iter()
+        .map(|service| service["worktree_path"].as_str().expect("worktree path"))
+        .collect::<BTreeSet<_>>();
+    let ports = services
+        .iter()
+        .map(|service| service["port"].as_u64().expect("service port"))
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(identity_keys.len(), 2);
+    assert_eq!(worktree_paths.len(), 2);
+    assert_eq!(ports.len(), 2);
+    for service in services {
+        assert_eq!(service["project"], "monorepo");
+        assert_eq!(service["service"], "web");
+        assert_eq!(service["branch"], "feature/tree");
+    }
 }
 
 #[test]
@@ -2028,12 +2212,9 @@ fn render_all_writes_every_enabled_output() {
 fn render_env_local_output_writes_opt_in_dotenv_file() {
     let registry_path = temp_registry_path("render-env-local-registry");
     let root = temp_test_dir("render-env-local-root");
-    let port = free_loopback_port();
     fs::write(
         root.join(".bindport.toml"),
-        format!(
-            "project = \"env-local-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"env-local.localhost\"\n[[outputs]]\nname = \"env-local\"\ntemplate = \"bindport-env-local\"\ntarget = \"apps/{{{{ route.service }}}}/.env.local\"\nauto_render = false\n"
-        ),
+        "project = \"env-local-project\"\ndefault_range = \"29430-29439\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"env-local.localhost\"\n[[outputs]]\nname = \"env-local\"\ntemplate = \"bindport-env-local\"\ntarget = \"apps/{{ route.service }}/.env.local\"\nauto_render = false\n",
     )
     .expect("write env-local config");
 
@@ -2065,11 +2246,17 @@ fn render_env_local_output_writes_opt_in_dotenv_file() {
 
     let env_file = root.join("apps/web/.env.local");
     let contents = fs::read_to_string(&env_file).expect("env-local file");
+    let rendered_port = dotenv_value(&contents, "PORT")
+        .expect("rendered port")
+        .parse::<u16>()
+        .expect("rendered port is numeric");
+    assert!((29430..=29439).contains(&rendered_port));
     assert!(contents.contains("BINDPORT_PROJECT=env-local-project"));
     assert!(contents.contains("BINDPORT_SERVICE=web"));
     assert!(contents.contains("BINDPORT_STATE=stopped"));
-    assert!(contents.contains(&format!("PORT={port}")));
-    assert!(contents.contains(&format!("BINDPORT_TARGET_URL=http://127.0.0.1:{port}")));
+    assert!(contents.contains(&format!(
+        "BINDPORT_TARGET_URL=http://127.0.0.1:{rendered_port}"
+    )));
     assert!(contents.contains("BINDPORT_HOSTNAME=env-local.localhost"));
     assert!(contents.contains("BINDPORT_ROUTE_URL=http://env-local.localhost"));
 }
@@ -2693,6 +2880,14 @@ fn temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("bindport-{name}-{}-{now}", std::process::id()))
 }
 
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf()
+}
+
 fn run_print_port(registry_path: &Path, cwd: &Path) -> u16 {
     let output = bindport_with_registry(registry_path)
         .current_dir(cwd)
@@ -2869,6 +3064,13 @@ fn http_body(response: &str) -> &str {
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .expect("http body separator")
+}
+
+fn dotenv_value<'a>(contents: &'a str, name: &str) -> Option<&'a str> {
+    contents
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .find_map(|(key, value)| (key == name).then_some(value))
 }
 
 fn free_loopback_port() -> u16 {

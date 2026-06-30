@@ -559,12 +559,72 @@ mod tests {
     }
 
     #[test]
+    fn allocate_port_wrapper_uses_real_loopback_availability() {
+        let listener =
+            TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).expect("listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let range = PortRange {
+            start: port,
+            end: port,
+        };
+
+        assert!(!is_port_available(port));
+        assert!(matches!(
+            allocate_port(range, &[]),
+            Err(RunnerError::NoAvailablePort { .. })
+        ));
+
+        assert!(matches!(
+            spawn_child_on_port(&[], port, &[]),
+            Err(RunnerError::NoCommand)
+        ));
+    }
+
+    #[test]
     fn bind_errors_only_conflict_when_address_is_in_use() {
         assert!(!bind_error_leaves_port_available(io::ErrorKind::AddrInUse));
         assert!(bind_error_leaves_port_available(
             io::ErrorKind::AddrNotAvailable
         ));
         assert!(bind_error_leaves_port_available(io::ErrorKind::Unsupported));
+    }
+
+    #[test]
+    fn runner_errors_format_user_facing_messages() {
+        let errors = vec![
+            RunnerError::NoCommand,
+            RunnerError::NoAvailablePort {
+                range: PortRange {
+                    start: 29_000,
+                    end: 29_010,
+                },
+            },
+            RunnerError::SignalForwarding {
+                source: io::Error::other("signals blocked"),
+            },
+            RunnerError::Spawn {
+                command: String::from("missing-command"),
+                source: io::Error::new(io::ErrorKind::NotFound, "not found"),
+            },
+            RunnerError::Wait {
+                command: String::from("sleep"),
+                source: io::Error::other("wait failed"),
+            },
+        ];
+
+        let messages = errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(messages[0], "no command provided after `--`");
+        assert_eq!(messages[1], "no available port found in range 29000-29010");
+        assert_eq!(
+            messages[2],
+            "failed to install signal forwarding: signals blocked"
+        );
+        assert_eq!(messages[3], "failed to spawn `missing-command`: not found");
+        assert_eq!(messages[4], "failed waiting for `sleep`: wait failed");
     }
 
     #[cfg(unix)]
@@ -580,6 +640,7 @@ mod tests {
         };
 
         let mut first = spawn_child(&command, range, &[]).expect("first child");
+        assert!((range.start..=range.end).contains(&first.port()));
         let error = match spawn_child(&command, range, &[]) {
             Ok(mut second) => {
                 let _ = second.kill();

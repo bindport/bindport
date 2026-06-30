@@ -67,6 +67,9 @@ jobs:
       - name: Test
         run: mise run test
 
+      - name: Coverage
+        run: mise run coverage
+
       - name: Build release binary
         run: mise run build
 
