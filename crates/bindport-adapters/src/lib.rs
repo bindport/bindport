@@ -12,6 +12,7 @@ use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 use serde::Serialize;
 
 const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
+const BUILT_IN_ENV_LOCAL: &str = include_str!("../templates/bindport-env-local.env.j2");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdapterKind {
@@ -1132,10 +1133,16 @@ struct BuiltInTemplate {
 }
 
 fn built_in_templates() -> &'static [BuiltInTemplate] {
-    &[BuiltInTemplate {
-        name: "bindport-traefik",
-        contents: BUILT_IN_TRAEFIK,
-    }]
+    &[
+        BuiltInTemplate {
+            name: "bindport-traefik",
+            contents: BUILT_IN_TRAEFIK,
+        },
+        BuiltInTemplate {
+            name: "bindport-env-local",
+            contents: BUILT_IN_ENV_LOCAL,
+        },
+    ]
 }
 
 fn resolve_built_in(name: &str) -> Option<ResolvedTemplate> {
@@ -1269,6 +1276,38 @@ mod tests {
 
         assert!(rendered.contains("Host(`feature.demo.localhost`)"));
         assert!(rendered.contains("url: \"http://127.0.0.1:29100\""));
+    }
+
+    #[test]
+    fn built_in_env_local_template_renders_route_metadata() {
+        let template = TemplateResolver::new(None, None)
+            .resolve("bindport-env-local", None)
+            .expect("built-in template");
+        let rendered = render_template(
+            &template.contents,
+            minijinja::context! {
+                route => minijinja::context! {
+                    project => "demo",
+                    service => "web",
+                    state => "active",
+                    port => 29100,
+                    host => "127.0.0.1",
+                    url => "http://127.0.0.1:29100",
+                    target_url => "http://127.0.0.1:29100",
+                    hostname => "feature.demo.localhost",
+                    route_url => "http://feature.demo.localhost",
+                },
+            },
+        )
+        .expect("built-in template renders");
+
+        assert!(rendered.contains("BINDPORT_PROJECT=demo"));
+        assert!(rendered.contains("BINDPORT_SERVICE=web"));
+        assert!(rendered.contains("BINDPORT_STATE=active"));
+        assert!(rendered.contains("PORT=29100"));
+        assert!(rendered.contains("BINDPORT_TARGET_URL=http://127.0.0.1:29100"));
+        assert!(rendered.contains("BINDPORT_HOSTNAME=feature.demo.localhost"));
+        assert!(rendered.contains("BINDPORT_ROUTE_URL=http://feature.demo.localhost"));
     }
 
     #[test]
