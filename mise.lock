@@ -27,6 +27,10 @@ backend = "cargo:cargo-audit"
 version = "0.13.11"
 backend = "cargo:cargo-edit"
 
+[[tools."cargo:cargo-llvm-cov"]]
+version = "0.8.7"
+backend = "cargo:cargo-llvm-cov"
+
 [[tools.gitleaks]]
 version = "8.30.1"
 backend = "aqua:gitleaks/gitleaks"
