@@ -101,6 +101,66 @@ For an active route with a hostname, the template renders Traefik routers and
 services pointing at `route.target_url`. For stopped, stale, or missing-hostname
 routes, it renders comment-only YAML.
 
+## Traefik File Provider Setup
+
+BindPort does not run Traefik. Point an existing Traefik file provider at the
+directory where BindPort writes generated route files, and let Traefik reload
+when files change.
+
+Example BindPort config for a project that wants branch-scoped local hostnames:
+
+```toml
+project = "orderful-website"
+
+[[services]]
+name = "web"
+hostname = "{branch}.orderful-website.localhost"
+env.PORT = "{port}"
+env.HOSTNAME = "0.0.0.0"
+env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
+
+[output_defaults]
+root = ".bindport/generated"
+target_host = "127.0.0.1"
+target_scheme = "http"
+
+[[outputs]]
+name = "traefik"
+template = "bindport-traefik"
+target = "traefik/{{ route.slug }}.yml"
+
+[outputs.vars]
+entrypoints = ["web"]
+tls = false
+middlewares = []
+```
+
+With that config, a branch named `feature/tree` for service `web` can render a
+host such as `feature-tree.orderful-website.localhost`, and Traefik receives an
+upstream target like `http://127.0.0.1:29123`.
+
+If Traefik runs in a container and needs to reach the host machine instead of
+its own loopback device, set the output target host in local config:
+
+```toml
+[output_defaults]
+target_host = "host.docker.internal"
+```
+
+Then mount or otherwise expose the generated directory to Traefik and configure
+Traefik's file provider to watch that directory. For example:
+
+```yaml
+providers:
+  file:
+    directory: /path/to/project/.bindport/generated/traefik
+    watch: true
+```
+
+Use a project-relative `root` in committed config. Put machine-specific absolute
+paths, container mount paths, or Docker-specific target hosts in
+`.bindport.local.toml`, which should stay untracked.
+
 ## Output Files
 
 Each enabled `[[outputs]]` entry provides a template and a target path template:
@@ -192,3 +252,47 @@ were just cleaned from the registry.
 BindPort uses MiniJinja with strict undefined placeholders and autoescaping
 disabled. That means missing values are errors, and templates must quote or
 escape their own target format correctly.
+
+## Custom Templates
+
+Export the built-in template when you want a project-local starting point:
+
+```sh
+mkdir -p .bindport/templates
+bindport templates export --source built-in bindport-traefik \
+  > .bindport/templates/my-traefik.yml.j2
+```
+
+Then point an output at the new logical template name:
+
+```toml
+[[outputs]]
+name = "traefik"
+template = "my-traefik"
+target = "traefik/{{ route.slug }}.yml"
+```
+
+Custom templates receive the same `route`, `output`, and `vars` context as the
+built-in template. They are text-only and are resolved by logical name, so keep
+template files under project `.bindport/templates` or global
+`$XDG_CONFIG_HOME/bindport/templates`.
+
+## Troubleshooting
+
+- Run `bindport doctor outputs` before starting a wrapped command. It checks
+  template lookup, target rendering, path safety, target collisions, and
+  wildcard-template ambiguity without writing files.
+- Run `bindport render --dry-run` to see planned files without touching disk.
+- Run `bindport status --json` and inspect `outputs` plus per-service
+  `services[].outputs` when a generated file is missing or preserved.
+- If Traefik renders comment-only YAML, confirm the route is active and has
+  `hostname` metadata. Stopped, stale, and missing-hostname routes intentionally
+  render no live router.
+- If Traefik cannot reach the service, check `target_host`. Host Traefik usually
+  works with `127.0.0.1`; containerized Traefik often needs
+  `host.docker.internal` or an equivalent host gateway name.
+- If BindPort refuses to overwrite a file, the file is unowned or externally
+  modified. Use `bindport render --repair` to record externally modified
+  DB-owned files without adopting unknown files.
+- If cleanup does not delete a generated file, confirm the route was removed
+  from the registry and that `delete_on` includes the lifecycle state you expect.
