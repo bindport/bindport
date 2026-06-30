@@ -1527,6 +1527,45 @@ fn service_path_config_infers_service_from_current_directory() {
 }
 
 #[test]
+fn config_explain_reports_field_and_identity_sources() {
+    let registry_path = temp_registry_path("config-explain-registry");
+    let root = temp_test_dir("config-explain-root");
+    let api_src = root.join("apps").join("api").join("src");
+    fs::create_dir_all(&api_src).expect("api source dir");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"base-project\"\ndefault_range = \"29105-29106\"\nskip_ports = [29105]\n[[services]]\nname = \"web\"\npath = \"apps/web\"\n[[services]]\nname = \"api\"\npath = \"apps/api\"\n",
+    )
+    .expect("write base config");
+    fs::write(
+        root.join(".bindport.local.toml"),
+        "project = \"local-project\"\ndefault_range = \"29107-29107\"\n",
+    )
+    .expect("write local config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&api_src)
+        .args(["config", "explain"])
+        .output()
+        .expect("run bindport config explain");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("config explain stdout");
+
+    assert!(stdout.contains("BindPort config explain"));
+    assert!(stdout.contains("config:"));
+    assert!(stdout.contains(".bindport.toml"));
+    assert!(stdout.contains("config local override:"));
+    assert!(stdout.contains(".bindport.local.toml"));
+    assert!(stdout.contains("project: local-project (local override config)"));
+    assert!(stdout.contains("default_range: 29107-29107 (local override config)"));
+    assert!(stdout.contains("skip_ports: 1 ports (project config)"));
+    assert!(stdout.contains("services: 2 entries (project config)"));
+    assert!(stdout.contains("project: local-project (local override config `project`)"));
+    assert!(stdout.contains("service: api (project config `[[services]].path`)"));
+}
+
+#[test]
 fn local_project_config_overrides_base_project_config() {
     let registry_path = temp_registry_path("local-project-config-registry");
     let root = temp_test_dir("local-project-config-root");
