@@ -1743,7 +1743,11 @@ fn render_command_writes_config_files_and_records_ownership() {
         String::from_utf8_lossy(&status_output.stderr)
     );
     let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
-    let rendered_path_string = rendered_path.display().to_string();
+    let rendered_path_string = rendered_path
+        .canonicalize()
+        .expect("canonical rendered path")
+        .display()
+        .to_string();
 
     assert_eq!(status["schema_version"], "0.3");
     assert_eq!(status["outputs"][0]["name"], "traefik");
@@ -1761,7 +1765,7 @@ fn render_command_writes_config_files_and_records_ownership() {
     assert_eq!(status["services"][0]["proxy"]["rendered"], true);
     assert_eq!(
         status["services"][0]["proxy"]["target"],
-        rendered_path.display().to_string()
+        rendered_path_string
     );
 
     let rerender = bindport_with_registry(&registry_path)
