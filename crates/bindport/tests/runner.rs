@@ -1831,6 +1831,115 @@ fn render_command_writes_config_files_and_records_ownership() {
 }
 
 #[test]
+fn render_repair_records_externally_modified_owned_files() {
+    let registry_path = temp_registry_path("render-repair-modified-registry");
+    let root = temp_test_dir("render-repair-modified-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-repair\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"repair.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+    let rendered_path = root.join(".bindport/generated/traefik/web.yml");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "traefik"])
+        .output()
+        .expect("render output");
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    fs::write(&rendered_path, "external change").expect("modify rendered file");
+
+    let repair = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "--repair", "traefik"])
+        .output()
+        .expect("repair output");
+    assert!(
+        repair.status.success(),
+        "repair failed: {}",
+        String::from_utf8_lossy(&repair.stderr)
+    );
+    let repair_stdout = String::from_utf8(repair.stdout).expect("repair stdout");
+    assert!(repair_stdout.contains("repaired traefik: 0 files"));
+    assert!(repair_stdout.contains("preserved traefik: 1 externally modified files"));
+    assert_eq!(
+        fs::read_to_string(&rendered_path).expect("preserved file"),
+        "external change"
+    );
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["outputs"][0]["rendered"], 0);
+    assert_eq!(status["outputs"][0]["error"], 1);
+    assert_eq!(status["services"][0]["outputs"][0]["status"], "error");
+    assert_eq!(
+        status["services"][0]["outputs"][0]["reason"],
+        "external_modified"
+    );
+}
+
+#[test]
+fn runner_blocks_start_when_required_output_preflight_fails() {
+    let registry_path = temp_registry_path("render-block-preflight-registry");
+    let root = temp_test_dir("render-block-preflight-root");
+    let port = free_loopback_port();
+    let marker_path = root.join("child-ran");
+    let marker_arg = marker_path.display().to_string();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-block\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"block.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"../blocked.yml\"\non_failure = \"block\"\n"
+        ),
+    )
+    .expect("write render config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args([
+            "run",
+            "web",
+            "--",
+            "sh",
+            "-c",
+            "printf ran > \"$1\"",
+            "sh",
+            &marker_arg,
+        ])
+        .output()
+        .expect("run bindport");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unsafe output target"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!marker_path.exists());
+}
+
+#[test]
 fn runner_auto_renders_outputs_on_start_and_exit() {
     let registry_path = temp_registry_path("auto-render-registry");
     let root = temp_test_dir("auto-render-root");

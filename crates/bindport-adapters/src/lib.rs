@@ -637,6 +637,26 @@ pub fn write_render_plan(
     Ok(written)
 }
 
+pub fn verify_render_plan_targets(
+    plan: &RenderPlan,
+    base_dir: &Path,
+    ownership: &[OutputFileOwnership],
+) -> Result<Vec<PlannedOutputFile>, OutputFileError> {
+    let root = output_root(base_dir, &plan.output)?;
+    let symlink_anchor = symlink_check_anchor(base_dir, &root, &plan.output);
+    let planned_files = render_plan_paths_with_anchor(plan, base_dir, &root, &symlink_anchor)?;
+    let owned_hashes = ownership
+        .iter()
+        .map(|owned| (owned.path.clone(), owned.content_hash.clone()))
+        .collect::<BTreeMap<_, _>>();
+
+    for planned in &planned_files {
+        verify_existing_target(&planned.path, &owned_hashes)?;
+    }
+
+    Ok(planned_files)
+}
+
 pub fn remove_owned_output_files(
     files: &[RemovableOutputFile],
     base_dir: &Path,

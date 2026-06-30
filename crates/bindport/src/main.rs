@@ -17,16 +17,17 @@ use std::os::unix::process::ExitStatusExt;
 use bindport_adapters::{
     AdapterKind, OutputFileError, OutputFileOwnership as AdapterOutputFileOwnership,
     OutputFileRemovalStatus as AdapterOutputFileRemovalStatus, OutputRenderConfig,
-    RemovableOutputFile as AdapterRemovableOutputFile, RenderError, RouteRecord,
+    RemovableOutputFile as AdapterRemovableOutputFile, RenderError, RenderPlan, RouteRecord,
     TemplateError as AdapterTemplateError, TemplateResolver, TemplateSource,
-    remove_owned_output_files, render_output_routes, render_plan_paths, write_render_plan,
+    remove_owned_output_files, render_output_routes, render_plan_paths, verify_render_plan_targets,
+    write_render_plan,
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, ConfigError, ConfigSource,
     DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, EffectiveOutputConfig, FALLBACK_CONFIG_FILE,
-    IdentitySources, LoadedConfig, OutputConfigError, OutputDeleteState, PortRange, SERVICE_NAME,
-    ServiceConfig, ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
-    normalize_branch_label, resolve_identity,
+    IdentitySources, LoadedConfig, OutputConfigError, OutputDeleteState, OutputFailurePolicy,
+    PortRange, SERVICE_NAME, ServiceConfig, ServiceIdentity, default_fallback_config,
+    detect_git_identity, discover_config, normalize_branch_label, resolve_identity,
 };
 use bindport_dashboard::{DashboardCleanCallback, DashboardOptions, DashboardServer};
 use bindport_registry::{
@@ -214,6 +215,10 @@ fn run_wrapped_command(command: &[String], options: RunOptions) -> ExitCode {
             eprintln!("bindport: {error}");
             ExitCode::FAILURE
         }
+        Err(RunCommandError::OutputRender(error)) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -230,6 +235,7 @@ fn run_wrapped_command_result(
     let identity = resolve_run_identity(&cwd, command, options, &config);
     let service_config = configured_service(&config, &identity);
     let run_templates = resolve_run_templates(options, service_config);
+    let requires_output_preflight = has_blocking_auto_outputs(&config)?;
     let mut registry = open_optional_registry();
     let mut skip_ports = config.skip_ports.clone();
     let mut previous_port = None;
@@ -269,6 +275,17 @@ fn run_wrapped_command_result(
         };
         let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
         let run_metadata = resolve_run_metadata(&identity, port, &run_templates)?;
+        if requires_output_preflight {
+            let Some(registry) = registry.as_mut() else {
+                return Err(RenderCommandError::InvalidArgument(String::from(
+                    "output rendering requires registry recording when on_failure = \"block\"",
+                ))
+                .into());
+            };
+            let pending_route =
+                pending_route_record(&identity, port, &run_metadata, &command_display, &cwd);
+            preflight_blocking_outputs(&cwd, &config, registry, pending_route)?;
+        }
         let mut child = spawn_child_on_port(command, port, &run_metadata.env)?;
         let attempt_started_at = Instant::now();
         let run = RunStart {
@@ -337,6 +354,7 @@ enum RunCommandError {
     Runner(RunnerError),
     Config(ConfigError),
     Template(TemplateError),
+    OutputRender(RenderCommandError),
 }
 
 impl From<RunnerError> for RunCommandError {
@@ -354,6 +372,12 @@ impl From<ConfigError> for RunCommandError {
 impl From<TemplateError> for RunCommandError {
     fn from(error: TemplateError) -> Self {
         Self::Template(error)
+    }
+}
+
+impl From<RenderCommandError> for RunCommandError {
+    fn from(error: RenderCommandError) -> Self {
+        Self::OutputRender(error)
     }
 }
 
@@ -1504,12 +1528,19 @@ struct RenderCommandOptions {
     output: Option<String>,
     all: bool,
     dry_run: bool,
+    repair: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RenderReport {
     Print,
     Quiet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderMode {
+    Normal,
+    Repair,
 }
 
 fn run_render_command(args: &[String]) -> ExitCode {
@@ -1525,7 +1556,7 @@ fn run_render_command(args: &[String]) -> ExitCode {
         }
         Err(RenderCommandError::InvalidArgument(error)) => {
             eprintln!("bindport: {error}");
-            eprintln!("usage: bindport render [output] [--all] [--dry-run]");
+            eprintln!("usage: bindport render [output] [--all] [--dry-run] [--repair]");
             ExitCode::FAILURE
         }
         Err(RenderCommandError::Registry(error)) => {
@@ -1566,12 +1597,18 @@ fn run_render_command_result(args: &[String]) -> Result<(), RenderCommandError> 
     }
 
     let mut registry = Registry::open_default()?;
+    let mode = if options.repair {
+        RenderMode::Repair
+    } else {
+        RenderMode::Normal
+    };
     render_outputs(
         &cwd,
         &config,
         &mut registry,
         outputs,
         options.dry_run,
+        mode,
         RenderReport::Print,
     )?;
 
@@ -1583,16 +1620,98 @@ fn auto_render_outputs(
     config: &ResolvedConfig,
     registry: &mut Registry,
 ) -> Result<usize, RenderCommandError> {
-    let outputs = configured_outputs(config)?
+    let mut outputs = Vec::new();
+    for output in configured_outputs(config)?
         .into_iter()
         .filter(|output| output.auto_render)
-        .collect::<Vec<_>>();
+    {
+        let delay = registry.reserve_auto_render(&output.name, output.debounce_ms)?;
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+        outputs.push(output);
+    }
 
     if outputs.is_empty() {
         return Ok(0);
     }
 
-    render_outputs(cwd, config, registry, outputs, false, RenderReport::Quiet)
+    render_outputs(
+        cwd,
+        config,
+        registry,
+        outputs,
+        false,
+        RenderMode::Normal,
+        RenderReport::Quiet,
+    )
+}
+
+fn has_blocking_auto_outputs(config: &ResolvedConfig) -> Result<bool, RenderCommandError> {
+    Ok(configured_outputs(config)?
+        .into_iter()
+        .any(|output| output.auto_render && output.on_failure == OutputFailurePolicy::Block))
+}
+
+fn preflight_blocking_outputs(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    registry: &mut Registry,
+    pending_route: RouteRecord,
+) -> Result<(), RenderCommandError> {
+    let outputs = configured_outputs(config)?
+        .into_iter()
+        .filter(|output| output.auto_render && output.on_failure == OutputFailurePolicy::Block)
+        .collect::<Vec<_>>();
+
+    if outputs.is_empty() {
+        return Ok(());
+    }
+
+    let snapshot = registry.status_snapshot()?;
+    let mut routes = route_records(snapshot.services);
+    routes.retain(|route| route.key != pending_route.key);
+    routes.push(pending_route);
+
+    validate_render_outputs(cwd, config, registry, outputs, &routes)
+}
+
+fn validate_render_outputs(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    registry: &Registry,
+    outputs: Vec<EffectiveOutputConfig>,
+    routes: &[RouteRecord],
+) -> Result<(), RenderCommandError> {
+    let resolver = TemplateResolver::new(
+        Some(project_template_dir(cwd, config)),
+        global_template_dir(),
+    );
+    let base_dir = output_base_dir(cwd, config);
+
+    for output in outputs {
+        let template = resolver.resolve(&output.template, None)?;
+        let render_config = OutputRenderConfig::from(&output);
+        let delete_route_keys = delete_route_keys(&output, routes);
+        let render_routes = routes
+            .iter()
+            .filter(|route| !delete_route_keys.contains(&route.key))
+            .cloned()
+            .collect::<Vec<_>>();
+        let plan = render_output_routes(&render_config, &template.contents, &render_routes)?;
+        let ownership = registry.output_file_ownership(&output.name)?;
+        let write_ownership = ownership
+            .iter()
+            .map(|owned| AdapterOutputFileOwnership {
+                path: owned.path.clone(),
+                content_hash: owned.content_hash.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        verify_render_plan_targets(&plan, &base_dir, &write_ownership)?;
+    }
+
+    Ok(())
 }
 
 fn parse_render_command(
@@ -1606,6 +1725,7 @@ fn parse_render_command(
             "--help" | "-h" => return Ok((RenderCommand::Help, RenderCommandOptions::default())),
             "--all" => options.all = true,
             "--dry-run" => options.dry_run = true,
+            "--repair" => options.repair = true,
             option if option.starts_with("--") => {
                 return Err(RenderCommandError::InvalidArgument(format!(
                     "unknown render option `{option}`"
@@ -1627,6 +1747,11 @@ fn parse_render_command(
     if options.all && options.output.is_some() {
         return Err(RenderCommandError::InvalidArgument(String::from(
             "--all cannot be combined with an output name",
+        )));
+    }
+    if options.dry_run && options.repair {
+        return Err(RenderCommandError::InvalidArgument(String::from(
+            "--repair cannot be combined with --dry-run",
         )));
     }
 
@@ -1672,6 +1797,7 @@ fn render_outputs(
     registry: &mut Registry,
     outputs: Vec<EffectiveOutputConfig>,
     dry_run: bool,
+    mode: RenderMode,
     report: RenderReport,
 ) -> Result<usize, RenderCommandError> {
     let resolver = TemplateResolver::new(
@@ -1726,32 +1852,115 @@ fn render_outputs(
             &base_dir,
             &render_config,
         )?;
-        let written = write_render_plan(&plan, &base_dir, &write_ownership)?;
-
-        for file in &written {
-            registry.record_output_file(&OutputFileRecord {
-                output_name: output.name.clone(),
-                route_key: file.route_key.clone(),
-                rendered_path: file.path.clone(),
-                status: OutputFileStatus::Rendered,
-                reason: None,
-                content_hash: Some(file.content_hash.clone()),
-                template_hash: None,
-                lease_id: None,
-                run_id: None,
-            })?;
-        }
+        let write_summary = match mode {
+            RenderMode::Normal => {
+                let written = write_render_plan(&plan, &base_dir, &write_ownership)?;
+                record_written_output_files(registry, &output, &written)?;
+                RenderWriteSummary {
+                    written: written.len(),
+                    external_modified: 0,
+                }
+            }
+            RenderMode::Repair => {
+                write_repair_render_plan(registry, &output, &plan, &base_dir, &write_ownership)?
+            }
+        };
 
         if report == RenderReport::Print {
-            println!("rendered {}: {} files", output.name, written.len());
+            let verb = if mode == RenderMode::Repair {
+                "repaired"
+            } else {
+                "rendered"
+            };
+            println!("{verb} {}: {} files", output.name, write_summary.written);
             if removed > 0 {
                 println!("removed {}: {} files", output.name, removed);
             }
+            if write_summary.external_modified > 0 {
+                println!(
+                    "preserved {}: {} externally modified files",
+                    output.name, write_summary.external_modified
+                );
+            }
         }
-        rendered += written.len();
+        rendered += write_summary.written;
     }
 
     Ok(rendered)
+}
+
+struct RenderWriteSummary {
+    written: usize,
+    external_modified: usize,
+}
+
+fn write_repair_render_plan(
+    registry: &mut Registry,
+    output: &EffectiveOutputConfig,
+    plan: &RenderPlan,
+    base_dir: &Path,
+    ownership: &[AdapterOutputFileOwnership],
+) -> Result<RenderWriteSummary, RenderCommandError> {
+    let mut summary = RenderWriteSummary {
+        written: 0,
+        external_modified: 0,
+    };
+
+    for file in &plan.files {
+        let single_file_plan = RenderPlan {
+            output: plan.output.clone(),
+            files: vec![file.clone()],
+        };
+        match write_render_plan(&single_file_plan, base_dir, ownership) {
+            Ok(written) => {
+                record_written_output_files(registry, output, &written)?;
+                summary.written += written.len();
+            }
+            Err(OutputFileError::ExternalModified { path }) => {
+                let expected_hash = ownership
+                    .iter()
+                    .find(|owned| owned.path == path)
+                    .map(|owned| owned.content_hash.clone());
+                registry.record_output_file(&OutputFileRecord {
+                    output_name: output.name.clone(),
+                    route_key: file.route_key.clone(),
+                    rendered_path: path,
+                    status: OutputFileStatus::Error,
+                    reason: Some(String::from("external_modified")),
+                    content_hash: expected_hash,
+                    template_hash: None,
+                    lease_id: None,
+                    run_id: None,
+                })?;
+                summary.external_modified += 1;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Ok(summary)
+}
+
+fn record_written_output_files(
+    registry: &mut Registry,
+    output: &EffectiveOutputConfig,
+    written: &[bindport_adapters::WrittenOutputFile],
+) -> Result<(), RegistryError> {
+    for file in written {
+        registry.record_output_file(&OutputFileRecord {
+            output_name: output.name.clone(),
+            route_key: file.route_key.clone(),
+            rendered_path: file.path.clone(),
+            status: OutputFileStatus::Rendered,
+            reason: None,
+            content_hash: Some(file.content_hash.clone()),
+            template_hash: None,
+            lease_id: None,
+            run_id: None,
+        })?;
+    }
+
+    Ok(())
 }
 
 fn delete_route_keys(output: &EffectiveOutputConfig, routes: &[RouteRecord]) -> BTreeSet<String> {
@@ -1803,17 +2012,24 @@ fn remove_output_files_for_lifecycle(
     let mut removed_count = 0;
 
     for file in removed {
-        let (status, reason) = match file.status {
+        let expected_hash = candidates
+            .iter()
+            .find(|candidate| candidate.route_key == file.route_key && candidate.path == file.path)
+            .map(|candidate| candidate.content_hash.clone());
+        let (status, reason, content_hash) = match file.status {
             AdapterOutputFileRemovalStatus::Removed => {
                 removed_count += 1;
-                (OutputFileStatus::Removed, None)
+                (OutputFileStatus::Removed, None, None)
             }
-            AdapterOutputFileRemovalStatus::Missing => {
-                (OutputFileStatus::Removed, Some(String::from("missing")))
-            }
+            AdapterOutputFileRemovalStatus::Missing => (
+                OutputFileStatus::Removed,
+                Some(String::from("missing")),
+                None,
+            ),
             AdapterOutputFileRemovalStatus::ExternalModified => (
                 OutputFileStatus::Error,
                 Some(String::from("external_modified")),
+                expected_hash,
             ),
         };
 
@@ -1823,7 +2039,7 @@ fn remove_output_files_for_lifecycle(
             rendered_path: file.path,
             status,
             reason,
-            content_hash: None,
+            content_hash,
             template_hash: None,
             lease_id: None,
             run_id: None,
@@ -1866,6 +2082,38 @@ fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
             }
         })
         .collect()
+}
+
+fn pending_route_record(
+    identity: &ServiceIdentity,
+    port: u16,
+    metadata: &RunMetadata,
+    command: &str,
+    cwd: &Path,
+) -> RouteRecord {
+    let git = identity.git.as_ref();
+
+    RouteRecord {
+        key: identity.identity_key.clone(),
+        project: identity.project.clone(),
+        service: identity.service.clone(),
+        state: String::from("active"),
+        health: String::from("unknown"),
+        port,
+        host: String::from("127.0.0.1"),
+        url: format!("http://127.0.0.1:{port}"),
+        hostname: metadata.hostname.clone(),
+        route_url: metadata.route_url.clone(),
+        branch: git.map(|git| git.branch.clone()),
+        branch_label: git.map(|git| git.branch_label.clone()),
+        worktree_path: git.map(|git| git.worktree_path.display().to_string()),
+        worktree_hash: git.map(|git| git.worktree_hash.clone()),
+        pid: None,
+        command: command.to_string(),
+        cwd: cwd.display().to_string(),
+        started_at: String::from("pending"),
+        updated_at: String::from("pending"),
+    }
 }
 
 fn output_base_dir(cwd: &Path, config: &ResolvedConfig) -> PathBuf {
@@ -3012,6 +3260,7 @@ fn print_render_help() {
     println!("Options:");
     println!("  --all        Render every enabled output (default)");
     println!("  --dry-run    Render templates and print targets without writing files");
+    println!("  --repair     Re-render current routes and reconcile DB-owned files");
 }
 
 fn print_templates_help() {

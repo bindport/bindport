@@ -3,6 +3,7 @@
 use std::{
     env, fmt, fs, io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use bindport_core::{SERVICE_NAME, ServiceIdentity};
@@ -544,8 +545,11 @@ impl Registry {
             "SELECT route_key, rendered_path, content_hash
              FROM output_files
              WHERE output_name = ?1
-             AND status = 'rendered'
              AND content_hash IS NOT NULL
+             AND (
+                status = 'rendered'
+                OR (status = 'error' AND reason = 'external_modified')
+             )
              ORDER BY rendered_path, route_key",
         )?;
         let rows = statement.query_map(params![output_name], |row| {
@@ -594,6 +598,65 @@ impl Registry {
         )?;
 
         Ok(())
+    }
+
+    pub fn reserve_auto_render(
+        &mut self,
+        output_name: &str,
+        debounce_ms: u64,
+    ) -> Result<Duration, RegistryError> {
+        let now_ms = self.connection.query_row(
+            "SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+
+        self.reserve_auto_render_at(output_name, debounce_ms, now_ms)
+    }
+
+    fn reserve_auto_render_at(
+        &mut self,
+        output_name: &str,
+        debounce_ms: u64,
+        now_ms: i64,
+    ) -> Result<Duration, RegistryError> {
+        let transaction = self.connection.transaction()?;
+        let previous_ms = transaction
+            .query_row(
+                "SELECT last_render_at_ms
+                 FROM output_render_state
+                 WHERE output_name = ?1",
+                params![output_name],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        let debounce_ms = i64::try_from(debounce_ms).unwrap_or(i64::MAX);
+        let delay_ms = if debounce_ms == 0 {
+            0
+        } else {
+            previous_ms
+                .map(|previous_ms| {
+                    previous_ms
+                        .saturating_add(debounce_ms)
+                        .saturating_sub(now_ms)
+                })
+                .unwrap_or_default()
+                .max(0)
+        };
+        let scheduled_ms = now_ms.saturating_add(delay_ms);
+
+        transaction.execute(
+            "INSERT INTO output_render_state (output_name, last_render_at_ms)
+             VALUES (?1, ?2)
+             ON CONFLICT(output_name) DO UPDATE SET
+                last_render_at_ms = excluded.last_render_at_ms",
+            params![output_name, scheduled_ms],
+        )?;
+        transaction.commit()?;
+
+        Ok(Duration::from_millis(
+            u64::try_from(delay_ms).unwrap_or(u64::MAX),
+        ))
     }
 
     fn ensure_schema(&self) -> Result<(), RegistryError> {
@@ -669,7 +732,12 @@ impl Registry {
             CREATE INDEX IF NOT EXISTS output_files_route_key_idx
             ON output_files(route_key);
 
-            PRAGMA user_version = 5;
+            CREATE TABLE IF NOT EXISTS output_render_state (
+                output_name TEXT PRIMARY KEY,
+                last_render_at_ms INTEGER NOT NULL
+            );
+
+            PRAGMA user_version = 6;
             ",
         )?;
 
@@ -1089,6 +1157,38 @@ mod tests {
     }
 
     #[test]
+    fn output_file_ownership_keeps_external_modified_expected_hashes() {
+        let mut registry =
+            Registry::open(temp_registry_path("output-files-modified")).expect("registry");
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key: String::from("route-1"),
+                rendered_path: PathBuf::from("/tmp/bindport/route-1.yml"),
+                status: OutputFileStatus::Error,
+                reason: Some(String::from("external_modified")),
+                content_hash: Some(String::from("hash-1")),
+                template_hash: Some(String::from("template-1")),
+                lease_id: None,
+                run_id: None,
+            })
+            .expect("record external modification");
+
+        let ownership = registry
+            .output_file_ownership("traefik")
+            .expect("ownership records");
+
+        assert_eq!(
+            ownership,
+            vec![OutputFileOwnership {
+                route_key: String::from("route-1"),
+                path: PathBuf::from("/tmp/bindport/route-1.yml"),
+                content_hash: String::from("hash-1")
+            }]
+        );
+    }
+
+    #[test]
     fn record_output_file_upserts_by_output_and_route() {
         let mut registry =
             Registry::open(temp_registry_path("output-files-upsert")).expect("registry");
@@ -1120,6 +1220,26 @@ mod tests {
         assert_eq!(ownership.len(), 1);
         assert_eq!(ownership[0].path, PathBuf::from("/tmp/bindport/new.yml"));
         assert_eq!(ownership[0].content_hash, "new-hash");
+    }
+
+    #[test]
+    fn auto_render_reservations_apply_debounce_windows() {
+        let mut registry =
+            Registry::open(temp_registry_path("auto-render-reservation")).expect("registry");
+
+        let first = registry
+            .reserve_auto_render_at("traefik", 250, 1_000)
+            .expect("first reservation");
+        let second = registry
+            .reserve_auto_render_at("traefik", 250, 1_100)
+            .expect("debounced reservation");
+        let disabled = registry
+            .reserve_auto_render_at("traefik", 0, 1_100)
+            .expect("disabled debounce");
+
+        assert_eq!(first, Duration::from_millis(0));
+        assert_eq!(second, Duration::from_millis(150));
+        assert_eq!(disabled, Duration::from_millis(0));
     }
 
     #[cfg(unix)]
