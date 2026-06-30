@@ -155,9 +155,13 @@ ownership.
 Wrapped command start and exit events automatically render outputs where
 `auto_render = true`, which is the default. The start render records the active
 route after the child process is spawned; the exit render records the stopped
-route after the registry is updated. Automatic renders reserve a SQLite-backed
-debounce slot per output. The default `debounce_ms = 250` spaces rapid events;
-set `debounce_ms = 0` to render immediately on every automatic event. Manual
+route after the registry is updated. Render triggers flow through an internal
+route-event collector with source tags for `cli_runner`, `cli_clean`,
+`dashboard_clean`, `manual_render`, and `stale_reconcile`. The collector is not a
+public API, but keeps local CLI and dashboard actions on the same path for later
+trusted automation. Automatic renders reserve a SQLite-backed debounce slot per
+output. The default `debounce_ms = 250` spaces rapid events; set
+`debounce_ms = 0` to render immediately on every automatic event. Manual
 `bindport render` and `bindport render --repair` bypass debounce.
 
 Auto-render failures are warnings and do not change the wrapped command's exit
