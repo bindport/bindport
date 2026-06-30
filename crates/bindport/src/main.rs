@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
+    collections::BTreeSet,
     env, fs,
     io::{self, BufRead, Write},
     net::Ipv4Addr,
@@ -14,14 +15,16 @@ use std::os::unix::process::ExitStatusExt;
 
 use bindport_adapters::{
     AdapterKind, OutputFileError, OutputFileOwnership as AdapterOutputFileOwnership,
-    OutputRenderConfig, RenderError, RouteRecord, TemplateError as AdapterTemplateError,
-    TemplateResolver, TemplateSource, render_output_routes, render_plan_paths, write_render_plan,
+    OutputFileRemovalStatus as AdapterOutputFileRemovalStatus, OutputRenderConfig,
+    RemovableOutputFile as AdapterRemovableOutputFile, RenderError, RouteRecord,
+    TemplateError as AdapterTemplateError, TemplateResolver, TemplateSource,
+    remove_owned_output_files, render_output_routes, render_plan_paths, write_render_plan,
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, ConfigError, ConfigSource,
     DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, EffectiveOutputConfig, FALLBACK_CONFIG_FILE,
-    IdentitySources, LoadedConfig, OutputConfigError, PortRange, SERVICE_NAME, ServiceConfig,
-    ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
+    IdentitySources, LoadedConfig, OutputConfigError, OutputDeleteState, PortRange, SERVICE_NAME,
+    ServiceConfig, ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
     normalize_branch_label, resolve_identity,
 };
 use bindport_dashboard::{DashboardOptions, DashboardServer};
@@ -1665,13 +1668,23 @@ fn render_outputs(
     );
     let snapshot = registry.status_snapshot()?;
     let routes = route_records(snapshot.services);
+    let current_route_keys = routes
+        .iter()
+        .map(|route| route.key.clone())
+        .collect::<BTreeSet<_>>();
     let base_dir = output_base_dir(cwd, config);
     let mut rendered = 0;
 
     for output in outputs {
         let template = resolver.resolve(&output.template, None)?;
         let render_config = OutputRenderConfig::from(&output);
-        let plan = render_output_routes(&render_config, &template.contents, &routes)?;
+        let delete_route_keys = delete_route_keys(&output, &routes);
+        let render_routes = routes
+            .iter()
+            .filter(|route| !delete_route_keys.contains(&route.key))
+            .cloned()
+            .collect::<Vec<_>>();
+        let plan = render_output_routes(&render_config, &template.contents, &render_routes)?;
 
         if dry_run {
             if report == RenderReport::Print {
@@ -1684,15 +1697,24 @@ fn render_outputs(
             continue;
         }
 
-        let ownership = registry
-            .output_file_ownership(&output.name)?
-            .into_iter()
+        let ownership = registry.output_file_ownership(&output.name)?;
+        let write_ownership = ownership
+            .iter()
             .map(|owned| AdapterOutputFileOwnership {
-                path: owned.path,
-                content_hash: owned.content_hash,
+                path: owned.path.clone(),
+                content_hash: owned.content_hash.clone(),
             })
             .collect::<Vec<_>>();
-        let written = write_render_plan(&plan, &base_dir, &ownership)?;
+        let removed = remove_output_files_for_lifecycle(
+            registry,
+            &output,
+            &ownership,
+            &current_route_keys,
+            &delete_route_keys,
+            &base_dir,
+            &render_config,
+        )?;
+        let written = write_render_plan(&plan, &base_dir, &write_ownership)?;
 
         for file in &written {
             registry.record_output_file(&OutputFileRecord {
@@ -1710,11 +1732,93 @@ fn render_outputs(
 
         if report == RenderReport::Print {
             println!("rendered {}: {} files", output.name, written.len());
+            if removed > 0 {
+                println!("removed {}: {} files", output.name, removed);
+            }
         }
         rendered += written.len();
     }
 
     Ok(rendered)
+}
+
+fn delete_route_keys(output: &EffectiveOutputConfig, routes: &[RouteRecord]) -> BTreeSet<String> {
+    routes
+        .iter()
+        .filter(|route| {
+            route_delete_state(route).is_some_and(|state| output.delete_on.contains(&state))
+        })
+        .map(|route| route.key.clone())
+        .collect()
+}
+
+fn route_delete_state(route: &RouteRecord) -> Option<OutputDeleteState> {
+    match route.state.as_str() {
+        "stopped" => Some(OutputDeleteState::Stopped),
+        "stale" => Some(OutputDeleteState::Stale),
+        _ => None,
+    }
+}
+
+fn remove_output_files_for_lifecycle(
+    registry: &mut Registry,
+    output: &EffectiveOutputConfig,
+    ownership: &[bindport_registry::OutputFileOwnership],
+    current_route_keys: &BTreeSet<String>,
+    delete_route_keys: &BTreeSet<String>,
+    base_dir: &Path,
+    render_config: &OutputRenderConfig,
+) -> Result<usize, RenderCommandError> {
+    let delete_removed = output.delete_on.contains(&OutputDeleteState::Removed);
+    let candidates = ownership
+        .iter()
+        .filter(|owned| {
+            delete_route_keys.contains(&owned.route_key)
+                || (delete_removed && !current_route_keys.contains(&owned.route_key))
+        })
+        .map(|owned| AdapterRemovableOutputFile {
+            route_key: owned.route_key.clone(),
+            path: owned.path.clone(),
+            content_hash: owned.content_hash.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    let removed = remove_owned_output_files(&candidates, base_dir, &render_config.context)?;
+    let mut removed_count = 0;
+
+    for file in removed {
+        let (status, reason) = match file.status {
+            AdapterOutputFileRemovalStatus::Removed => {
+                removed_count += 1;
+                (OutputFileStatus::Removed, None)
+            }
+            AdapterOutputFileRemovalStatus::Missing => {
+                (OutputFileStatus::Removed, Some(String::from("missing")))
+            }
+            AdapterOutputFileRemovalStatus::ExternalModified => (
+                OutputFileStatus::Error,
+                Some(String::from("external_modified")),
+            ),
+        };
+
+        registry.record_output_file(&OutputFileRecord {
+            output_name: output.name.clone(),
+            route_key: file.route_key,
+            rendered_path: file.path,
+            status,
+            reason,
+            content_hash: None,
+            template_hash: None,
+            lease_id: None,
+            run_id: None,
+        })?;
+    }
+
+    Ok(removed_count)
 }
 
 fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
@@ -2123,8 +2227,15 @@ fn clean_registry_result(args: &[String]) -> Result<(), CleanCommandError> {
     }
 
     let states = options.states();
-    let summary = Registry::open_default()
-        .and_then(|mut registry| registry.clean_leases(&states, options.dry_run))?;
+    let mut registry = Registry::open_default()?;
+    let summary = registry.clean_leases(&states, options.dry_run)?;
+
+    if !options.dry_run
+        && summary.total_leases() > 0
+        && let Err(error) = auto_render_outputs_for_current_dir(&mut registry)
+    {
+        print_auto_render_warning("registry cleanup", &error);
+    }
 
     if options.json {
         print_clean_json(summary, options.dry_run)?;
@@ -2133,6 +2244,15 @@ fn clean_registry_result(args: &[String]) -> Result<(), CleanCommandError> {
     }
 
     Ok(())
+}
+
+fn auto_render_outputs_for_current_dir(
+    registry: &mut Registry,
+) -> Result<usize, RenderCommandError> {
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    let config = resolve_config(&cwd)?;
+
+    auto_render_outputs(&cwd, &config, registry)
 }
 
 fn parse_clean_options(args: &[String]) -> Result<CleanOptions, CleanCommandError> {

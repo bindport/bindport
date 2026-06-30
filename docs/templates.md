@@ -115,6 +115,24 @@ the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
 
+`delete_on` controls when DB-owned output files are removed. The default is
+`["removed"]`, which deletes a rendered file after the matching route has been
+removed from the registry and cleanup triggers output rendering. Users can opt
+into earlier cleanup:
+
+```toml
+[[outputs]]
+name = "traefik"
+template = "bindport-traefik"
+target = "traefik/{{ route.service }}.yml"
+delete_on = ["stopped", "stale", "removed"]
+```
+
+Deletion is conservative: BindPort removes only files recorded in SQLite as
+rendered output files, and only when the current on-disk hash matches the
+recorded hash. Missing files are marked removed. Externally modified files are
+preserved and marked as output errors.
+
 `bindport doctor outputs` checks the same configured outputs, template lookup,
 target planning, and output path safety without writing files or recording
 ownership.
@@ -131,8 +149,10 @@ Relative targets must stay under the output root and may not traverse through
 symlinks. Absolute roots are accepted after path cleanup, but target paths are
 always relative text file paths.
 
-Automatic rendering for registry cleanup and deletion for removed routes are
-later v0.3 output slices.
+CLI registry cleanup triggers output rendering so the default `delete_on =
+["removed"]` behavior can remove DB-owned files for routes that were just
+cleaned from the registry. Dashboard cleanup output events remain a later v0.3
+slice.
 
 ## MiniJinja Behavior
 
