@@ -97,10 +97,33 @@ impl BindPortConfig {
     }
 
     pub fn configured_service_name_for_cwd(&self, config_root: &Path, cwd: &Path) -> Option<&str> {
-        self.service
-            .as_deref()
-            .or_else(|| self.service_name_for_cwd(config_root, cwd))
-            .or_else(|| self.single_service_name())
+        self.configured_service_for_cwd(config_root, cwd)
+            .map(|service| service.name)
+    }
+
+    pub fn configured_service_for_cwd(
+        &self,
+        config_root: &Path,
+        cwd: &Path,
+    ) -> Option<ConfiguredService<'_>> {
+        if let Some(name) = self.service.as_deref() {
+            return Some(ConfiguredService {
+                name,
+                source: ConfiguredServiceSource::ServiceField,
+            });
+        }
+
+        if let Some(name) = self.service_name_for_cwd(config_root, cwd) {
+            return Some(ConfiguredService {
+                name,
+                source: ConfiguredServiceSource::PathMatch,
+            });
+        }
+
+        self.single_service_name().map(|name| ConfiguredService {
+            name,
+            source: ConfiguredServiceSource::SingleService,
+        })
     }
 
     pub fn service_config(&self, service_name: &str) -> Option<&ServiceConfig> {
@@ -261,6 +284,19 @@ impl BindPortConfig {
         );
         merge_outputs(&mut self.outputs, local.outputs);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfiguredService<'a> {
+    pub name: &'a str,
+    pub source: ConfiguredServiceSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfiguredServiceSource {
+    ServiceField,
+    PathMatch,
+    SingleService,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -590,18 +626,20 @@ pub struct LoadedConfig {
 pub struct LoadedLocalConfig {
     pub path: PathBuf,
     pub format: ConfigFormat,
+    pub config: BindPortConfig,
     pub unknown_keys: Vec<String>,
 }
 
 impl LoadedConfig {
     pub fn configured_service_name_for_cwd(&self, cwd: &Path) -> Option<&str> {
-        self.path
-            .parent()
-            .and_then(|config_root| {
-                self.config
-                    .configured_service_name_for_cwd(config_root, cwd)
-            })
-            .or_else(|| self.config.configured_service_name())
+        self.configured_service_for_cwd(cwd)
+            .map(|service| service.name)
+    }
+
+    pub fn configured_service_for_cwd(&self, cwd: &Path) -> Option<ConfiguredService<'_>> {
+        let config_root = self.path.parent().unwrap_or_else(|| Path::new("."));
+
+        self.config.configured_service_for_cwd(config_root, cwd)
     }
 
     pub fn port_range(&self) -> Result<PortRange, ConfigError> {
@@ -756,13 +794,14 @@ fn load_project_local_override(mut loaded: LoadedConfig) -> Result<LoadedConfig,
                 unknown_keys,
                 ..
             } = local;
-            loaded.config.merge_local_override(config);
+            loaded.config.merge_local_override(config.clone());
             loaded.unknown_keys.extend(unknown_keys.clone());
             loaded.unknown_keys.sort();
             loaded.unknown_keys.dedup();
             loaded.local_override = Some(LoadedLocalConfig {
                 path,
                 format,
+                config,
                 unknown_keys,
             });
             return Ok(loaded);
@@ -1384,6 +1423,11 @@ mod tests {
             config.configured_service_name_for_cwd(&root, &web_src),
             Some("web")
         );
+        let matched = config
+            .configured_service_for_cwd(&root, &web_src)
+            .expect("matched web service");
+        assert_eq!(matched.name, "web");
+        assert_eq!(matched.source, ConfiguredServiceSource::PathMatch);
         assert_eq!(
             config.configured_service_name_for_cwd(&root, &api),
             Some("api")
@@ -1406,6 +1450,11 @@ mod tests {
             config.configured_service_name_for_cwd(&root, &api_src),
             Some("api")
         );
+        let matched = config
+            .configured_service_for_cwd(&root, &api_src)
+            .expect("matched api service");
+        assert_eq!(matched.name, "api");
+        assert_eq!(matched.source, ConfiguredServiceSource::PathMatch);
     }
 
     #[test]
