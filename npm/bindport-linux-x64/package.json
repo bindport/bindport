@@ -1,0 +1,28 @@
+{
+  "name": "@bindport/linux-x64",
+  "version": "0.3.0",
+  "description": "Linux x64 native binary for BindPort.",
+  "license": "MIT",
+  "homepage": "https://github.com/bindport/bindport#readme",
+  "bugs": {
+    "url": "https://github.com/bindport/bindport/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bindport/bindport.git",
+    "directory": "npm/bindport-linux-x64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/bindport",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

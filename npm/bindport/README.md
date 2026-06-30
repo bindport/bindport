@@ -1,13 +1,32 @@
-# bindport npm wrapper
+# bindport
 
-Bootstrap placeholder for the future BindPort npm package.
+Proxy-neutral local development port registry and runner.
 
-The published package will provide a `bindport` command that dispatches to the
-native binary for the current platform. Do not publish this package until the
-native binary install/dispatch path is real. See
-[`docs/release.md`](../../docs/release.md) for the release policy.
+This package provides the `bindport` command for JavaScript package managers.
+It dispatches to one optional native package for the current platform:
 
-For now, install the published Cargo crate:
+- `@bindport/linux-x64`
+- `@bindport/linux-arm64`
+- `@bindport/darwin-x64`
+- `@bindport/darwin-arm64`
+
+Install it as a development dependency in a package or monorepo:
+
+```sh
+npm install --save-dev bindport
+```
+
+Then use it from scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "bindport -- next dev"
+  }
+}
+```
+
+Cargo remains a supported install path:
 
 ```sh
 cargo install bindport

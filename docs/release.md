@@ -4,9 +4,9 @@ BindPort releases are review-first. Version bumps happen in a normal pull
 request. A manually dispatched GitHub Actions workflow verifies reviewed `main`
 and can create the stable Git tag and GitHub Release.
 
-Cargo package publishing is manual. The npm wrapper is useful release glue, but
-it must not be published until it can install or dispatch to real platform
-binaries.
+Cargo and npm package publishing are manual. The GitHub Release workflow builds
+native binaries and npm tarballs; separate publish workflows/scripts push those
+reviewed artifacts to crates.io and npm.
 
 ## Current Status
 
@@ -18,8 +18,9 @@ cargo install bindport
 ```
 
 The current release targets Linux and macOS-style local development. Windows
-support remains future/beta until the cross-platform hardening milestone. npm is
-not published yet because the package still needs native binary dispatch.
+support remains future/beta until the cross-platform hardening milestone. npm
+publishing uses the unscoped `bindport` wrapper package plus scoped native
+binary packages for Linux and macOS on x64/arm64.
 
 The minimum release gate is:
 
@@ -127,8 +128,9 @@ merged.
 ## Release Check Gate
 
 Release checks are intentionally non-publishing by default. They validate the
-version, run the local CI gate, dry-run Cargo package contents, and dry-run the
-npm package tarball. Full crates.io publish dry-runs are reserved for the
+version, run the local CI gate, dry-run Cargo package contents, validate all npm
+package versions and optional dependencies, and dry-run wrapper/platform npm
+package tarballs. Full crates.io publish dry-runs are reserved for the
 `--publish-ready` gate because Cargo publishing remains a separate manual
 action.
 
@@ -151,8 +153,8 @@ version bumps. Use its `publish_ready` input only when checking the Cargo packag
 state immediately before a manual crates.io publish. That input runs the
 publish helper in dry-run mode. For a new workspace version, crates that depend
 on unpublished internal crate versions may be skipped until their dependencies
-exist on crates.io. npm remains a separate future publish path while
-`npm/bindport/package.json` is private.
+exist on crates.io. npm publishing remains a separate manual action after the
+GitHub Release artifacts have been created.
 
 ## Stable Release
 
@@ -206,8 +208,17 @@ Release artifacts are uploaded to the GitHub Release:
 
 - `bindport-linux-x64`
 - `bindport-linux-x64.sha256`
+- `bindport-linux-arm64`
+- `bindport-linux-arm64.sha256`
+- `bindport-macos-x64`
+- `bindport-macos-x64.sha256`
 - `bindport-macos-arm64`
 - `bindport-macos-arm64.sha256`
+- `bindport-linux-x64-X.Y.Z.tgz`
+- `bindport-linux-arm64-X.Y.Z.tgz`
+- `bindport-darwin-x64-X.Y.Z.tgz`
+- `bindport-darwin-arm64-X.Y.Z.tgz`
+- `bindport-X.Y.Z.tgz`
 
 Dry runs run the release checks and release Git credential preflight. They do
 not create Git tags or GitHub Releases. They still build release binaries so the
@@ -391,11 +402,11 @@ claimed. Published crate versions are permanent and cannot be overwritten or
 deleted from the archive. They can be yanked, but the version number remains
 used.
 
-For npm, the name is claimed by publishing the first package version. Unscoped
-packages such as `bindport` are public. Scoped packages such as `@bindport/cli`
-are private by default and require `--access public` for public visibility.
-Because a used `package@version` cannot be reused even after unpublish, wait
-until the wrapper can install or dispatch to a real native binary.
+For npm, the `bindport` wrapper package name is final. The native packages use
+the `@bindport/*` scope and must be published with public access. Because a used
+`package@version` cannot be reused even after unpublish, publish npm only from
+reviewed GitHub Release tarballs. The `@bindport` npm scope must exist before
+the native packages can be published.
 
 ## npm Package Shape
 
@@ -411,7 +422,7 @@ BindPort does not need a Node application stack. The runtime remains the Rust
 binary; npm is only an install path for JavaScript projects that want to call
 `bindport` from `package.json` scripts.
 
-The preferred npm shape is a small wrapper package plus platform packages:
+The npm shape is a small wrapper package plus platform packages:
 
 - `bindport`: user-facing wrapper and `bin` entry.
 - `@bindport/linux-x64`: Linux x64 native binary.
@@ -419,30 +430,34 @@ The preferred npm shape is a small wrapper package plus platform packages:
 - `@bindport/darwin-x64`: macOS Intel native binary.
 - `@bindport/darwin-arm64`: macOS Apple Silicon native binary.
 
-The wrapper should declare platform packages as optional dependencies and
-resolve the installed package for `process.platform` and `process.arch`. Avoid a
-postinstall download script unless platform packages prove unworkable.
+The wrapper declares platform packages as optional dependencies and resolves the
+installed package for `process.platform` and `process.arch`. There is no
+postinstall download script; release-built platform package tarballs contain the
+native binaries.
 
-Before the first real npm publish:
+Before a real npm publish:
 
-1. Choose the final package name (`bindport` or `@bindport/cli`).
-2. Add platform packages for the supported OS/architecture targets.
-3. Make the wrapper resolve those packages reliably.
-4. Verify `npx`, `npm exec`, and `bunx` against a packed local tarball.
-5. Remove `"private": true` from `npm/bindport/package.json`.
-6. From `npm/bindport`, verify `npm pack --dry-run`.
+1. Run the GitHub `Release` workflow for the version.
+2. Confirm the GitHub Release contains all raw binaries, checksums, and npm
+   tarballs.
+3. Run the `npm Publish` workflow with `execute=false`.
+4. Run the `npm Publish` workflow with `execute=true` after the dry-run passes.
 
-First public publish, when ready:
+Local npm publish dry-run from downloaded release tarballs:
 
 ```sh
-cd npm/bindport
-npm publish --access public
+gh release download v0.4.0 --pattern "*.tgz" --dir dist/npm
+mise run npm-publish v0.4.0 --dist dist/npm
 ```
 
-For the unscoped name `bindport`, `--access public` is unnecessary because
-public access is the default. The flag is required only for a scoped public
-package such as `@bindport/cli`. Revisit the command once the final package name
-is chosen.
+Real local npm publish, when intentionally bypassing the workflow:
+
+```sh
+mise run npm-publish v0.4.0 --dist dist/npm --execute
+```
+
+Publish order matters: native platform packages are published first, then the
+`bindport` wrapper. The `npm-publish` script enforces that order.
 
 ## Bun / bunx Workflow
 
@@ -515,7 +530,8 @@ run:
 - The `Cargo Publish` workflow may publish crates.io packages only when manually
   dispatched with `execute=true` and approved through the `crates-io`
   environment.
-- No workflow publishes npm packages yet.
+- The `npm Publish` workflow may publish npm packages only when manually
+  dispatched with `execute=true` and approved through the `npm` environment.
 - No workflow commits version bumps back to the repository.
 - Keep automatic package publishing disabled until the manual workflows have
   shipped cleanly.

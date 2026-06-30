@@ -80,15 +80,7 @@ bump_version() {
 
 update_npm_version() {
   local version="$1"
-  # shellcheck disable=SC2016
-  node -e '
-    const fs = require("fs");
-    const path = "npm/bindport/package.json";
-    const version = process.argv[1];
-    const packageJson = JSON.parse(fs.readFileSync(path, "utf8"));
-    packageJson.version = version;
-    fs.writeFileSync(path, `${JSON.stringify(packageJson, null, 2)}\n`);
-  ' "$version"
+  node scripts/npm-package-utils.js update-version "$version"
 }
 
 update_workspace_dependency_versions() {
@@ -221,7 +213,7 @@ cargo metadata --format-version 1 --no-deps >/dev/null
 cargo metadata --locked --format-version 1 --no-deps >/dev/null
 MISE_TRUSTED_CONFIG_PATHS="$root" scripts/release-check.sh --version "$new_version" --allow-dirty
 
-git add Cargo.toml Cargo.lock npm/bindport/package.json
+git add Cargo.toml Cargo.lock npm
 git diff --staged --quiet && die "version update produced no staged changes"
 git commit -m "build: prepare v$new_version release"
 git push -u origin "$release_branch"

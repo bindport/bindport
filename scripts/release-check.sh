@@ -119,9 +119,11 @@ if [[ "$npm_name" != "$npm_package_name" ]]; then
   exit 1
 fi
 
-if [[ "$publish_ready" == "true" && "$npm_private" == "true" ]]; then
-  echo "npm package is private; npm publishing remains disabled."
+if [[ "$npm_private" == "true" ]]; then
+  echo "npm package is private; npm publishing is disabled." >&2
+  exit 1
 fi
+node scripts/npm-package-utils.js validate "$version"
 
 git diff --check
 
@@ -149,9 +151,6 @@ if [[ "$publish_ready" == "true" ]]; then
 else
   echo "Skipping Cargo publish dry-run; use --publish-ready before crates.io publishing."
 fi
-(
-  cd npm/bindport
-  npm pack --dry-run
-)
+node scripts/npm-package-utils.js pack-check --dry-run
 
 echo "Release check completed for v$version."

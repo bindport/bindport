@@ -239,6 +239,35 @@ fi
 scripts/cargo-publish.sh "${args[@]}"
 '''
 
+[tasks.npm-smoke]
+description = "Smoke test local npm wrapper and platform package tarballs"
+run = "scripts/npm-smoke.sh"
+
+[tasks.npm-publish]
+description = "Dry-run or execute npm publishing from release tarballs"
+usage = '''
+arg "<version>" help="Release version to publish, for example 0.4.0 or v0.4.0"
+flag "--dist <dir>" help="Directory containing release npm tarballs" default="dist"
+flag "--execute" help="Actually publish to npm"
+flag "--yes" help="Skip the interactive publish confirmation"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=(
+  --version "${usage_version?}"
+  --dist "${usage_dist?}"
+)
+if [[ "${usage_execute:-false}" == "true" ]]; then
+  args+=(--execute)
+fi
+if [[ "${usage_yes:-false}" == "true" ]]; then
+  args+=(--yes)
+fi
+scripts/npm-publish.sh "${args[@]}"
+'''
+
 [tasks.workflow-lint]
 description = "Lint GitHub Actions workflows"
 run = "actionlint"
@@ -273,4 +302,5 @@ depends = [
     "test",
     "coverage",
     "build",
+    "npm-smoke",
 ]
