@@ -91,10 +91,16 @@ pub struct BindPortConfig {
 
 impl BindPortConfig {
     pub fn configured_service_name(&self) -> Option<&str> {
-        self.service.as_deref().or(match self.services.as_deref() {
-            Some([service]) => service.name.as_deref(),
-            _ => None,
-        })
+        self.service
+            .as_deref()
+            .or_else(|| self.single_service_name())
+    }
+
+    pub fn configured_service_name_for_cwd(&self, config_root: &Path, cwd: &Path) -> Option<&str> {
+        self.service
+            .as_deref()
+            .or_else(|| self.service_name_for_cwd(config_root, cwd))
+            .or_else(|| self.single_service_name())
     }
 
     pub fn service_config(&self, service_name: &str) -> Option<&ServiceConfig> {
@@ -104,6 +110,50 @@ impl BindPortConfig {
                 .as_deref()
                 .is_some_and(|name| name == service_name)
         })
+    }
+
+    fn single_service_name(&self) -> Option<&str> {
+        match self.services.as_deref() {
+            Some([service]) => service.name.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn service_name_for_cwd(&self, config_root: &Path, cwd: &Path) -> Option<&str> {
+        let services = self.services.as_deref()?;
+        let cwd = absolute_path(config_root, cwd.to_path_buf());
+        let mut best = None;
+
+        for (index, service) in services.iter().enumerate() {
+            let Some(name) = service
+                .name
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())
+            else {
+                continue;
+            };
+            let Some(path) = service
+                .path
+                .as_deref()
+                .filter(|path| !path.trim().is_empty())
+            else {
+                continue;
+            };
+
+            let service_root = absolute_path(config_root, PathBuf::from(path));
+            if !cwd.starts_with(&service_root) {
+                continue;
+            }
+
+            let depth = service_root.components().count();
+            match best {
+                Some((best_depth, best_index, _))
+                    if best_depth > depth || (best_depth == depth && best_index < index) => {}
+                _ => best = Some((depth, index, name)),
+            }
+        }
+
+        best.map(|(_, _, name)| name)
     }
 
     pub fn output_config(&self, output_name: &str) -> Option<&OutputConfig> {
@@ -217,6 +267,7 @@ impl BindPortConfig {
 #[serde(default)]
 pub struct ServiceConfig {
     pub name: Option<String>,
+    pub path: Option<String>,
     pub command: Option<String>,
     pub env: Option<BTreeMap<String, String>>,
     pub hostname: Option<String>,
@@ -543,6 +594,16 @@ pub struct LoadedLocalConfig {
 }
 
 impl LoadedConfig {
+    pub fn configured_service_name_for_cwd(&self, cwd: &Path) -> Option<&str> {
+        self.path
+            .parent()
+            .and_then(|config_root| {
+                self.config
+                    .configured_service_name_for_cwd(config_root, cwd)
+            })
+            .or_else(|| self.config.configured_service_name())
+    }
+
     pub fn port_range(&self) -> Result<PortRange, ConfigError> {
         self.config
             .default_range
@@ -1155,17 +1216,17 @@ mod tests {
     fn parses_config_formats() {
         let toml = parse_config(
             ConfigFormat::Toml,
-            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nregister_service = true\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\nhostname = \"{branch}.{project}.localhost\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
+            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nregister_service = true\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\npath = \"apps/web\"\nhostname = \"{branch}.{project}.localhost\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
         )
         .expect("toml config");
         let json = parse_config(
             ConfigFormat::Json,
-            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"register_service":true,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","hostname":"{branch}.{project}.localhost","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
+            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"register_service":true,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","path":"apps/web","hostname":"{branch}.{project}.localhost","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
         )
         .expect("json config");
         let yaml = parse_config(
             ConfigFormat::Yaml,
-            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  register_service: true\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    hostname: \"{branch}.{project}.localhost\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
+            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  register_service: true\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    path: apps/web\n    hostname: \"{branch}.{project}.localhost\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
         )
         .expect("yaml config");
 
@@ -1183,6 +1244,7 @@ mod tests {
         assert_eq!(auth.required, Some(true));
         assert_eq!(auth.token_env.as_deref(), Some("BINDPORT_DASHBOARD_TOKEN"));
         let service = toml.service_config("web").expect("service config by name");
+        assert_eq!(service.path.as_deref(), Some("apps/web"));
         assert_eq!(
             service.hostname.as_deref(),
             Some("{branch}.{project}.localhost")
@@ -1196,6 +1258,47 @@ mod tests {
             Some("{route_url}")
         );
         assert_eq!(toml.configured_service_name(), Some("web"));
+    }
+
+    #[test]
+    fn service_paths_infer_service_from_cwd() {
+        let root = temp_test_dir("service-paths");
+        let web_src = root.join("apps").join("web").join("src");
+        let api = root.join("apps").join("api");
+        fs::create_dir_all(&web_src).expect("web src");
+        fs::create_dir_all(&api).expect("api dir");
+        let config = parse_config(
+            ConfigFormat::Toml,
+            "project = \"demo\"\n[[services]]\nname = \"web\"\npath = \"apps/web\"\n[[services]]\nname = \"api\"\npath = \"apps/api\"\n",
+        )
+        .expect("config");
+
+        assert_eq!(
+            config.configured_service_name_for_cwd(&root, &web_src),
+            Some("web")
+        );
+        assert_eq!(
+            config.configured_service_name_for_cwd(&root, &api),
+            Some("api")
+        );
+        assert_eq!(config.configured_service_name_for_cwd(&root, &root), None);
+    }
+
+    #[test]
+    fn deepest_service_path_match_wins() {
+        let root = temp_test_dir("service-path-depth");
+        let api_src = root.join("apps").join("api").join("src");
+        fs::create_dir_all(&api_src).expect("api src");
+        let config = parse_config(
+            ConfigFormat::Toml,
+            "project = \"demo\"\n[[services]]\nname = \"apps\"\npath = \"apps\"\n[[services]]\nname = \"api\"\npath = \"apps/api\"\n",
+        )
+        .expect("config");
+
+        assert_eq!(
+            config.configured_service_name_for_cwd(&root, &api_src),
+            Some("api")
+        );
     }
 
     #[test]

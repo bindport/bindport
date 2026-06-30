@@ -1485,6 +1485,48 @@ fn parent_project_config_sets_port_range_and_project() {
 }
 
 #[test]
+fn service_path_config_infers_service_from_current_directory() {
+    let registry_path = temp_registry_path("service-path-registry");
+    let root = temp_test_dir("service-path-root");
+    let api_src = root.join("apps").join("api").join("src");
+    fs::create_dir_all(&api_src).expect("api source dir");
+    fs::create_dir_all(root.join("apps").join("web")).expect("web dir");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"monorepo\"\ndefault_range = \"29104-29104\"\nskip_ports = []\n[[services]]\nname = \"web\"\npath = \"apps/web\"\nhostname = \"web.{project}.localhost\"\nenv.BINDPORT_SELECTED_SERVICE = \"{service}\"\n[[services]]\nname = \"api\"\npath = \"apps/api\"\nhostname = \"{service}.{project}.localhost\"\nenv.BINDPORT_SELECTED_SERVICE = \"{service}\"\n",
+    )
+    .expect("write project config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&api_src)
+        .args([
+            "--",
+            "sh",
+            "-c",
+            "printf '%s|%s' \"$PORT\" \"$BINDPORT_SELECTED_SERVICE\"",
+        ])
+        .output()
+        .expect("run bindport");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"29104|api");
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["services"][0]["project"], "monorepo");
+    assert_eq!(status["services"][0]["service"], "api");
+    assert_eq!(status["services"][0]["hostname"], "api.monorepo.localhost");
+    assert_eq!(
+        status["services"][0]["route_url"],
+        "http://api.monorepo.localhost"
+    );
+}
+
+#[test]
 fn local_project_config_overrides_base_project_config() {
     let registry_path = temp_registry_path("local-project-config-registry");
     let root = temp_test_dir("local-project-config-root");

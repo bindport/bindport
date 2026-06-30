@@ -26,5 +26,22 @@ project = "orderful-website"
 
 [[services]]
 name = "web"
+path = "."
 hostname = "{branch}.orderful-website.localhost"
+```
+
+For a monorepo, keep one config at the repo root and scope services by relative
+path. Running BindPort from inside `apps/api` selects the `api` service unless a
+CLI or environment service override is provided:
+
+```toml
+project = "orderful"
+
+[[services]]
+name = "web"
+path = "apps/web"
+
+[[services]]
+name = "api"
+path = "apps/api"
 ```

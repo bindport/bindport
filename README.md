@@ -151,8 +151,8 @@ Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
-appear in `bindport status`. Service entries currently apply `name`, `env`,
-`hostname`, and `route_url`. The example `identity` and deeper service fields
+appear in `bindport status`. Service entries currently apply `name`, `path`,
+`env`, `hostname`, and `route_url`. The example `identity` and deeper service fields
 such as `command` and `health_url` document the intended future shape and are
 not applied yet; `bindport doctor` reports ignored top-level keys so typos and
 future-only sections are visible.
@@ -162,12 +162,31 @@ service argument in `bindport run <service> -- ...` wins, then
 `BINDPORT_PROJECT` / `BINDPORT_SERVICE`, then config, then inference from
 `package.json`, the git worktree path, and command name.
 
+For monorepos, define service paths relative to the discovered project config.
+When no CLI or environment service override is provided, BindPort selects the
+deepest `[[services]].path` that contains the current working directory:
+
+```toml
+project = "orderful"
+
+[[services]]
+name = "web"
+path = "apps/web"
+hostname = "{branch}.orderful-website.localhost"
+
+[[services]]
+name = "api"
+path = "apps/api"
+hostname = "{branch}.orderful-api.localhost"
+```
+
 Wrapped commands always receive `PORT=<assigned>`. Service env templates can
 add more variables:
 
 ```toml
 [[services]]
 name = "web"
+path = "apps/web"
 hostname = "{branch}.{project}.localhost"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
