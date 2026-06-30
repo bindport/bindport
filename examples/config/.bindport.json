@@ -28,6 +28,7 @@
   "services": [
     {
       "name": "web",
+      "path": ".",
       "command": "next dev",
       "env": {
         "PORT": "{port}",

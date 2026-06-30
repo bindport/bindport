@@ -436,7 +436,7 @@ fn resolve_run_identity(
     let config_service = config
         .loaded
         .as_ref()
-        .and_then(|loaded| loaded.config.configured_service_name());
+        .and_then(|loaded| loaded.configured_service_name_for_cwd(cwd));
 
     resolve_identity(IdentitySources {
         cwd,

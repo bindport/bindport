@@ -35,6 +35,7 @@ output_defaults:
   debounce_ms: 250
 services:
   - name: web
+    path: .
     command: next dev
     env:
       PORT: "{port}"
