@@ -6,6 +6,7 @@ use std::{
     io::{self, BufRead, BufReader, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
     path::{Path, PathBuf},
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -20,7 +21,10 @@ const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const DASHBOARD_ACTION_HEADER: &str = "X-BindPort-Dashboard-Action";
 
-#[derive(Debug, Clone)]
+pub type DashboardCleanCallback =
+    Arc<dyn Fn(&mut Registry, CleanSummary) -> Result<(), String> + Send + Sync + 'static>;
+
+#[derive(Clone)]
 pub struct DashboardOptions {
     pub host: Ipv4Addr,
     pub preferred_port: u16,
@@ -29,6 +33,22 @@ pub struct DashboardOptions {
     pub allowed_hosts: Vec<String>,
     pub auth: DashboardAuth,
     pub static_dir: Option<PathBuf>,
+    pub clean_callback: Option<DashboardCleanCallback>,
+}
+
+impl fmt::Debug for DashboardOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DashboardOptions")
+            .field("host", &self.host)
+            .field("preferred_port", &self.preferred_port)
+            .field("fallback_range", &self.fallback_range)
+            .field("skip_ports", &self.skip_ports)
+            .field("allowed_hosts", &self.allowed_hosts)
+            .field("auth", &self.auth)
+            .field("static_dir", &self.static_dir)
+            .field("clean_callback", &self.clean_callback.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -47,6 +67,7 @@ impl Default for DashboardOptions {
             allowed_hosts: default_allowed_hosts(),
             auth: DashboardAuth::default(),
             static_dir: None,
+            clean_callback: None,
         }
     }
 }
@@ -442,16 +463,37 @@ fn clean_response(
         )));
     }
 
-    match Registry::open_default().and_then(|mut registry| registry.clean_leases(states, false)) {
-        Ok(summary) => match serde_json::to_string_pretty(&clean_summary_json(summary)) {
-            Ok(json) => HttpResponse::ok("application/json; charset=utf-8", &json),
-            Err(error) => HttpResponse::internal_error(&json_error_body(format!(
-                "failed to serialize clean JSON: {error}"
+    match Registry::open_default() {
+        Ok(mut registry) => match registry.clean_leases(states, false) {
+            Ok(summary) => {
+                run_clean_callback(options, &mut registry, summary);
+
+                match serde_json::to_string_pretty(&clean_summary_json(summary)) {
+                    Ok(json) => HttpResponse::ok("application/json; charset=utf-8", &json),
+                    Err(error) => HttpResponse::internal_error(&json_error_body(format!(
+                        "failed to serialize clean JSON: {error}"
+                    ))),
+                }
+            }
+            Err(error) => HttpResponse::service_unavailable(&json_error_body(format!(
+                "registry unavailable: {error}"
             ))),
         },
         Err(error) => HttpResponse::service_unavailable(&json_error_body(format!(
             "registry unavailable: {error}"
         ))),
+    }
+}
+
+fn run_clean_callback(options: &DashboardOptions, registry: &mut Registry, summary: CleanSummary) {
+    if summary.total_leases() == 0 {
+        return;
+    }
+
+    if let Some(callback) = &options.clean_callback
+        && let Err(error) = callback(registry, summary)
+    {
+        eprintln!("dashboard: warning: cleanup callback failed: {error}");
     }
 }
 

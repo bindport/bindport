@@ -33,8 +33,8 @@ The minimum release gate is:
    `/api/status`.
 8. The dashboard shows active, stopped, and stale services with URL copy/open
    actions.
-9. Dashboard cleanup can remove stopped or stale entries but cannot mutate
-   active services.
+9. Dashboard cleanup can remove stopped or stale entries, trigger output
+   cleanup, and cannot mutate active services.
 10. Local and CI checks pass.
 
 The package-script gate is covered by the

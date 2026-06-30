@@ -153,10 +153,9 @@ Relative targets must stay under the output root and may not traverse through
 symlinks. Absolute roots are accepted after path cleanup, but target paths are
 always relative text file paths.
 
-CLI registry cleanup triggers output rendering so the default `delete_on =
-["removed"]` behavior can remove DB-owned files for routes that were just
-cleaned from the registry. Dashboard cleanup output events remain a later v0.3
-slice.
+CLI and dashboard registry cleanup trigger output rendering so the default
+`delete_on = ["removed"]` behavior can remove DB-owned files for routes that
+were just cleaned from the registry.
 
 ## MiniJinja Behavior
 

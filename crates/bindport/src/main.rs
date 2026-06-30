@@ -7,6 +7,7 @@ use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Command, ExitCode, ExitStatus, Stdio},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -27,7 +28,7 @@ use bindport_core::{
     ServiceConfig, ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
     normalize_branch_label, resolve_identity,
 };
-use bindport_dashboard::{DashboardOptions, DashboardServer};
+use bindport_dashboard::{DashboardCleanCallback, DashboardOptions, DashboardServer};
 use bindport_registry::{
     CleanState, CleanSummary, OutputFileRecord, OutputFileStatus, REGISTRY_PATH_ENV, Registry,
     RegistryError, RunStart, StartedRun, StatusService, default_registry_path,
@@ -781,8 +782,9 @@ fn serve_dashboard(options: &DashboardCliOptions) -> Result<(), DashboardCommand
         }
     }
 
-    let dashboard = resolve_dashboard_options(&config, options, skip_ports)?;
+    let mut dashboard = resolve_dashboard_options(&config, options, skip_ports)?;
     let register_service = resolve_dashboard_registration(&config, options)?;
+    dashboard.clean_callback = Some(dashboard_clean_callback(cwd.clone(), config));
     let host = dashboard.host.to_string();
     let server = DashboardServer::bind(dashboard)?;
     let _registration = register_dashboard_service(register_service, &server, &host, &cwd);
@@ -1029,6 +1031,7 @@ fn resolve_dashboard_options(
             token,
         },
         static_dir,
+        clean_callback: None,
     })
 }
 
@@ -1446,6 +1449,14 @@ fn terminate_process(pid: u32) -> io::Result<()> {
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+fn dashboard_clean_callback(cwd: PathBuf, config: ResolvedConfig) -> DashboardCleanCallback {
+    Arc::new(move |registry, _summary| {
+        auto_render_outputs(&cwd, &config, registry)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 #[cfg(not(unix))]

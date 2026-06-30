@@ -350,6 +350,51 @@ fn dashboard_cleans_stopped_entries() {
 }
 
 #[test]
+fn dashboard_clean_removes_owned_output_files_for_removed_routes() {
+    let registry_path = temp_registry_path("dashboard-clean-output-registry");
+    let root = temp_test_dir("dashboard-clean-output-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"dashboard-clean-output\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"dashboard-clean.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\n"
+        ),
+    )
+    .expect("write output config");
+    let rendered_path = root.join(".bindport/generated/traefik/web.yml");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    assert!(rendered_path.is_file());
+
+    let mut command = bindport_with_registry(&registry_path);
+    command.current_dir(&root);
+    let dashboard = start_dashboard(command);
+    let clean_response = http_post_clean(dashboard.port, "/api/clean/stopped", None);
+
+    assert!(clean_response.starts_with("HTTP/1.1 200 OK"));
+    assert!(!rendered_path.exists());
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status after dashboard clean");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["outputs"][0]["name"], "traefik");
+    assert_eq!(status["outputs"][0]["removed"], 1);
+}
+
+#[test]
 fn dashboard_can_register_itself_as_a_service() {
     let registry_path = temp_registry_path("dashboard-register-service-registry");
     let port = free_loopback_port();
@@ -775,12 +820,12 @@ fn dashboard_returns_not_found_for_unknown_route() {
 }
 
 #[test]
-fn dashboard_falls_back_when_default_port_is_busy() {
-    let busy_default = match TcpListener::bind(("127.0.0.1", 27_080)) {
-        Ok(listener) => Some(listener),
-        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
-        Err(error) => panic!("bind busy dashboard port: {error}"),
-    };
+fn dashboard_falls_back_when_preferred_port_is_busy() {
+    let busy_preferred = TcpListener::bind(("127.0.0.1", 0)).expect("bind busy dashboard port");
+    let preferred_port = busy_preferred
+        .local_addr()
+        .expect("busy dashboard port")
+        .port();
     let fallback_port = free_loopback_port();
     let registry_path = temp_registry_path("dashboard-fallback-registry");
     let root = temp_test_dir("dashboard-fallback-root");
@@ -792,12 +837,16 @@ fn dashboard_falls_back_when_default_port_is_busy() {
 
     let mut command = bindport_with_registry(&registry_path);
     command.current_dir(&root);
-    let dashboard = start_dashboard(command);
+    let preferred_port_arg = preferred_port.to_string();
+    let dashboard = start_dashboard_with_args(
+        command,
+        &["dashboard", "serve", "--port", &preferred_port_arg],
+    );
 
     assert_eq!(dashboard.port, fallback_port);
-    assert_ne!(dashboard.port, 27_080);
+    assert_ne!(dashboard.port, preferred_port);
 
-    drop(busy_default);
+    drop(busy_preferred);
 }
 
 #[test]

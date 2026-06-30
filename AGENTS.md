@@ -72,6 +72,9 @@ Don't mutate state outside the working tree without being told to.
 - Static-only dashboard dev: `mise run dev-dashboard-static`
 - Remote dashboard dev: set `BINDPORT_DASHBOARD_TOKEN`, then `mise run dev-dashboard-remote`
 
+## Test Watch Outs
+- macOS CI has exposed path and port assumptions: canonicalize temp paths before comparing recorded filesystem paths, and use test-owned ports/listener guards instead of relying on shared default port state.
+
 `bindport -- <command>` currently performs probe-based port selection, child
 process wrapping, optional config discovery, basic project/service and git
 identity resolution, Unix SIGINT/SIGTERM forwarding, and basic SQLite lease/run
