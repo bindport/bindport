@@ -820,12 +820,12 @@ fn dashboard_returns_not_found_for_unknown_route() {
 }
 
 #[test]
-fn dashboard_falls_back_when_default_port_is_busy() {
-    let busy_default = match TcpListener::bind(("127.0.0.1", 27_080)) {
-        Ok(listener) => Some(listener),
-        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
-        Err(error) => panic!("bind busy dashboard port: {error}"),
-    };
+fn dashboard_falls_back_when_preferred_port_is_busy() {
+    let busy_preferred = TcpListener::bind(("127.0.0.1", 0)).expect("bind busy dashboard port");
+    let preferred_port = busy_preferred
+        .local_addr()
+        .expect("busy dashboard port")
+        .port();
     let fallback_port = free_loopback_port();
     let registry_path = temp_registry_path("dashboard-fallback-registry");
     let root = temp_test_dir("dashboard-fallback-root");
@@ -837,12 +837,16 @@ fn dashboard_falls_back_when_default_port_is_busy() {
 
     let mut command = bindport_with_registry(&registry_path);
     command.current_dir(&root);
-    let dashboard = start_dashboard(command);
+    let preferred_port_arg = preferred_port.to_string();
+    let dashboard = start_dashboard_with_args(
+        command,
+        &["dashboard", "serve", "--port", &preferred_port_arg],
+    );
 
     assert_eq!(dashboard.port, fallback_port);
-    assert_ne!(dashboard.port, 27_080);
+    assert_ne!(dashboard.port, preferred_port);
 
-    drop(busy_default);
+    drop(busy_preferred);
 }
 
 #[test]
