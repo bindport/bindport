@@ -31,6 +31,7 @@ use bindport_dashboard::{DashboardOptions, DashboardServer};
 use bindport_registry::{
     CleanState, CleanSummary, OutputFileRecord, OutputFileStatus, REGISTRY_PATH_ENV, Registry,
     RegistryError, RunStart, StartedRun, StatusService, default_registry_path,
+    status_service_route_key,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
@@ -1825,16 +1826,7 @@ fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
     services
         .into_iter()
         .map(|service| {
-            let key = service.identity_key.clone().unwrap_or_else(|| {
-                format!(
-                    "{}:{}:{}:{}:{}",
-                    service.project,
-                    service.service,
-                    service.host,
-                    service.port,
-                    service.started_at
-                )
-            });
+            let key = status_service_route_key(&service);
             let updated_at = service
                 .exited_at
                 .clone()

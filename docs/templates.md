@@ -143,6 +143,10 @@ route after the child process is spawned; the exit render records the stopped
 route after the registry is updated. Auto-render failures are warnings and do
 not change the wrapped command's exit code.
 
+`bindport status --json` exposes top-level output summaries plus per-service
+output status from the same registry records. The legacy `proxy` field is a
+compatibility alias for recorded `traefik` output status.
+
 Relative `root` values are resolved beside the discovered project config. If no
 project config is discovered, they resolve from the current working directory.
 Relative targets must stay under the output root and may not traverse through

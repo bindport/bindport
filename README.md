@@ -34,7 +34,7 @@ The current release includes:
   git branch/worktree metadata recorded when available.
 - Service env templates for wrapped commands through `[[services]].env` and
   `bindport run --env`, including route hostname metadata when configured.
-- Basic SQLite-backed lease/run recording with `bindport status --json`.
+- Basic SQLite-backed lease/run/output recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
 - `bindport doctor outputs` diagnostics for configured output templates and

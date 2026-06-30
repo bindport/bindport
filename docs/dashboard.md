@@ -97,10 +97,10 @@ dashboard. Active services cannot be removed from the dashboard.
 
 Each row has an expand control for secondary details: state, PID, port, health,
 proxy render status, current working directory, and command. Health is
-`unknown` until service health checks are implemented. Proxy status is
-`Not rendered` until a future proxy adapter renders routes. Expanded rows stay
-expanded across automatic refreshes while the matching service remains in the
-registry snapshot.
+`unknown` until service health checks are implemented. Proxy status reflects a
+recorded `traefik` output row when one exists. Expanded rows stay expanded
+across automatic refreshes while the matching service remains in the registry
+snapshot.
 
 Use the search field to filter by state, project, service, URL, root path,
 branch, PID, command, or working directory. State buttons narrow the table to
@@ -128,9 +128,11 @@ The dashboard serves:
 - `GET /healthz` - plain `ok` health response for smoke checks.
 
 `/api/status` returns the registry snapshot with route-oriented fields such as
-`hostname`, `route_url`, and `proxy`. `hostname` and `route_url` are populated
-when a wrapped service config or run option sets them. `proxy` remains `null`
-until a future proxy adapter renders routes.
+`hostname`, `route_url`, `outputs`, and `proxy`. `hostname` and `route_url` are
+populated when a wrapped service config or run option sets them. `outputs`
+contains per-service rendered output status. `proxy` is a compatibility alias
+for recorded `traefik` output status and remains `null` when no matching output
+row exists.
 
 ## Security Posture
 

@@ -44,10 +44,11 @@ The package-script gate is covered by the
 registry recording `next dev`. This proves package-manager script dispatch
 without adding a real Next.js dependency to the repository.
 
-`status --json` exposes route-oriented fields (`hostname`, `route_url`, and
-`proxy`). Service config and run options can populate `hostname` and
-`route_url`; `proxy` remains `null` until rendered output status is wired back
-into service snapshots.
+`status --json` exposes route-oriented fields (`hostname`, `route_url`,
+`outputs`, and `proxy`). Service config and run options can populate
+`hostname` and `route_url`; rendered output records populate top-level output
+summaries and per-service output status. `proxy` is a compatibility alias for
+recorded `traefik` output status.
 
 The dashboard gate is covered by integration tests for status API parity,
 static asset serving, token auth, stopped/stale cleanup, self-registration,
