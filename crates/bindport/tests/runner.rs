@@ -1831,6 +1831,62 @@ fn render_command_writes_config_files_and_records_ownership() {
 }
 
 #[test]
+fn render_all_writes_every_enabled_output() {
+    let registry_path = temp_registry_path("render-all-registry");
+    let root = temp_test_dir("render-all-root");
+    let template_dir = root.join(".bindport").join("templates");
+    fs::create_dir_all(&template_dir).expect("template dir");
+    fs::write(
+        template_dir.join("debug-route.txt.j2"),
+        "debug {{ output.name }} {{ route.service }} {{ vars.mode }} {{ route.target_url }}\n",
+    )
+    .expect("write debug template");
+
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-all\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"render-all.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n[[outputs]]\nname = \"debug\"\ntemplate = \"debug-route\"\nroot = \".bindport/generated\"\ntarget = \"debug/{{{{ route.service }}}}.txt\"\nauto_render = false\n[outputs.vars]\nmode = \"dev\"\n"
+        ),
+    )
+    .expect("write render config");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "--all"])
+        .output()
+        .expect("render all outputs");
+
+    assert!(
+        render.status.success(),
+        "render all failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let stdout = String::from_utf8(render.stdout).expect("render stdout");
+    assert!(stdout.contains("rendered traefik: 1 files"));
+    assert!(stdout.contains("rendered debug: 1 files"));
+
+    assert!(root.join(".bindport/generated/traefik/web.yml").is_file());
+    assert_eq!(
+        fs::read_to_string(root.join(".bindport/generated/debug/web.txt"))
+            .expect("debug rendered file"),
+        format!("debug debug web dev http://127.0.0.1:{port}")
+    );
+}
+
+#[test]
 fn render_repair_records_externally_modified_owned_files() {
     let registry_path = temp_registry_path("render-repair-modified-registry");
     let root = temp_test_dir("render-repair-modified-root");
@@ -2004,6 +2060,77 @@ fn runner_skips_outputs_when_auto_render_is_disabled() {
 }
 
 #[test]
+#[cfg(unix)]
+fn runner_auto_renders_stale_routes_reconciled_during_route_event() {
+    let registry_path = temp_registry_path("auto-render-stale-registry");
+    let root = temp_test_dir("auto-render-stale-root");
+    let stale_port = free_loopback_port();
+    let active_port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"auto-render-stale\"\ndefault_range = \"{active_port}-{active_port}\"\nskip_ports = []\n[[services]]\nname = \"api\"\nhostname = \"api.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\n"
+        ),
+    )
+    .expect("write render config");
+
+    let mut registry = Registry::open(&registry_path).expect("registry");
+    let identity = ServiceIdentity {
+        project: String::from("auto-render-stale"),
+        service: String::from("web"),
+        git: None,
+        identity_key: String::from("v1:auto-render-stale:web"),
+    };
+    registry
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port: stale_port,
+            hostname: Some(String::from("web.localhost")),
+            route_url: Some(String::from("http://web.localhost")),
+            pid: 2_000_000_000,
+            command: String::from("stale fixture"),
+            cwd: root.clone(),
+        })
+        .expect("record stale fixture");
+    drop(registry);
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "api", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stale_contents = fs::read_to_string(root.join(".bindport/generated/traefik/web.yml"))
+        .expect("stale route render");
+    assert!(stale_contents.contains(" is stale, so no live router was rendered."));
+    assert!(!stale_contents.contains("routers:"));
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    assert!(status_output.status.success());
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    let stale_service = services
+        .iter()
+        .find(|service| service["service"] == "web")
+        .expect("stale service");
+
+    assert_eq!(stale_service["state"], "stale");
+    assert_eq!(stale_service["outputs"][0]["status"], "rendered");
+}
+
+#[test]
 fn clean_removes_owned_output_files_for_removed_routes() {
     let registry_path = temp_registry_path("clean-output-removed-registry");
     let root = temp_test_dir("clean-output-removed-root");
@@ -2101,6 +2228,39 @@ fn doctor_outputs_reports_configured_output() {
     assert!(stdout.contains("template: bindport-traefik (built-in)"));
     assert!(stdout.contains("planned files: 0"));
     assert!(!root.join(".bindport/generated").exists());
+}
+
+#[test]
+fn doctor_outputs_reports_wildcard_template_warning() {
+    let registry_path = temp_registry_path("doctor-output-wildcard-registry");
+    let root = temp_test_dir("doctor-output-wildcard-root");
+    let template_dir = root.join(".bindport").join("templates");
+    fs::create_dir_all(&template_dir).expect("template dir");
+    fs::write(template_dir.join("debug.10.txt.j2"), "first\n").expect("write first template");
+    fs::write(template_dir.join("debug.20.txt.j2"), "second\n").expect("write second template");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-output-project\"\n[[outputs]]\nname = \"debug\"\ntemplate = \"debug\"\nroot = \".bindport/generated\"\ntarget = \"debug/{{ route.service }}.txt\"\n",
+    )
+    .expect("write output config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor", "outputs"])
+        .output()
+        .expect("run bindport doctor outputs");
+
+    assert!(
+        output.status.success(),
+        "doctor outputs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("output debug:"));
+    assert!(stdout.contains("template: debug (project)"));
+    assert!(stdout.contains("template warning: multiple wildcard matches"));
+    assert!(stdout.contains("debug.10.txt.j2"));
 }
 
 #[test]
