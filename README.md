@@ -26,8 +26,8 @@ The current release includes:
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
 - CLI support for `--help`, `--version`, `status`, `config explain`,
-  `doctor`, `clean`, `dashboard`, and one-shot `bindport -- <command>` command
-  wrapping.
+  `config validate`, `doctor`, `clean`, `dashboard`, and one-shot
+  `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
   `.bindport.yaml`, with a fallback user config in the XDG config directory.
 - Basic project/service identity resolution from environment, config,
@@ -137,7 +137,9 @@ when `XDG_CONFIG_HOME` is unset. The registry database remains state at
 never required; missing config means built-in defaults are used.
 Use `bindport config explain` to inspect the discovered config file, local
 override file, effective config-field sources, and the project/service identity
-source for the current directory.
+source for the current directory. Use `bindport config validate` to check
+service names, service paths, and output configuration before running a wrapped
+command.
 
 The current implementation reads top-level `project`, `service`,
 `default_range`, `skip_ports`, `[[services]]` entries, `[dashboard]` /
