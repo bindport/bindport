@@ -37,6 +37,8 @@ The current release includes:
 - Basic SQLite-backed lease/run recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
+- `bindport doctor outputs` diagnostics for configured output templates and
+  planned render paths without writing files.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
   and JSON output options.
 - Local dashboard API and embedded UI for active, stopped, and stale registry
@@ -81,6 +83,7 @@ cargo run -p bindport -- init
 cargo run -p bindport -- status --json
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- dashboard serve
+cargo run -p bindport -- doctor outputs
 cargo run -p bindport -- templates list
 cargo run -p bindport -- templates export bindport-traefik
 cargo run -p bindport -- render --dry-run
@@ -134,9 +137,11 @@ The current implementation reads top-level `project`, `service`,
 `default_range`, `skip_ports`, `[[services]]` entries, `[dashboard]` /
 `[dashboard.auth]`, `output_defaults`, and `[[outputs]]`. Output configuration is
 used by `bindport render` to write text output files from the current registry
-snapshot. Template lookup, listing, showing, and export are available through
-`bindport templates`. Wrapped command start/exit events auto-render outputs
-when `auto_render = true`; cleanup/deletion rendering remains later v0.3 work.
+snapshot. `bindport doctor outputs` validates output config, template lookup,
+and planned render paths without writing files. Template lookup, listing,
+showing, and export are available through `bindport templates`. Wrapped command
+start/exit events auto-render outputs when `auto_render = true`;
+cleanup/deletion rendering remains later v0.3 work.
 Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass

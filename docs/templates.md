@@ -46,6 +46,13 @@ Preview rendered targets without writing files:
 bindport render --dry-run
 ```
 
+Validate configured outputs, template lookup, render planning, and safe output
+paths without writing files:
+
+```sh
+bindport doctor outputs
+```
+
 ## Lookup Order
 
 Template names are logical names, not filesystem paths. Names must be safe
@@ -107,6 +114,10 @@ write. Existing files are overwritten only when BindPort previously rendered
 the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
+
+`bindport doctor outputs` checks the same configured outputs, template lookup,
+target planning, and output path safety without writing files or recording
+ownership.
 
 Wrapped command start and exit events automatically render outputs where
 `auto_render = true`, which is the default. The start render records the active
