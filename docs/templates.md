@@ -65,7 +65,8 @@ bindport doctor outputs
 Template names are logical names, not filesystem paths. Names must be safe
 relative names with no path separators, no absolute path syntax, and no `..`.
 
-For `template = "bindport-traefik"`, BindPort checks the first matching file:
+For `template = "bindport-traefik"` or `template = "bindport-env-local"`,
+BindPort checks the first matching file:
 
 1. project `.bindport/templates/bindport-traefik`
 2. project `.bindport/templates/bindport-traefik.j2`
@@ -73,7 +74,7 @@ For `template = "bindport-traefik"`, BindPort checks the first matching file:
 4. global `$XDG_CONFIG_HOME/bindport/templates/bindport-traefik`
 5. global `$XDG_CONFIG_HOME/bindport/templates/bindport-traefik.j2`
 6. global `$XDG_CONFIG_HOME/bindport/templates/bindport-traefik.*.j2`
-7. built-in `bindport-traefik`
+7. built-in template, when the name is one of BindPort's built-ins
 
 Project templates live beside the discovered project config. If no project
 config is discovered, the project template directory is the current working
@@ -82,7 +83,9 @@ directory's `.bindport/templates`.
 Wildcard matches are sorted lexicographically by full filename and the first
 match wins. Templates are UTF-8 text.
 
-## Built-In Traefik Template
+## Built-In Templates
+
+### `bindport-traefik`
 
 The first built-in template is `bindport-traefik`. It is a MiniJinja text
 template for Traefik's file provider and uses the same lookup/export path as
@@ -100,6 +103,34 @@ middlewares = []
 For an active route with a hostname, the template renders Traefik routers and
 services pointing at `route.target_url`. For stopped, stale, or missing-hostname
 routes, it renders comment-only YAML.
+
+### `bindport-env-local`
+
+The `bindport-env-local` built-in renders route metadata as a dotenv-style text
+file. It exists only as an output template; BindPort never writes `.env.local`
+unless a project explicitly configures an output for it.
+
+Example monorepo config:
+
+```toml
+[[outputs]]
+name = "env-local"
+template = "bindport-env-local"
+target = "apps/{{ route.service }}/.env.local"
+```
+
+The generated file includes stable BindPort variables such as `PORT`,
+`BINDPORT_PROJECT`, `BINDPORT_SERVICE`, `BINDPORT_STATE`,
+`BINDPORT_TARGET_URL`, and route hostname fields when configured. Project
+templates can shadow `bindport-env-local` when a framework needs aliases such as
+`NEXT_PUBLIC_*`.
+
+Like every output, `.env.local` files are written through the SQLite-backed
+ownership checks. Existing unowned files are not overwritten. Automatic output
+rendering happens after route state changes are recorded, so startup-critical
+environment should still use `[[services]].env` or `bindport run --env`; use the
+env-file output for tools that reread files or for explicit `bindport render`
+workflows.
 
 ## Traefik File Provider Setup
 

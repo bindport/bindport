@@ -2025,6 +2025,56 @@ fn render_all_writes_every_enabled_output() {
 }
 
 #[test]
+fn render_env_local_output_writes_opt_in_dotenv_file() {
+    let registry_path = temp_registry_path("render-env-local-registry");
+    let root = temp_test_dir("render-env-local-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"env-local-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"env-local.localhost\"\n[[outputs]]\nname = \"env-local\"\ntemplate = \"bindport-env-local\"\ntarget = \"apps/{{{{ route.service }}}}/.env.local\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write env-local config");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "env-local"])
+        .output()
+        .expect("render env-local output");
+
+    assert!(
+        render.status.success(),
+        "render env-local failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let stdout = String::from_utf8(render.stdout).expect("render stdout");
+    assert!(stdout.contains("rendered env-local: 1 files"));
+
+    let env_file = root.join("apps/web/.env.local");
+    let contents = fs::read_to_string(&env_file).expect("env-local file");
+    assert!(contents.contains("BINDPORT_PROJECT=env-local-project"));
+    assert!(contents.contains("BINDPORT_SERVICE=web"));
+    assert!(contents.contains("BINDPORT_STATE=stopped"));
+    assert!(contents.contains(&format!("PORT={port}")));
+    assert!(contents.contains(&format!("BINDPORT_TARGET_URL=http://127.0.0.1:{port}")));
+    assert!(contents.contains("BINDPORT_HOSTNAME=env-local.localhost"));
+    assert!(contents.contains("BINDPORT_ROUTE_URL=http://env-local.localhost"));
+}
+
+#[test]
 fn render_repair_records_externally_modified_owned_files() {
     let registry_path = temp_registry_path("render-repair-modified-registry");
     let root = temp_test_dir("render-repair-modified-root");

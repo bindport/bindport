@@ -41,6 +41,8 @@ The current release includes:
   active registry ports, OS listener conflicts, and the next candidate port.
 - `bindport doctor outputs` diagnostics for configured output templates and
   planned render paths without writing files.
+- Built-in `bindport-env-local` output template for explicit `.env.local`
+  generation through the normal owned-output pipeline.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
   and JSON output options.
 - Local dashboard API and embedded UI for active, stopped, and stale registry
