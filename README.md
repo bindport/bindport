@@ -203,7 +203,7 @@ services are not removed.
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
 - [Templates](docs/templates.md): output template lookup, built-in Traefik
-  template export, and manual output file rendering.
+  file-provider setup, custom templates, render lifecycle, and troubleshooting.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging boundaries.
 

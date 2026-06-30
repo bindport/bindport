@@ -54,6 +54,13 @@ The dashboard gate is covered by integration tests for status API parity,
 static asset serving, token auth, stopped/stale cleanup, self-registration,
 background service controls, and a 100-service registry snapshot.
 
+The v0.3 template-output gate is covered by integration and unit tests for
+output config parsing, local overrides, template lookup/export, MiniJinja strict
+rendering, path safety, SQLite ownership, repair behavior, status output,
+dashboard status parity, `render --all`, auto-render events, cleanup-triggered
+deletion, and `doctor outputs` diagnostics. Real Traefik reload behavior remains
+manual acceptance because CI should not depend on a local proxy daemon.
+
 ## Local Release Checks
 
 Run the standard local gate before any release prep branch:
@@ -295,11 +302,44 @@ fresh checkout or clean worktree:
 10. Run `mise run dev-dashboard-remote` and confirm Rust server changes restart
     the dev server while static asset changes refresh the browser.
 
+## v0.3.0 Manual Acceptance
+
+Before merging the v0.3.0 release prep PR, smoke test template outputs from a
+fresh checkout or clean worktree:
+
+1. Build the release binary with `cargo build --release --locked`.
+2. Create a project config with a `bindport-traefik` output and a branch-based
+   service hostname such as `hostname = "{branch}.orderful-website.localhost"`.
+3. Run a wrapped command with that service and confirm BindPort writes a
+   generated Traefik file under the configured output root.
+4. Point an existing Traefik file provider at the generated directory with
+   `watch = true`, then confirm Traefik reloads the generated file.
+5. Visit a rendered hostname such as
+   `feature-tree.orderful-website.localhost` and confirm it forwards to the
+   correct wrapped process.
+6. Repeat with a second project name such as `hoststamp` to confirm the hostname
+   template keeps local app domains distinct.
+7. Run `bindport render --dry-run`, `bindport render --all`, and
+   `bindport doctor outputs` and confirm the planned output paths match the
+   generated files.
+8. Export the built-in template, point an output at the custom template name,
+   and confirm the custom MiniJinja template renders without code changes.
+9. Stop the wrapped command and confirm the generated Traefik file becomes
+   comment-only YAML by default.
+10. Run `bindport clean` and confirm DB-owned generated files are removed for
+    removed routes when `delete_on = ["removed"]`.
+11. Modify a DB-owned generated file, then run `bindport render --repair` and
+    confirm the file is preserved and status reports `external_modified`.
+12. If the dashboard itself is configured with a hostname/output entry, confirm
+    the dashboard can be reached through Traefik and still rejects unauthenticated
+    requests when dashboard auth is required.
+
 ## Versioning
 
 - `0.0.x`: unreleased bootstrap only.
 - `0.1.0`: first working runner release.
 - `0.2.0`: local dashboard API, embedded UI, and stopped/stale cleanup.
+- `0.3.0`: template output rendering and built-in Traefik file-provider output.
 - Pre-1.0 minor releases may contain breaking changes.
 - A stable release prep commit should update all package versions together.
 
