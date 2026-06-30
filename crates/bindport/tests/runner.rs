@@ -1807,6 +1807,65 @@ fn runner_skips_outputs_when_auto_render_is_disabled() {
 }
 
 #[test]
+fn doctor_outputs_reports_configured_output() {
+    let registry_path = temp_registry_path("doctor-output-registry");
+    let root = temp_test_dir("doctor-output-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-output-project\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{ route.service }}.yml\"\n",
+    )
+    .expect("write output config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor", "outputs"])
+        .output()
+        .expect("run bindport doctor outputs");
+
+    assert!(
+        output.status.success(),
+        "doctor outputs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("BindPort output doctor"));
+    assert!(stdout.contains("routes: 0"));
+    assert!(stdout.contains("output traefik:"));
+    assert!(stdout.contains("template: bindport-traefik (built-in)"));
+    assert!(stdout.contains("planned files: 0"));
+    assert!(!root.join(".bindport/generated").exists());
+}
+
+#[test]
+fn doctor_outputs_reports_render_plan_errors() {
+    let registry_path = temp_registry_path("doctor-output-collision-registry");
+    let root = temp_test_dir("doctor-output-collision-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-output-project\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/same.yml\"\n",
+    )
+    .expect("write output config");
+    record_registry_service(&registry_path, "web", 29_601);
+    record_registry_service(&registry_path, "api", 29_602);
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor", "outputs"])
+        .output()
+        .expect("run bindport doctor outputs");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("routes: 2"));
+    assert!(stdout.contains("output traefik:"));
+    assert!(stdout.contains("plan: invalid"));
+    assert!(stdout.contains("multiple routes render to target `traefik/same.yml`"));
+    assert!(!root.join(".bindport/generated/traefik/same.yml").exists());
+}
+
+#[test]
 fn doctor_reports_unknown_config_keys() {
     let registry_path = temp_registry_path("doctor-unknown-config-registry");
     let root = temp_test_dir("doctor-unknown-config-root");
@@ -2068,6 +2127,31 @@ fn reserve_registry_port(registry_path: &Path, port: u16) {
             cwd: PathBuf::from("/tmp/bindport-busy-fixture"),
         })
         .expect("reserve registry port");
+}
+
+fn record_registry_service(registry_path: &Path, service: &str, port: u16) {
+    let mut registry = Registry::open(registry_path).expect("registry");
+    let identity = ServiceIdentity {
+        project: String::from("doctor-output-project"),
+        service: service.to_string(),
+        git: None,
+        identity_key: format!("v1:doctor-output-project:{service}"),
+    };
+
+    registry
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port,
+            hostname: Some(format!("{service}.localhost")),
+            route_url: None,
+            pid: std::process::id(),
+            command: String::from("doctor output fixture"),
+            cwd: std::env::temp_dir().join("bindport-doctor-output-fixture"),
+        })
+        .expect("record registry service");
 }
 
 struct DashboardProcess {

@@ -15,7 +15,7 @@ use std::os::unix::process::ExitStatusExt;
 use bindport_adapters::{
     AdapterKind, OutputFileError, OutputFileOwnership as AdapterOutputFileOwnership,
     OutputRenderConfig, RenderError, RouteRecord, TemplateError as AdapterTemplateError,
-    TemplateResolver, TemplateSource, render_output_routes, write_render_plan,
+    TemplateResolver, TemplateSource, render_output_routes, render_plan_paths, write_render_plan,
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, ConfigError, ConfigSource,
@@ -76,7 +76,7 @@ fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
             }
         }
         Some("clean") => clean_registry(&args[1..]),
-        Some("doctor") => print_doctor(),
+        Some("doctor") => run_doctor_command(&args[1..]),
         Some("dashboard") => run_dashboard(&args[1..]),
         Some("render") => run_render_command(&args[1..]),
         Some("templates") => run_template_command(&args[1..]),
@@ -2269,6 +2269,27 @@ fn print_status() -> ExitCode {
     }
 }
 
+fn run_doctor_command(args: &[String]) -> ExitCode {
+    match args.first().map(String::as_str) {
+        None => print_doctor(),
+        Some("--help" | "-h") => {
+            print_doctor_help();
+            ExitCode::SUCCESS
+        }
+        Some("outputs") if args.len() == 1 => print_doctor_outputs(),
+        Some("outputs") => {
+            eprintln!("bindport: doctor outputs does not take arguments");
+            eprintln!("usage: bindport doctor [outputs]");
+            ExitCode::FAILURE
+        }
+        Some(command) => {
+            eprintln!("bindport: unknown doctor command `{command}`");
+            eprintln!("usage: bindport doctor [outputs]");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn print_doctor() -> ExitCode {
     println!("BindPort bootstrap doctor");
 
@@ -2297,6 +2318,161 @@ fn print_doctor() -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+fn print_doctor_outputs() -> ExitCode {
+    println!("BindPort output doctor");
+
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    let config = match resolve_config(&cwd) {
+        Ok(config) => {
+            print_doctor_output_config(&config);
+            config
+        }
+        Err(error) => {
+            println!("config: invalid ({error})");
+            return ExitCode::FAILURE;
+        }
+    };
+    let outputs = match configured_outputs(&config) {
+        Ok(outputs) => outputs,
+        Err(error) => {
+            println!("outputs: invalid ({error})");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if outputs.is_empty() {
+        println!("outputs: none configured");
+        return ExitCode::SUCCESS;
+    }
+
+    let mut registry = match Registry::open_default() {
+        Ok(registry) => registry,
+        Err(error) => {
+            println!("registry: unavailable ({error})");
+            return ExitCode::FAILURE;
+        }
+    };
+    let snapshot = match registry.status_snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            println!("registry: unavailable ({error})");
+            return ExitCode::FAILURE;
+        }
+    };
+    let routes = route_records(snapshot.services);
+    let base_dir = output_base_dir(&cwd, &config);
+    let resolver = TemplateResolver::new(
+        Some(project_template_dir(&cwd, &config)),
+        global_template_dir(),
+    );
+    let mut ok = true;
+
+    println!("routes: {}", routes.len());
+    println!("base dir: {}", base_dir.display());
+
+    for output in &outputs {
+        if !print_doctor_output(output, &resolver, &routes, &base_dir) {
+            ok = false;
+        }
+    }
+
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn print_doctor_output_config(config: &ResolvedConfig) {
+    match config.loaded.as_ref() {
+        Some(loaded) => {
+            println!(
+                "config: {} ({} {})",
+                loaded.path.display(),
+                loaded.source.as_str(),
+                loaded.format.as_str()
+            );
+            if let Some(local) = loaded.local_override.as_ref() {
+                println!(
+                    "config local override: {} ({} {})",
+                    local.path.display(),
+                    loaded.source.as_str(),
+                    local.format.as_str()
+                );
+            }
+        }
+        None => match config.fallback_path.as_ref() {
+            Some(path) => println!("config: none (optional fallback: {})", path.display()),
+            None => println!("config: none (optional fallback unavailable)"),
+        },
+    }
+}
+
+fn print_doctor_output(
+    output: &EffectiveOutputConfig,
+    resolver: &TemplateResolver,
+    routes: &[RouteRecord],
+    base_dir: &Path,
+) -> bool {
+    println!("output {}:", output.name);
+    println!("  target: {}", output.target);
+    println!(
+        "  root: {}",
+        output.root.as_deref().unwrap_or("<derived from target>")
+    );
+    println!("  auto-render: {}", output.auto_render);
+
+    let template = match resolver.resolve(&output.template, None) {
+        Ok(template) => {
+            println!("  template: {} ({})", output.template, template.source);
+            if let Some(path) = template.path.as_ref() {
+                println!("  template path: {}", path.display());
+            }
+            if template.wildcard_matches.len() > 1 {
+                println!(
+                    "  template warning: multiple wildcard matches; using {}",
+                    template
+                        .wildcard_matches
+                        .first()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| String::from("<unknown>"))
+                );
+            }
+            template
+        }
+        Err(error) => {
+            println!("  template: {} (invalid: {error})", output.template);
+            return false;
+        }
+    };
+
+    let render_config = OutputRenderConfig::from(output);
+    let plan = match render_output_routes(&render_config, &template.contents, routes) {
+        Ok(plan) => plan,
+        Err(error) => {
+            println!("  plan: invalid ({error})");
+            return false;
+        }
+    };
+    let planned_files = match render_plan_paths(&plan, base_dir) {
+        Ok(planned_files) => planned_files,
+        Err(error) => {
+            println!("  paths: invalid ({error})");
+            return false;
+        }
+    };
+
+    println!("  planned files: {}", planned_files.len());
+    for file in planned_files.iter().take(5) {
+        println!("    {} -> {}", file.route_key, file.path.display());
+    }
+    if planned_files.len() > 5 {
+        println!("    ... {} more", planned_files.len() - 5);
+    }
+
+    true
 }
 
 fn print_doctor_registry_path() -> Option<Registry> {
@@ -2675,6 +2851,7 @@ fn print_help() {
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport doctor              Show bootstrap diagnostics");
+    println!("  bindport doctor outputs      Validate output rendering setup");
     println!("  bindport dashboard [serve]   Serve the local dashboard");
     println!("  bindport dashboard start     Start the dashboard in the background");
     println!("  bindport dashboard status    Show background dashboard status");
@@ -2690,6 +2867,17 @@ fn print_help() {
     println!("  --env NAME=VALUE             Add a templated child environment variable");
     println!("  --hostname <template>        Set route hostname metadata");
     println!("  --route-url <template>       Set route URL metadata");
+}
+
+fn print_doctor_help() {
+    println!("BindPort diagnostics");
+    println!();
+    println!("Usage:");
+    println!("  bindport doctor");
+    println!("  bindport doctor outputs");
+    println!();
+    println!("Commands:");
+    println!("  outputs    Validate output config, templates, and planned file paths");
 }
 
 fn print_render_help() {

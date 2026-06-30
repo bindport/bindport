@@ -435,6 +435,13 @@ pub struct WrittenOutputFile {
     pub bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedOutputFile {
+    pub route_key: String,
+    pub target: String,
+    pub path: PathBuf,
+}
+
 #[derive(Debug)]
 pub enum RenderError {
     TargetTemplate {
@@ -586,15 +593,15 @@ pub fn write_render_plan(
 ) -> Result<Vec<WrittenOutputFile>, OutputFileError> {
     let root = output_root(base_dir, &plan.output)?;
     let symlink_anchor = symlink_check_anchor(base_dir, &root, &plan.output);
+    let planned_files = render_plan_paths_with_anchor(plan, base_dir, &root, &symlink_anchor)?;
     let owned_hashes = ownership
         .iter()
         .map(|owned| (owned.path.clone(), owned.content_hash.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut written = Vec::with_capacity(plan.files.len());
 
-    for file in &plan.files {
-        let path = output_file_path(base_dir, &root, &plan.output, &file.target)?;
-        reject_symlink_components(&symlink_anchor, &path)?;
+    for (file, planned) in plan.files.iter().zip(planned_files) {
+        let path = planned.path;
         verify_existing_target(&path, &owned_hashes)?;
         atomic_write(&symlink_anchor, &path, &file.contents)?;
 
@@ -607,6 +614,37 @@ pub fn write_render_plan(
     }
 
     Ok(written)
+}
+
+pub fn render_plan_paths(
+    plan: &RenderPlan,
+    base_dir: &Path,
+) -> Result<Vec<PlannedOutputFile>, OutputFileError> {
+    let root = output_root(base_dir, &plan.output)?;
+    let symlink_anchor = symlink_check_anchor(base_dir, &root, &plan.output);
+
+    render_plan_paths_with_anchor(plan, base_dir, &root, &symlink_anchor)
+}
+
+fn render_plan_paths_with_anchor(
+    plan: &RenderPlan,
+    base_dir: &Path,
+    root: &Path,
+    symlink_anchor: &Path,
+) -> Result<Vec<PlannedOutputFile>, OutputFileError> {
+    let mut planned_files = Vec::with_capacity(plan.files.len());
+
+    for file in &plan.files {
+        let path = output_file_path(base_dir, root, &plan.output, &file.target)?;
+        reject_symlink_components(symlink_anchor, &path)?;
+        planned_files.push(PlannedOutputFile {
+            route_key: file.route_key.clone(),
+            target: file.target.clone(),
+            path,
+        });
+    }
+
+    Ok(planned_files)
 }
 
 fn short_hash(value: &str) -> String {
