@@ -92,8 +92,9 @@ include compact copy actions, and `http` / `https` URLs also include an open
 action. Other URL schemes are displayed as plain text.
 
 Stopped and stale groups include a cleanup action in the group header. Cleanup
-removes the matching stopped or stale registry entries and then refreshes the
-dashboard. Active services cannot be removed from the dashboard.
+removes the matching stopped or stale registry entries, triggers configured
+output rendering/deletion, and then refreshes the dashboard. Active services
+cannot be removed from the dashboard.
 
 Each row has an expand control for secondary details: state, PID, port, health,
 proxy render status, current working directory, and command. Health is
