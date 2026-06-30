@@ -30,8 +30,9 @@ The current release includes:
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
   `.bindport.yaml`, with a fallback user config in the XDG config directory.
 - Basic project/service identity resolution from environment, config,
-  `package.json`, command inference, and `bindport run <service> -- ...`, with
-  git branch/worktree metadata recorded when available.
+  package-manager workspaces, `package.json`, command inference, and
+  `bindport run <service> -- ...`, with git branch/worktree metadata recorded
+  when available.
 - Service env templates for wrapped commands through `[[services]].env` and
   `bindport run --env`, including route hostname metadata when configured.
 - Basic SQLite-backed lease/run/output recording with `bindport status --json`.
@@ -160,7 +161,8 @@ future-only sections are visible.
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
 `BINDPORT_PROJECT` / `BINDPORT_SERVICE`, then config, then inference from
-`package.json`, the git worktree path, and command name.
+package-manager workspace roots, nearest `package.json`, the git worktree path,
+and command name.
 
 For monorepos, define service paths relative to the discovered project config.
 When no CLI or environment service override is provided, BindPort selects the

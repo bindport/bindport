@@ -980,11 +980,109 @@ struct PackageMetadata {
     identity_name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceRoot {
+    path: PathBuf,
+    metadata: PackageMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct PnpmWorkspaceConfig {
+    packages: Option<Vec<String>>,
+}
+
 fn package_inference(cwd: &Path, git: Option<&GitIdentity>) -> PackageInference {
-    let root = git.and_then(|git| read_package_metadata(&git.worktree_path));
-    let nearest = nearest_package_metadata(cwd, git.map(|git| git.worktree_path.as_path()));
+    let git_boundary = git.map(|git| git.worktree_path.as_path());
+    let workspace_root = nearest_workspace_root(cwd, git_boundary);
+    let package_boundary = workspace_root
+        .as_ref()
+        .map(|workspace| workspace.path.as_path())
+        .or(git_boundary);
+    let root = workspace_root
+        .as_ref()
+        .map(|workspace| workspace.metadata.clone())
+        .or_else(|| git.and_then(|git| read_package_metadata(&git.worktree_path)));
+    let nearest = nearest_package_metadata(cwd, package_boundary);
 
     PackageInference { root, nearest }
+}
+
+fn nearest_workspace_root(cwd: &Path, boundary: Option<&Path>) -> Option<WorkspaceRoot> {
+    let cwd = absolute_path(cwd, cwd.to_path_buf());
+
+    for directory in cwd.ancestors() {
+        if let Some(boundary) = boundary
+            && !directory.starts_with(boundary)
+        {
+            break;
+        }
+
+        if is_workspace_root(directory) {
+            return Some(WorkspaceRoot {
+                path: directory.to_path_buf(),
+                metadata: workspace_root_metadata(directory),
+            });
+        }
+
+        if Some(directory) == boundary {
+            break;
+        }
+    }
+
+    None
+}
+
+fn is_workspace_root(directory: &Path) -> bool {
+    package_json_has_workspaces(directory) || pnpm_workspace_has_packages(directory)
+}
+
+fn package_json_has_workspaces(directory: &Path) -> bool {
+    let contents = fs::read_to_string(directory.join("package.json")).ok();
+    let Some(value) = contents
+        .as_deref()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(contents).ok())
+    else {
+        return false;
+    };
+
+    workspace_packages_present(value.get("workspaces"))
+}
+
+fn workspace_packages_present(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Array(packages)) => packages.iter().any(non_empty_json_string),
+        Some(serde_json::Value::Object(workspace)) => workspace
+            .get("packages")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|packages| packages.iter().any(non_empty_json_string)),
+        _ => false,
+    }
+}
+
+fn non_empty_json_string(value: &serde_json::Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|package| !package.trim().is_empty())
+}
+
+fn pnpm_workspace_has_packages(directory: &Path) -> bool {
+    let contents = fs::read_to_string(directory.join("pnpm-workspace.yaml")).ok();
+    let Some(config) = contents
+        .as_deref()
+        .and_then(|contents| serde_yaml_ng::from_str::<PnpmWorkspaceConfig>(contents).ok())
+    else {
+        return false;
+    };
+
+    config
+        .packages
+        .is_some_and(|packages| packages.iter().any(|package| !package.trim().is_empty()))
+}
+
+fn workspace_root_metadata(directory: &Path) -> PackageMetadata {
+    read_package_metadata(directory).unwrap_or_else(|| PackageMetadata {
+        identity_name: directory_identity_name(directory),
+    })
 }
 
 fn nearest_package_metadata(cwd: &Path, boundary: Option<&Path>) -> Option<PackageMetadata> {
@@ -1016,6 +1114,15 @@ fn read_package_metadata(directory: &Path) -> Option<PackageMetadata> {
     let identity_name = package_identity_name(name)?;
 
     Some(PackageMetadata { identity_name })
+}
+
+fn directory_identity_name(directory: &Path) -> String {
+    directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(package_identity_name)
+        .unwrap_or(None)
+        .unwrap_or_else(|| String::from("workspace"))
 }
 
 fn package_identity_name(name: &str) -> Option<String> {
@@ -1578,6 +1685,143 @@ mod tests {
 
         assert_eq!(identity.project, "hoststamp");
         assert_eq!(identity.service, "hoststamp");
+    }
+
+    #[test]
+    fn package_workspaces_infer_root_project_without_git() {
+        let root = temp_test_dir("package-workspaces-root");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"orderful","workspaces":["apps/*"]}"#,
+        )
+        .expect("write root package json");
+        let api = root.join("apps").join("api");
+        let api_src = api.join("src");
+        fs::create_dir_all(&api_src).expect("api src");
+        fs::write(api.join("package.json"), r#"{"name":"@orderful/api"}"#)
+            .expect("write api package json");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &api_src,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(identity.project, "orderful");
+        assert_eq!(identity.service, "api");
+    }
+
+    #[test]
+    fn package_workspace_object_infers_root_project() {
+        let root = temp_test_dir("package-workspace-object");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"hoststamp","workspaces":{"packages":["packages/*"]}}"#,
+        )
+        .expect("write root package json");
+        let web = root.join("packages").join("web");
+        fs::create_dir_all(&web).expect("web dir");
+        fs::write(web.join("package.json"), r#"{"name":"@hoststamp/web"}"#)
+            .expect("write web package json");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &web,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(identity.project, "hoststamp");
+        assert_eq!(identity.service, "web");
+    }
+
+    #[test]
+    fn pnpm_workspace_yaml_infers_root_project_without_git() {
+        let root = temp_test_dir("pnpm-workspace-root");
+        fs::write(root.join("package.json"), r#"{"name":"orderful"}"#)
+            .expect("write root package json");
+        fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - apps/*\n")
+            .expect("write pnpm workspace");
+        let web = root.join("apps").join("web");
+        fs::create_dir_all(&web).expect("web dir");
+        fs::write(web.join("package.json"), r#"{"name":"@orderful/web"}"#)
+            .expect("write web package json");
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &web,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(identity.project, "orderful");
+        assert_eq!(identity.service, "web");
+    }
+
+    #[test]
+    fn package_workspace_root_beats_outer_git_root_package() {
+        let root = temp_test_dir("workspace-below-git-root");
+        git(&root, ["init"]);
+        git(&root, ["config", "user.email", "bindport@example.invalid"]);
+        git(&root, ["config", "user.name", "BindPort Test"]);
+        git(&root, ["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("package.json"), r#"{"name":"outer"}"#)
+            .expect("write outer package json");
+        let workspace = root.join("frontend");
+        fs::create_dir_all(&workspace).expect("workspace dir");
+        fs::write(
+            workspace.join("package.json"),
+            r#"{"name":"orderful","workspaces":["apps/*"]}"#,
+        )
+        .expect("write workspace package json");
+        let web = workspace.join("apps").join("web");
+        fs::create_dir_all(&web).expect("web dir");
+        fs::write(web.join("package.json"), r#"{"name":"@orderful/web"}"#)
+            .expect("write web package json");
+        fs::write(root.join("README.md"), "test\n").expect("write fixture");
+        git(
+            &root,
+            [
+                "add",
+                "README.md",
+                "package.json",
+                "frontend/package.json",
+                "frontend/apps/web/package.json",
+            ],
+        );
+        git(&root, ["commit", "-m", "initial"]);
+        let command = [String::from("next")];
+
+        let identity = resolve_identity(IdentitySources {
+            cwd: &web,
+            command: &command,
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        });
+
+        assert_eq!(identity.project, "orderful");
+        assert_eq!(identity.service, "web");
+        assert!(identity.git.is_some());
     }
 
     #[test]

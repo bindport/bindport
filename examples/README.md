@@ -32,7 +32,10 @@ hostname = "{branch}.orderful-website.localhost"
 
 For a monorepo, keep one config at the repo root and scope services by relative
 path. Running BindPort from inside `apps/api` selects the `api` service unless a
-CLI or environment service override is provided:
+CLI or environment service override is provided. If the repo also has npm/yarn
+`package.json#workspaces` or `pnpm-workspace.yaml`, BindPort uses that workspace
+root package as the inferred project and the nearest package as the inferred
+service when explicit config does not provide them.
 
 ```toml
 project = "orderful"
