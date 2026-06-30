@@ -11,7 +11,7 @@ use serde::Serialize;
 
 pub const DEFAULT_REGISTRY_FILE: &str = "registry.sqlite";
 pub const REGISTRY_PATH_ENV: &str = "BINDPORT_REGISTRY_PATH";
-pub const STATUS_SCHEMA_VERSION: &str = "0.1";
+pub const STATUS_SCHEMA_VERSION: &str = "0.3";
 
 pub fn default_registry_directory_name() -> &'static str {
     SERVICE_NAME
@@ -163,8 +163,18 @@ impl CleanSummary {
 pub struct StatusSnapshot {
     pub schema_version: &'static str,
     pub generated_at: String,
+    pub outputs: Vec<StatusOutput>,
     pub services: Vec<StatusService>,
     pub runs: Vec<StatusRun>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatusOutput {
+    pub name: String,
+    pub pending: usize,
+    pub rendered: usize,
+    pub removed: usize,
+    pub error: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -191,7 +201,16 @@ pub struct StatusService {
     pub exited_at: Option<String>,
     pub exit_code: Option<i32>,
     pub health: String,
+    pub outputs: Vec<StatusServiceOutput>,
     pub proxy: Option<StatusProxy>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StatusServiceOutput {
+    pub name: String,
+    pub status: String,
+    pub reason: Option<String>,
+    pub path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -441,12 +460,15 @@ impl Registry {
         self.reconcile_stale_active_leases()?;
 
         let generated_at = utc_now(&self.connection)?;
-        let services = self.status_services()?;
+        let mut services = self.status_services()?;
+        self.attach_service_outputs(&mut services)?;
+        let outputs = self.status_outputs()?;
         let runs = self.status_runs()?;
 
         Ok(StatusSnapshot {
             schema_version: STATUS_SCHEMA_VERSION,
             generated_at,
+            outputs,
             services,
             runs,
         })
@@ -644,7 +666,10 @@ impl Registry {
             CREATE INDEX IF NOT EXISTS output_files_output_path_idx
             ON output_files(output_name, rendered_path);
 
-            PRAGMA user_version = 4;
+            CREATE INDEX IF NOT EXISTS output_files_route_key_idx
+            ON output_files(route_key);
+
+            PRAGMA user_version = 5;
             ",
         )?;
 
@@ -773,7 +798,65 @@ impl Registry {
                 exited_at: row.get(18)?,
                 exit_code: row.get(19)?,
                 health: String::from("unknown"),
+                outputs: Vec::new(),
                 proxy: None,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn attach_service_outputs(&self, services: &mut [StatusService]) -> Result<(), RegistryError> {
+        for service in services {
+            let route_key = status_service_route_key(service);
+            service.outputs = self.status_outputs_for_route(&route_key)?;
+            service.proxy = status_proxy_for_outputs(&service.outputs);
+        }
+
+        Ok(())
+    }
+
+    fn status_outputs_for_route(
+        &self,
+        route_key: &str,
+    ) -> Result<Vec<StatusServiceOutput>, RegistryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT output_name, status, reason, rendered_path
+             FROM output_files
+             WHERE route_key = ?1
+             ORDER BY output_name",
+        )?;
+        let rows = statement.query_map(params![route_key], |row| {
+            Ok(StatusServiceOutput {
+                name: row.get(0)?,
+                status: row.get(1)?,
+                reason: row.get(2)?,
+                path: row.get(3)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn status_outputs(&self) -> Result<Vec<StatusOutput>, RegistryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT
+                output_name,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'rendered' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'removed' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)
+             FROM output_files
+             GROUP BY output_name
+             ORDER BY output_name",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(StatusOutput {
+                name: row.get(0)?,
+                pending: row.get::<_, i64>(1)? as usize,
+                rendered: row.get::<_, i64>(2)? as usize,
+                removed: row.get::<_, i64>(3)? as usize,
+                error: row.get::<_, i64>(4)? as usize,
             })
         })?;
 
@@ -808,6 +891,26 @@ struct ActiveRun {
     lease_id: i64,
     run_id: i64,
     pid: u32,
+}
+
+pub fn status_service_route_key(service: &StatusService) -> String {
+    service.identity_key.clone().unwrap_or_else(|| {
+        format!(
+            "{}:{}:{}:{}:{}",
+            service.project, service.service, service.host, service.port, service.started_at
+        )
+    })
+}
+
+fn status_proxy_for_outputs(outputs: &[StatusServiceOutput]) -> Option<StatusProxy> {
+    outputs
+        .iter()
+        .find(|output| output.name == "traefik")
+        .map(|output| StatusProxy {
+            adapter: String::from("traefik"),
+            rendered: output.status == OutputFileStatus::Rendered.as_str(),
+            target: Some(output.path.clone()),
+        })
 }
 
 fn utc_now(connection: &Connection) -> Result<String, RegistryError> {
@@ -873,12 +976,14 @@ mod tests {
 
         let snapshot = registry.status_snapshot().expect("snapshot");
         assert_eq!(snapshot.schema_version, STATUS_SCHEMA_VERSION);
+        assert!(snapshot.outputs.is_empty());
         assert_eq!(snapshot.services.len(), 1);
         assert_eq!(snapshot.services[0].state, "stopped");
         assert_eq!(snapshot.services[0].port, 29_123);
         assert_eq!(snapshot.services[0].url, "http://127.0.0.1:29123");
         assert_eq!(snapshot.services[0].hostname.as_deref(), None);
         assert_eq!(snapshot.services[0].route_url.as_deref(), None);
+        assert!(snapshot.services[0].outputs.is_empty());
         assert!(snapshot.services[0].proxy.is_none());
         assert_eq!(snapshot.services[0].exit_code, Some(0));
         assert_eq!(snapshot.runs.len(), 1);
@@ -975,6 +1080,12 @@ mod tests {
                 content_hash: String::from("hash-1")
             }]
         );
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(snapshot.outputs.len(), 1);
+        assert_eq!(snapshot.outputs[0].name, "traefik");
+        assert_eq!(snapshot.outputs[0].rendered, 1);
+        assert_eq!(snapshot.outputs[0].error, 1);
     }
 
     #[test]
@@ -1087,6 +1198,106 @@ mod tests {
             service.route_url.as_deref(),
             Some("http://feature-tree.bindport.localhost")
         );
+    }
+
+    #[test]
+    fn status_snapshot_reports_service_outputs_and_traefik_proxy_alias() {
+        let mut registry =
+            Registry::open(temp_registry_path("status-service-outputs")).expect("registry");
+        let identity = test_identity("v1:status-output");
+        let started = registry
+            .record_run_started(&RunStart {
+                project: identity.project.clone(),
+                service: identity.service.clone(),
+                identity: Some(identity.clone()),
+                host: String::from("127.0.0.1"),
+                port: 29_124,
+                hostname: Some(String::from("status.localhost")),
+                route_url: Some(String::from("http://status.localhost")),
+                pid: std::process::id(),
+                command: String::from("next dev"),
+                cwd: PathBuf::from("/tmp/bindport"),
+            })
+            .expect("record start");
+
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key: identity.identity_key,
+                rendered_path: PathBuf::from("/tmp/bindport/traefik/web.yml"),
+                status: OutputFileStatus::Rendered,
+                reason: None,
+                content_hash: Some(String::from("hash-1")),
+                template_hash: Some(String::from("template-1")),
+                lease_id: Some(started.lease_id),
+                run_id: Some(started.run_id),
+            })
+            .expect("record rendered file");
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        let service = &snapshot.services[0];
+
+        assert_eq!(snapshot.outputs.len(), 1);
+        assert_eq!(snapshot.outputs[0].name, "traefik");
+        assert_eq!(snapshot.outputs[0].rendered, 1);
+        assert_eq!(service.outputs.len(), 1);
+        assert_eq!(service.outputs[0].name, "traefik");
+        assert_eq!(service.outputs[0].status, "rendered");
+        assert_eq!(service.outputs[0].reason, None);
+        assert_eq!(service.outputs[0].path, "/tmp/bindport/traefik/web.yml");
+        let proxy = service.proxy.as_ref().expect("traefik proxy alias");
+        assert_eq!(proxy.adapter, "traefik");
+        assert!(proxy.rendered);
+        assert_eq!(
+            proxy.target.as_deref(),
+            Some("/tmp/bindport/traefik/web.yml")
+        );
+    }
+
+    #[test]
+    fn status_snapshot_links_outputs_for_services_without_identity_keys() {
+        let mut registry =
+            Registry::open(temp_registry_path("status-output-fallback-key")).expect("registry");
+        let started = registry
+            .record_run_started(&test_run_start(
+                "bindport",
+                "next",
+                29_123,
+                std::process::id(),
+            ))
+            .expect("record start");
+        let route_key = {
+            let snapshot = registry.status_snapshot().expect("snapshot");
+            let service = &snapshot.services[0];
+
+            assert!(service.identity_key.is_none());
+            format!(
+                "{}:{}:{}:{}:{}",
+                service.project, service.service, service.host, service.port, service.started_at
+            )
+        };
+
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key,
+                rendered_path: PathBuf::from("/tmp/bindport/traefik/next.yml"),
+                status: OutputFileStatus::Rendered,
+                reason: None,
+                content_hash: Some(String::from("hash-1")),
+                template_hash: Some(String::from("template-1")),
+                lease_id: Some(started.lease_id),
+                run_id: Some(started.run_id),
+            })
+            .expect("record rendered file");
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        let service = &snapshot.services[0];
+
+        assert_eq!(service.outputs.len(), 1);
+        assert_eq!(service.outputs[0].name, "traefik");
+        assert_eq!(service.outputs[0].path, "/tmp/bindport/traefik/next.yml");
+        assert!(service.proxy.as_ref().expect("proxy").rendered);
     }
 
     #[test]
