@@ -1,0 +1,11 @@
+{
+  "name": "orderful",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "bindport run web -- next dev",
+    "dev:api": "bindport run api -- cargo run"
+  }
+}

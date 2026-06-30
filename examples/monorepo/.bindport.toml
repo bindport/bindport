@@ -1,0 +1,54 @@
+project = "orderful"
+default_range = "29000-29999"
+skip_ports = [29000, 29070, 29118, 29167, 29168, 29169, 29900, 29901, 29920, 29999]
+
+[dashboard]
+host = "127.0.0.1"
+port = 27080
+register_service = false
+allowed_hosts = ["localhost", "127.0.0.1"]
+
+[dashboard.auth]
+required = false
+token_env = "BINDPORT_DASHBOARD_TOKEN"
+
+[output_defaults]
+root = ".bindport/generated"
+target_host = "127.0.0.1"
+target_scheme = "http"
+auto_render = true
+delete_on = ["removed"]
+on_failure = "warn"
+debounce_ms = 250
+
+[[services]]
+name = "web"
+path = "apps/web"
+hostname = "{branch}.orderful-website.localhost"
+env.PORT = "{port}"
+env.HOSTNAME = "0.0.0.0"
+env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
+
+[[services]]
+name = "api"
+path = "apps/api"
+hostname = "{branch}.orderful-api.localhost"
+env.PORT = "{port}"
+env.BINDPORT_ROUTE_URL = "{route_url}"
+
+[[outputs]]
+name = "traefik"
+template = "bindport-traefik"
+target = "traefik/{{ route.slug }}.yml"
+
+[outputs.vars]
+entrypoints = ["web"]
+tls = false
+middlewares = []
+
+[[outputs]]
+name = "env-local"
+template = "bindport-env-local"
+root = "."
+target = "apps/{{ route.service }}/.env.local"
+auto_render = false

@@ -10,7 +10,7 @@ binaries.
 
 ## Current Status
 
-BindPort v0.2.0 is released on GitHub and crates.io. Cargo is the supported
+BindPort v0.3.0 is released on GitHub and crates.io. Cargo is the supported
 install path:
 
 ```sh
@@ -61,6 +61,12 @@ dashboard status parity, `render --all`, auto-render events, cleanup-triggered
 deletion, and `doctor outputs` diagnostics. Real Traefik reload behavior remains
 manual acceptance because CI should not depend on a local proxy daemon.
 
+The v0.4 monorepo/config gate is covered by config explain/validate tests,
+workspace inference tests, local override layering tests, service env rendering
+tests, and the checked-in monorepo fixture. Manual acceptance should verify the
+fixture from both service directories and confirm opt-in `.env.local` output
+does not write unless configured.
+
 ## Local Release Checks
 
 Run the standard local gate before any release prep branch:
@@ -84,8 +90,8 @@ mise run release-prep
 mise run release-prep patch
 mise run release-prep minor
 mise run release-prep major
-mise run release-prep v0.2.0
-mise run release-prep 0.2.0
+mise run release-prep v0.4.0
+mise run release-prep 0.4.0
 ```
 
 When no argument is provided, `release-prep` defaults to `patch`.
@@ -130,13 +136,13 @@ Run it locally after a release-prep branch updates versions and package
 artifacts:
 
 ```sh
-mise run release-check 0.2.0
+mise run release-check 0.4.0
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/release-check.sh --version 0.2.0
+scripts/release-check.sh --version 0.4.0
 ```
 
 The same validation gate is available as the manual `Release Check` GitHub
@@ -154,7 +160,7 @@ After the release prep PR is merged, finish the release from clean, synced
 `main` with:
 
 ```sh
-mise run release-finish v0.2.0
+mise run release-finish v0.4.0
 ```
 
 `release-finish` is the normal post-merge path. It verifies the checkout, asks
@@ -168,9 +174,9 @@ skipped and the remaining crates continue in order.
 Use these options for recovery or non-interactive runs:
 
 ```sh
-mise run release-finish --yes v0.2.0
-mise run release-finish --skip-github-release v0.2.0
-mise run release-finish --skip-cargo-publish v0.2.0
+mise run release-finish --yes v0.4.0
+mise run release-finish --skip-github-release v0.4.0
+mise run release-finish --skip-cargo-publish v0.4.0
 ```
 
 `release-finish` waits for the manual `Release` workflow. If the
@@ -180,8 +186,8 @@ the local command continues polling until the workflow completes or times out.
 The lower-level release dispatch command remains available:
 
 ```sh
-mise run release-publish --dry-run v0.2.0
-mise run release-publish v0.2.0
+mise run release-publish --dry-run v0.4.0
+mise run release-publish v0.4.0
 ```
 
 When no version is provided, `release-publish` and `release-finish` use the
@@ -234,13 +240,13 @@ publishes or dry-runs those crates in dependency order:
 exists. To exercise the Cargo publish helper directly, run the local dry-run:
 
 ```sh
-mise run cargo-publish 0.2.0
+mise run cargo-publish 0.4.0
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/cargo-publish.sh --version 0.2.0 --dry-run
+scripts/cargo-publish.sh --version 0.4.0 --dry-run
 ```
 
 The dry-run requires the Cargo workspace version and `npm/bindport/package.json`
@@ -255,7 +261,7 @@ After the GitHub Release has been created from `main`, publish to crates.io
 directly with:
 
 ```sh
-mise run cargo-publish --execute 0.2.0
+mise run cargo-publish --execute 0.4.0
 ```
 
 Real publishing additionally requires:
@@ -334,12 +340,43 @@ fresh checkout or clean worktree:
     the dashboard can be reached through Traefik and still rejects unauthenticated
     requests when dashboard auth is required.
 
+## v0.4.0 Manual Acceptance
+
+Before merging the v0.4.0 release prep PR, smoke test monorepo config behavior
+from a fresh checkout or clean worktree:
+
+1. Build the release binary with `cargo build --release --locked`.
+2. From `examples/monorepo`, run `bindport config validate` and confirm
+   `validation: ok`.
+3. From `examples/monorepo/apps/web`, run `bindport config explain` and confirm
+   the service resolves to `web` from `[[services]].path`.
+4. From `examples/monorepo/apps/api`, run `bindport config explain` and confirm
+   the service resolves to `api` from `[[services]].path`.
+5. Run `bindport run web -- sh -c 'printf "%s\n" "$PORT"'` and confirm the
+   wrapped process receives the assigned port.
+6. Run a service with configured env templates and confirm `HOSTNAME`,
+   `NEXT_PUBLIC_BINDPORT_URL`, or equivalent service env values are injected.
+7. Copy `.bindport.local.toml.sample` to `.bindport.local.toml`, adjust a local
+   field such as `output_defaults.target_host`, and confirm
+   `bindport config explain` reports the local override source.
+8. Run `bindport doctor outputs` with a temp registry path and confirm both
+   `bindport-traefik` and `bindport-env-local` resolve.
+9. Run `bindport render --dry-run` and confirm both configured outputs plan
+   without writing files.
+10. Run `bindport render env-local` only after opting into that output and
+    confirm DB-owned `.env.local` files are written under the intended package
+    paths, while unowned existing files are not overwritten.
+11. Clone or create a second worktree, run the same service from both
+    worktrees, and confirm `bindport status --json` reports distinct identities
+    without port collisions.
+
 ## Versioning
 
 - `0.0.x`: unreleased bootstrap only.
 - `0.1.0`: first working runner release.
 - `0.2.0`: local dashboard API, embedded UI, and stopped/stale cleanup.
 - `0.3.0`: template output rendering and built-in Traefik file-provider output.
+- `0.4.0`: monorepo config depth, validation, local overrides, and env outputs.
 - Pre-1.0 minor releases may contain breaking changes.
 - A stable release prep commit should update all package versions together.
 
@@ -460,7 +497,7 @@ run:
     "dev": "bindport -- next dev"
   },
   "devDependencies": {
-    "bindport": "^0.2.0"
+    "bindport": "^0.4.0"
   }
 }
 ```

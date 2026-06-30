@@ -65,15 +65,14 @@ bindport doctor outputs
 Template names are logical names, not filesystem paths. Names must be safe
 relative names with no path separators, no absolute path syntax, and no `..`.
 
-For `template = "bindport-traefik"` or `template = "bindport-env-local"`,
-BindPort checks the first matching file:
+For `template = "<name>"`, BindPort checks the first matching file:
 
-1. project `.bindport/templates/bindport-traefik`
-2. project `.bindport/templates/bindport-traefik.j2`
-3. project `.bindport/templates/bindport-traefik.*.j2`
-4. global `$XDG_CONFIG_HOME/bindport/templates/bindport-traefik`
-5. global `$XDG_CONFIG_HOME/bindport/templates/bindport-traefik.j2`
-6. global `$XDG_CONFIG_HOME/bindport/templates/bindport-traefik.*.j2`
+1. project `.bindport/templates/<name>`
+2. project `.bindport/templates/<name>.j2`
+3. project `.bindport/templates/<name>.*.j2`
+4. global `$XDG_CONFIG_HOME/bindport/templates/<name>`
+5. global `$XDG_CONFIG_HOME/bindport/templates/<name>.j2`
+6. global `$XDG_CONFIG_HOME/bindport/templates/<name>.*.j2`
 7. built-in template, when the name is one of BindPort's built-ins
 
 Project templates live beside the discovered project config. If no project
@@ -116,6 +115,7 @@ Example monorepo config:
 [[outputs]]
 name = "env-local"
 template = "bindport-env-local"
+root = "."
 target = "apps/{{ route.service }}/.env.local"
 ```
 
@@ -130,7 +130,8 @@ ownership checks. Existing unowned files are not overwritten. Automatic output
 rendering happens after route state changes are recorded, so startup-critical
 environment should still use `[[services]].env` or `bindport run --env`; use the
 env-file output for tools that reread files or for explicit `bindport render`
-workflows.
+workflows. Set `root = "."` when shared output defaults point generated config
+files somewhere else and the env file should land in a package directory.
 
 ## Traefik File Provider Setup
 
