@@ -116,6 +116,7 @@ cargo_version="$(current_cargo_version)"
 npm_version="$(current_npm_version)"
 is_stable_semver "$cargo_version" || die "current Cargo version must be stable X.Y.Z, got $cargo_version"
 [[ "$npm_version" == "$cargo_version" ]] || die "npm version $npm_version does not match Cargo version $cargo_version"
+node scripts/npm-package-utils.js validate "$cargo_version"
 reject_bootstrap_version "$cargo_version"
 
 if [[ -n "$request" ]]; then

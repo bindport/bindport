@@ -73,6 +73,9 @@ jobs:
       - name: Build release binary
         run: mise run build
 
+      - name: Smoke test npm wrapper
+        run: mise run npm-smoke
+
   macos:
     name: macos compatibility
     runs-on: macos-latest

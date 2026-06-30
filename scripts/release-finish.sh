@@ -267,6 +267,7 @@ is_stable_semver "$version" || die "version must be stable X.Y.Z or vX.Y.Z, got 
 [[ ! "$version" =~ ^0\.0\. ]] || die "0.0.x is bootstrap-only and must not be released"
 [[ "$workspace_version" == "$version" ]] || die "Cargo workspace version $workspace_version does not match $version"
 [[ "$npm_version" == "$version" ]] || die "npm package version $npm_version does not match $version"
+node scripts/npm-package-utils.js validate "$version"
 
 release_tag="v$version"
 existing_remote_tag_commit="$(remote_tag_commit "$release_tag")"

@@ -35,10 +35,22 @@ jobs:
             os: ubuntu-24.04
             binary_name: bindport
             asset_name: bindport-linux-x64
+            npm_platform: linux-x64
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            binary_name: bindport
+            asset_name: bindport-linux-arm64
+            npm_platform: linux-arm64
+          - name: macos-x64
+            os: macos-15-intel
+            binary_name: bindport
+            asset_name: bindport-macos-x64
+            npm_platform: darwin-x64
           - name: macos-arm64
             os: macos-15
             binary_name: bindport
             asset_name: bindport-macos-arm64
+            npm_platform: darwin-arm64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -70,6 +82,13 @@ jobs:
           else
             (cd dist && shasum -a 256 "${ASSET_NAME}" > "${ASSET_NAME}.sha256")
           fi
+
+      - name: Pack platform npm package
+        shell: bash
+        env:
+          NPM_PLATFORM: ${{ matrix.npm_platform }}
+          ASSET_NAME: ${{ matrix.asset_name }}
+        run: scripts/npm-stage-platform-package.sh "$NPM_PLATFORM" "dist/$ASSET_NAME" "$PWD/dist"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -199,6 +218,30 @@ jobs:
             sha256sum -c ./*.sha256
           )
 
+      - name: Pack wrapper npm package
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd npm/bindport
+            npm pack --pack-destination "$GITHUB_WORKSPACE/dist"
+          )
+          expected=(
+            "bindport-darwin-arm64-${RELEASE_VERSION}.tgz"
+            "bindport-darwin-x64-${RELEASE_VERSION}.tgz"
+            "bindport-linux-arm64-${RELEASE_VERSION}.tgz"
+            "bindport-linux-x64-${RELEASE_VERSION}.tgz"
+            "bindport-${RELEASE_VERSION}.tgz"
+          )
+          for package in "${expected[@]}"; do
+            if [[ ! -f "dist/$package" ]]; then
+              echo "missing npm package tarball: dist/$package" >&2
+              exit 1
+            fi
+          done
+
       - name: Verify release git credentials
         if: ${{ steps.release.outputs.tag_exists == 'false' }}
         env:
@@ -256,4 +299,4 @@ jobs:
         run: echo "Dry run completed for $TAG."
 
       - name: Report package publishing status
-        run: echo "GitHub release binaries are uploaded automatically. Cargo publishing uses the manual Cargo Publish workflow; npm package publishing remains manual."
+        run: echo "GitHub release binaries and npm tarballs are uploaded automatically. Cargo and npm publishing use separate manual publish workflows."

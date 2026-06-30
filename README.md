@@ -51,8 +51,8 @@ The current source tree is preparing v0.4.0 and includes:
   controls.
 - MIT license, security policy, third-party notices stub, CI/audit/release
   workflows, and local `mise` tasks.
-- npm wrapper package skeleton. It is not published yet because native binary
-  dispatch is not wired.
+- npm wrapper plus Linux/macOS x64/arm64 platform package metadata for
+  publishing native binaries through JavaScript package managers.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
 The current support target is Linux and macOS-style local development. Windows
@@ -239,7 +239,7 @@ services are not removed.
 - [Monorepos](docs/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
-  Cargo publish helpers, and npm packaging boundaries.
+  Cargo publish helpers, and npm packaging.
 
 ## License
 
