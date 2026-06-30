@@ -428,6 +428,27 @@ pub struct OutputFileOwnership {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovableOutputFile {
+    pub route_key: String,
+    pub path: PathBuf,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedOutputFile {
+    pub route_key: String,
+    pub path: PathBuf,
+    pub status: OutputFileRemovalStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFileRemovalStatus {
+    Removed,
+    Missing,
+    ExternalModified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrittenOutputFile {
     pub route_key: String,
     pub path: PathBuf,
@@ -614,6 +635,55 @@ pub fn write_render_plan(
     }
 
     Ok(written)
+}
+
+pub fn remove_owned_output_files(
+    files: &[RemovableOutputFile],
+    base_dir: &Path,
+    output: &OutputContext,
+) -> Result<Vec<RemovedOutputFile>, OutputFileError> {
+    let root = output_root(base_dir, output)?;
+    let symlink_anchor = symlink_check_anchor(base_dir, &root, output);
+    let mut removed = Vec::with_capacity(files.len());
+
+    for file in files {
+        if !file.path.starts_with(&root) {
+            return Err(OutputFileError::TargetEscapesRoot {
+                target: file.path.display().to_string(),
+                root: root.clone(),
+            });
+        }
+        if file.path.file_name().is_none() {
+            return Err(OutputFileError::UnsafeTarget {
+                target: file.path.display().to_string(),
+            });
+        }
+        reject_symlink_components(&symlink_anchor, &file.path)?;
+
+        let status = match owned_file_state(&file.path, &file.content_hash)? {
+            OwnedFileState::Missing => OutputFileRemovalStatus::Missing,
+            OwnedFileState::ExternalModified => OutputFileRemovalStatus::ExternalModified,
+            OwnedFileState::Matches => match fs::remove_file(&file.path) {
+                Ok(()) => OutputFileRemovalStatus::Removed,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    OutputFileRemovalStatus::Missing
+                }
+                Err(source) => {
+                    return Err(OutputFileError::Io {
+                        path: file.path.clone(),
+                        source,
+                    });
+                }
+            },
+        };
+        removed.push(RemovedOutputFile {
+            route_key: file.route_key.clone(),
+            path: file.path.clone(),
+            status,
+        });
+    }
+
+    Ok(removed)
 }
 
 pub fn render_plan_paths(
@@ -828,6 +898,34 @@ fn verify_existing_target(
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnedFileState {
+    Matches,
+    Missing,
+    ExternalModified,
+}
+
+fn owned_file_state(path: &Path, expected_hash: &str) -> Result<OwnedFileState, OutputFileError> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(OwnedFileState::Missing);
+        }
+        Err(source) => {
+            return Err(OutputFileError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    if content_hash(&contents) != expected_hash {
+        return Ok(OwnedFileState::ExternalModified);
+    }
+
+    Ok(OwnedFileState::Matches)
 }
 
 fn atomic_write(anchor: &Path, path: &Path, contents: &str) -> Result<(), OutputFileError> {
@@ -1363,6 +1461,113 @@ mod tests {
             error,
             OutputFileError::ExternalModified { path: error_path } if error_path == path
         ));
+    }
+
+    #[test]
+    fn remove_owned_output_files_deletes_matching_files() {
+        let root = temp_test_dir("remove-owned");
+        let output = test_render_plan("routes/demo.yml", "owned").output;
+        let path = root.join(".bindport/out/routes/demo.yml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        fs::write(&path, "owned").expect("owned file");
+
+        let removed = remove_owned_output_files(
+            &[RemovableOutputFile {
+                route_key: String::from("route-1"),
+                path: path.clone(),
+                content_hash: content_hash("owned"),
+            }],
+            &root,
+            &output,
+        )
+        .expect("remove owned file");
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].route_key, "route-1");
+        assert_eq!(removed[0].path, path);
+        assert_eq!(removed[0].status, OutputFileRemovalStatus::Removed);
+        assert!(!removed[0].path.exists());
+    }
+
+    #[test]
+    fn remove_owned_output_files_reports_missing_files() {
+        let root = temp_test_dir("remove-missing");
+        let output = test_render_plan("routes/missing.yml", "owned").output;
+        let path = root.join(".bindport/out/routes/missing.yml");
+
+        let removed = remove_owned_output_files(
+            &[RemovableOutputFile {
+                route_key: String::from("route-1"),
+                path: path.clone(),
+                content_hash: content_hash("owned"),
+            }],
+            &root,
+            &output,
+        )
+        .expect("remove missing file");
+
+        assert_eq!(removed[0].status, OutputFileRemovalStatus::Missing);
+        assert_eq!(removed[0].path, path);
+    }
+
+    #[test]
+    fn remove_owned_output_files_preserves_externally_modified_files() {
+        let root = temp_test_dir("remove-modified");
+        let output = test_render_plan("routes/demo.yml", "owned").output;
+        let path = root.join(".bindport/out/routes/demo.yml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        fs::write(&path, "changed").expect("changed file");
+
+        let removed = remove_owned_output_files(
+            &[RemovableOutputFile {
+                route_key: String::from("route-1"),
+                path: path.clone(),
+                content_hash: content_hash("owned"),
+            }],
+            &root,
+            &output,
+        )
+        .expect("check modified file");
+
+        assert_eq!(removed[0].status, OutputFileRemovalStatus::ExternalModified);
+        assert_eq!(
+            fs::read_to_string(&path).expect("preserved file"),
+            "changed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_owned_output_files_rejects_symlink_below_output_root() {
+        let root = temp_test_dir("remove-symlink-root");
+        let outside = temp_test_dir("remove-symlink-outside");
+        let output = test_render_plan("routes/demo.yml", "owned").output;
+        let routes_dir = root.join(".bindport/out/routes");
+        let path = routes_dir.join("demo.yml");
+        let outside_path = outside.join("demo.yml");
+        fs::create_dir_all(&routes_dir).expect("routes dir");
+        fs::write(&path, "owned").expect("owned file");
+        fs::remove_file(&path).expect("remove original file");
+        fs::remove_dir(&routes_dir).expect("remove original dir");
+        fs::write(&outside_path, "owned").expect("outside file");
+        std::os::unix::fs::symlink(&outside, &routes_dir).expect("symlink routes dir");
+
+        let error = remove_owned_output_files(
+            &[RemovableOutputFile {
+                route_key: String::from("route-1"),
+                path: path.clone(),
+                content_hash: content_hash("owned"),
+            }],
+            &root,
+            &output,
+        )
+        .expect_err("symlink below root");
+
+        assert!(matches!(
+            error,
+            OutputFileError::SymlinkInPath { path: error_path } if error_path == routes_dir
+        ));
+        assert!(outside_path.is_file());
     }
 
     #[test]

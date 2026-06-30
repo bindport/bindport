@@ -1807,6 +1807,75 @@ fn runner_skips_outputs_when_auto_render_is_disabled() {
 }
 
 #[test]
+fn clean_removes_owned_output_files_for_removed_routes() {
+    let registry_path = temp_registry_path("clean-output-removed-registry");
+    let root = temp_test_dir("clean-output-removed-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"clean-output-removed\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"clean.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\n"
+        ),
+    )
+    .expect("write output config");
+    let rendered_path = root.join(".bindport/generated/traefik/web.yml");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    assert!(rendered_path.is_file());
+
+    let clean_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["clean", "--stopped"])
+        .output()
+        .expect("clean stopped entries");
+
+    assert!(
+        clean_output.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&clean_output.stderr)
+    );
+    assert!(!rendered_path.exists());
+}
+
+#[test]
+fn runner_delete_on_stopped_removes_owned_output_file_after_exit() {
+    let registry_path = temp_registry_path("delete-on-stopped-registry");
+    let root = temp_test_dir("delete-on-stopped-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"delete-on-stopped\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"stopped.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\ndelete_on = [\"stopped\", \"removed\"]\n"
+        ),
+    )
+    .expect("write output config");
+    let rendered_path = root.join(".bindport/generated/traefik/web.yml");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    assert!(!rendered_path.exists());
+}
+
+#[test]
 fn doctor_outputs_reports_configured_output() {
     let registry_path = temp_registry_path("doctor-output-registry");
     let root = temp_test_dir("doctor-output-root");

@@ -141,7 +141,9 @@ snapshot. `bindport doctor outputs` validates output config, template lookup,
 and planned render paths without writing files. Template lookup, listing,
 showing, and export are available through `bindport templates`. Wrapped command
 start/exit events auto-render outputs when `auto_render = true`;
-cleanup/deletion rendering remains later v0.3 work.
+`delete_on` can remove DB-owned output files for stopped/stale/removed routes,
+and CLI cleanup triggers removed-route output cleanup. Dashboard cleanup output
+events remain later v0.3 work.
 Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
