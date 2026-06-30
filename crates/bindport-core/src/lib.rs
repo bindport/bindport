@@ -270,6 +270,15 @@ impl BindPortConfig {
         Ok(effective)
     }
 
+    pub fn validate(&self) -> Vec<ConfigValidationIssue> {
+        let mut issues = Vec::new();
+
+        validate_services(self.services.as_deref(), &mut issues);
+        validate_outputs(self.outputs.as_deref(), &mut issues);
+
+        issues
+    }
+
     pub fn merge_local_override(&mut self, local: BindPortConfig) {
         override_option(&mut self.project, local.project);
         override_option(&mut self.service, local.service);
@@ -283,6 +292,141 @@ impl BindPortConfig {
             OutputDefaultsConfig::merge,
         );
         merge_outputs(&mut self.outputs, local.outputs);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigValidationIssue {
+    pub field: String,
+    pub message: String,
+}
+
+impl ConfigValidationIssue {
+    fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ConfigValidationIssue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.field, self.message)
+    }
+}
+
+fn validate_services(services: Option<&[ServiceConfig]>, issues: &mut Vec<ConfigValidationIssue>) {
+    let Some(services) = services else {
+        return;
+    };
+    let mut names = BTreeSet::new();
+
+    for (index, service) in services.iter().enumerate() {
+        let name_field = format!("services[{index}].name");
+        match service.name.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => {
+                if !names.insert(name.to_string()) {
+                    issues.push(ConfigValidationIssue::new(
+                        name_field,
+                        format!("duplicate service name `{name}`; service names must be unique"),
+                    ));
+                }
+            }
+            _ => issues.push(ConfigValidationIssue::new(
+                name_field,
+                "service name is required",
+            )),
+        }
+
+        if let Some(path) = service.path.as_deref() {
+            validate_service_path(index, path, issues);
+        }
+    }
+}
+
+fn validate_service_path(index: usize, path: &str, issues: &mut Vec<ConfigValidationIssue>) {
+    let field = format!("services[{index}].path");
+    let path = path.trim();
+
+    if path.is_empty() {
+        issues.push(ConfigValidationIssue::new(
+            field,
+            "service path must not be empty",
+        ));
+        return;
+    }
+
+    let path = Path::new(path);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        issues.push(ConfigValidationIssue::new(
+            field,
+            "service path must be relative to the config file and must not contain `..`",
+        ));
+    }
+}
+
+fn validate_outputs(outputs: Option<&[OutputConfig]>, issues: &mut Vec<ConfigValidationIssue>) {
+    let Some(outputs) = outputs else {
+        return;
+    };
+    let mut names = BTreeSet::new();
+
+    for (index, output) in outputs.iter().enumerate() {
+        let name_field = format!("outputs[{index}].name");
+        let Some(name) = output
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            issues.push(ConfigValidationIssue::new(
+                name_field,
+                "output name is required",
+            ));
+            continue;
+        };
+
+        if !names.insert(name.to_string()) {
+            issues.push(ConfigValidationIssue::new(
+                name_field,
+                format!("duplicate output name `{name}`; output names must be unique"),
+            ));
+        }
+
+        if !output.enabled.unwrap_or(true) {
+            continue;
+        }
+
+        if output
+            .template
+            .as_deref()
+            .map(str::trim)
+            .filter(|template| !template.is_empty())
+            .is_none()
+        {
+            issues.push(ConfigValidationIssue::new(
+                format!("outputs[{index}].template"),
+                format!("output `{name}` is missing required `template`"),
+            ));
+        }
+
+        if output
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+            .is_none()
+        {
+            issues.push(ConfigValidationIssue::new(
+                format!("outputs[{index}].target"),
+                format!("output `{name}` is missing required `target`"),
+            ));
+        }
     }
 }
 
@@ -1634,6 +1778,85 @@ mod tests {
             missing_template.effective_outputs(),
             Err(OutputConfigError::MissingTemplate { name }) if name == "traefik"
         ));
+    }
+
+    #[test]
+    fn validate_reports_service_and_output_errors() {
+        let config = BindPortConfig {
+            services: Some(vec![
+                ServiceConfig {
+                    path: Some(String::from("../api")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("web")),
+                    path: Some(String::from("/tmp/web")),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("web")),
+                    ..ServiceConfig::default()
+                },
+            ]),
+            outputs: Some(vec![
+                OutputConfig {
+                    name: Some(String::from("traefik")),
+                    template: Some(String::from("bindport-traefik")),
+                    ..OutputConfig::default()
+                },
+                OutputConfig {
+                    name: Some(String::from("debug")),
+                    target: Some(String::from("debug/{{ route.slug }}.txt")),
+                    ..OutputConfig::default()
+                },
+                OutputConfig {
+                    name: Some(String::from("debug")),
+                    template: Some(String::from("debug-route")),
+                    target: Some(String::from("debug/{{ route.slug }}.txt")),
+                    ..OutputConfig::default()
+                },
+            ]),
+            ..BindPortConfig::default()
+        };
+
+        let issues = config.validate();
+
+        assert_eq!(issues.len(), 7);
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].name" && issue.message == "service name is required"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].path"
+                && issue
+                    .message
+                    .contains("must be relative to the config file")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[1].path"
+                && issue
+                    .message
+                    .contains("must be relative to the config file")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[2].name"
+                && issue.message.contains("duplicate service name `web`")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "outputs[0].target"
+                && issue
+                    .message
+                    .contains("output `traefik` is missing required `target`")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "outputs[1].template"
+                && issue
+                    .message
+                    .contains("output `debug` is missing required `template`")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "outputs[2].name"
+                && issue.message.contains("duplicate output name `debug`")
+        }));
     }
 
     #[test]

@@ -2842,6 +2842,7 @@ fn run_doctor_command(args: &[String]) -> ExitCode {
 fn run_config_command(args: &[String]) -> ExitCode {
     match args.first().map(String::as_str) {
         Some("explain") if args.len() == 1 => print_config_explain(),
+        Some("validate") if args.len() == 1 => print_config_validate(),
         None | Some("--help" | "-h") => {
             print_config_help();
             ExitCode::SUCCESS
@@ -2851,11 +2852,54 @@ fn run_config_command(args: &[String]) -> ExitCode {
             eprintln!("usage: bindport config explain");
             ExitCode::FAILURE
         }
-        Some(command) => {
-            eprintln!("bindport: unknown config command `{command}`");
-            eprintln!("usage: bindport config explain");
+        Some("validate") => {
+            eprintln!("bindport: config validate does not take arguments");
+            eprintln!("usage: bindport config validate");
             ExitCode::FAILURE
         }
+        Some(command) => {
+            eprintln!("bindport: unknown config command `{command}`");
+            eprintln!("usage: bindport config explain|validate");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_config_validate() -> ExitCode {
+    println!("BindPort config validate");
+
+    let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
+    println!("cwd: {}", cwd.display());
+
+    let config = match resolve_config(&cwd) {
+        Ok(config) => config,
+        Err(error) => {
+            println!("config: invalid ({error})");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    print_config_source_explanation(&config);
+
+    let issues = config
+        .loaded
+        .as_ref()
+        .map(|loaded| loaded.config.validate())
+        .unwrap_or_default();
+
+    if issues.is_empty() {
+        println!("validation: ok");
+        ExitCode::SUCCESS
+    } else {
+        println!(
+            "validation: {} {}",
+            issues.len(),
+            plural(issues.len(), "error")
+        );
+        for issue in issues {
+            println!("  error: {issue}");
+        }
+        ExitCode::FAILURE
     }
 }
 
@@ -3045,6 +3089,14 @@ fn list_config_value(count: Option<usize>, unit: &str) -> String {
         Some(count) if unit == "entry" => format!("{count} entries"),
         Some(count) => format!("{count} {unit}s"),
         None => String::from("<unset>"),
+    }
+}
+
+fn plural(count: usize, word: &str) -> String {
+    if count == 1 {
+        word.to_string()
+    } else {
+        format!("{word}s")
     }
 }
 
@@ -3779,6 +3831,7 @@ fn print_help() {
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport config explain      Explain resolved config and identity sources");
+    println!("  bindport config validate     Validate config structure");
     println!("  bindport doctor              Show bootstrap diagnostics");
     println!("  bindport doctor outputs      Validate output rendering setup");
     println!("  bindport dashboard [serve]   Serve the local dashboard");
@@ -3803,9 +3856,11 @@ fn print_config_help() {
     println!();
     println!("Usage:");
     println!("  bindport config explain");
+    println!("  bindport config validate");
     println!();
     println!("Commands:");
     println!("  explain    Show resolved config fields and identity sources");
+    println!("  validate   Validate config structure and output actionable errors");
 }
 
 fn print_doctor_help() {
