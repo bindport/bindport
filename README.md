@@ -87,6 +87,7 @@ cargo run -p bindport -- doctor outputs
 cargo run -p bindport -- templates list
 cargo run -p bindport -- templates export bindport-traefik
 cargo run -p bindport -- render --dry-run
+cargo run -p bindport -- render --repair
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
 cargo run -p bindport -- run web --env NEXT_PUBLIC_BINDPORT_URL='{route_url}' --hostname '{branch}.{project}.localhost' -- sh -c 'echo "$NEXT_PUBLIC_BINDPORT_URL"'
 cargo run -p bindport -- -- sh -c 'echo "$PORT"'
@@ -141,8 +142,11 @@ snapshot. `bindport doctor outputs` validates output config, template lookup,
 and planned render paths without writing files. Template lookup, listing,
 showing, and export are available through `bindport templates`. Wrapped command
 start/exit events auto-render outputs when `auto_render = true`;
-`delete_on` can remove DB-owned output files for stopped/stale/removed routes,
-and CLI or dashboard cleanup triggers removed-route output cleanup.
+`debounce_ms` spaces automatic renders, `on_failure = "block"` validates
+required outputs before child startup, `delete_on` can remove DB-owned output
+files for stopped/stale/removed routes, and CLI or dashboard cleanup triggers
+removed-route output cleanup. `bindport render --repair` reconciles DB-owned
+files without adopting unknown files.
 Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass

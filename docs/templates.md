@@ -46,6 +46,13 @@ Preview rendered targets without writing files:
 bindport render --dry-run
 ```
 
+Repair DB-owned output records and files:
+
+```sh
+bindport render --repair
+bindport render --repair traefik
+```
+
 Validate configured outputs, template lookup, render planning, and safe output
 paths without writing files:
 
@@ -115,6 +122,14 @@ the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
 
+`bindport render --repair` uses the same safety checks, but treats an
+externally modified DB-owned file as state to record instead of a command-wide
+failure. Current route files that are missing are rendered again. DB-owned files
+for removed or configured deletion states are deleted only when their current
+hash still matches the registry record. Missing DB-owned files are marked
+removed, and externally modified DB-owned files are preserved and marked with
+`external_modified`. Unknown files are never adopted.
+
 `delete_on` controls when DB-owned output files are removed. The default is
 `["removed"]`, which deletes a rendered file after the matching route has been
 removed from the registry and cleanup triggers output rendering. Users can opt
@@ -140,8 +155,19 @@ ownership.
 Wrapped command start and exit events automatically render outputs where
 `auto_render = true`, which is the default. The start render records the active
 route after the child process is spawned; the exit render records the stopped
-route after the registry is updated. Auto-render failures are warnings and do
-not change the wrapped command's exit code.
+route after the registry is updated. Automatic renders reserve a SQLite-backed
+debounce slot per output. The default `debounce_ms = 250` spaces rapid events;
+set `debounce_ms = 0` to render immediately on every automatic event. Manual
+`bindport render` and `bindport render --repair` bypass debounce.
+
+Auto-render failures are warnings and do not change the wrapped command's exit
+code by default. Set `on_failure = "block"` on an output when startup should
+fail if BindPort cannot validate the required output plan before spawning the
+child process. The blocking check renders the pending route in memory and
+verifies template lookup, target rendering, path safety, target collisions, and
+existing DB-owned file hashes. Post-spawn, exit, and cleanup render failures are
+still warnings because BindPort does not roll back already-running processes or
+completed lifecycle cleanup.
 
 `bindport status --json` exposes top-level output summaries plus per-service
 output status from the same registry records. The legacy `proxy` field is a
