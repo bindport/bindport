@@ -1221,7 +1221,7 @@ fn process_is_running(_pid: u32) -> bool {
 mod tests {
     use super::*;
     use std::{
-        net::TcpListener,
+        net::{Shutdown, TcpListener},
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -1266,13 +1266,35 @@ mod tests {
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
             };
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-            let mut request = [0_u8; 512];
-            let _ = stream.read(&mut request);
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 128];
+            loop {
+                match stream.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(bytes) => {
+                        request.extend_from_slice(&buffer[..bytes]);
+                        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        break;
+                    }
+                    Err(_) => return,
+                }
+            }
             let _ = write!(
-                stream,
+                &mut stream,
                 "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             );
+            let _ = stream.flush();
+            let _ = stream.shutdown(Shutdown::Write);
         });
 
         port
