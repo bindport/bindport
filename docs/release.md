@@ -10,11 +10,20 @@ reviewed artifacts to crates.io and npm.
 
 ## Current Status
 
-BindPort v0.3.0 is released on GitHub and crates.io. Cargo is the supported
-install path:
+BindPort v0.4.0 is the release described by this document. Cargo and npm are
+alternate supported install paths after the release workflow and manual publish
+steps complete.
+
+Global Cargo install:
 
 ```sh
 cargo install bindport
+```
+
+JavaScript project dependency:
+
+```sh
+npm install --save-dev bindport
 ```
 
 The current release targets Linux and macOS-style local development. Windows
@@ -113,10 +122,10 @@ After confirmation, it:
 - creates `release/vX.Y.Z` from `main`;
 - updates the Cargo workspace version with `cargo set-version --workspace`;
 - updates internal workspace dependency versions to the same version;
-- updates `npm/bindport/package.json` to the same version;
+- updates npm wrapper and platform package metadata to the same version;
 - refreshes and validates Cargo metadata;
 - runs `scripts/release-check.sh --version X.Y.Z --allow-dirty`;
-- stages `Cargo.toml`, `Cargo.lock`, and `npm/bindport/package.json`;
+- stages `Cargo.toml`, `Cargo.lock`, and npm package metadata;
 - commits `build: prepare vX.Y.Z release`;
 - pushes the branch to `origin`;
 - opens a pull request with `gh pr create`.
@@ -478,14 +487,6 @@ the unscoped package can be run as:
 bunx bindport --help
 bunx bindport -- doctor
 bunx bindport -- next dev
-```
-
-If the final package name is scoped, for example `@bindport/cli`, use Bun's
-package flag because the package name and executable name differ:
-
-```sh
-bunx --package @bindport/cli bindport --help
-bunx -p @bindport/cli bindport -- next dev
 ```
 
 Arguments after the executable name are passed through to BindPort. Bun flags
