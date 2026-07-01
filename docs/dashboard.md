@@ -107,6 +107,12 @@ Use the search field to filter by state, project, service, URL, root path,
 branch, PID, command, or working directory. State buttons narrow the table to
 one registry state while keeping the text search active.
 
+The Hooks view shows configured hook commands and their trust state: pending,
+approved, denied, or changed. It also shows the hook source, subscribed events,
+command, timeout, hook hash, target kind, and target hash. Approval, denial,
+and reset actions are CLI-only through `bindport hooks trust|deny|reset` so a
+browser session cannot grant local command execution.
+
 The dashboard refreshes its registry snapshot every five seconds and shows the
 last successful refresh time in the header. If a later refresh fails, the last
 successful view stays visible while the header reports the refresh error.
@@ -133,7 +139,7 @@ The dashboard serves:
 populated when a wrapped service config or run option sets them. `outputs`
 contains per-service rendered output status. `proxy` is a compatibility alias
 for recorded `traefik` output status and remains `null` when no matching output
-row exists.
+row exists. The response also includes hook trust visibility under `hooks`.
 
 ## Security Posture
 

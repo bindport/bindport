@@ -23,6 +23,7 @@ pub const DEFAULT_OUTPUT_TARGET_HOST: &str = "127.0.0.1";
 pub const DEFAULT_OUTPUT_TARGET_SCHEME: &str = "http";
 pub const DEFAULT_OUTPUT_AUTO_RENDER: bool = true;
 pub const DEFAULT_OUTPUT_DEBOUNCE_MS: u64 = 250;
+pub const DEFAULT_HOOK_TIMEOUT_MS: u64 = 5_000;
 pub const CONFIG_FILENAMES: &[&str] = &[".bindport.toml", ".bindport.json", ".bindport.yaml"];
 pub const LOCAL_CONFIG_FILENAMES: &[&str] = &[
     ".bindport.local.toml",
@@ -44,6 +45,7 @@ pub const APPLIED_CONFIG_KEYS: &[&str] = &[
     "dashboard",
     "output_defaults",
     "outputs",
+    "hooks",
 ];
 pub const BINDPORT_PROJECT_ENV: &str = "BINDPORT_PROJECT";
 pub const BINDPORT_SERVICE_ENV: &str = "BINDPORT_SERVICE";
@@ -87,6 +89,7 @@ pub struct BindPortConfig {
     pub dashboard: Option<DashboardConfig>,
     pub output_defaults: Option<OutputDefaultsConfig>,
     pub outputs: Option<Vec<OutputConfig>>,
+    pub hooks: Option<HooksConfig>,
 }
 
 impl BindPortConfig {
@@ -275,6 +278,7 @@ impl BindPortConfig {
 
         validate_services(self.services.as_deref(), &mut issues);
         validate_outputs(self.outputs.as_deref(), &mut issues);
+        validate_hooks(self.hooks.as_ref(), &mut issues);
 
         issues
     }
@@ -292,6 +296,7 @@ impl BindPortConfig {
             OutputDefaultsConfig::merge,
         );
         merge_outputs(&mut self.outputs, local.outputs);
+        merge_option_with(&mut self.hooks, local.hooks, HooksConfig::merge);
     }
 }
 
@@ -450,6 +455,80 @@ fn validate_outputs(outputs: Option<&[OutputConfig]>, issues: &mut Vec<ConfigVal
             issues.push(ConfigValidationIssue::new(
                 format!("outputs[{index}].target"),
                 format!("output `{name}` is missing required `target`"),
+            ));
+        }
+    }
+}
+
+fn validate_hooks(hooks: Option<&HooksConfig>, issues: &mut Vec<ConfigValidationIssue>) {
+    let Some(hooks) = hooks else {
+        return;
+    };
+
+    if hooks.timeout_ms.is_some_and(|timeout| timeout == 0) {
+        issues.push(ConfigValidationIssue::new(
+            "hooks.timeout_ms",
+            "hook timeout must be greater than 0",
+        ));
+    }
+
+    let Some(commands) = hooks.commands.as_deref() else {
+        return;
+    };
+
+    let mut names = BTreeSet::new();
+    for (index, hook) in commands.iter().enumerate() {
+        if !hook.enabled.unwrap_or(true) {
+            continue;
+        }
+
+        let name = hook
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+
+        if let Some(name) = name
+            && !names.insert(name.to_string())
+        {
+            issues.push(ConfigValidationIssue::new(
+                format!("hooks.commands[{index}].name"),
+                format!("duplicate hook name `{name}`; hook names must be unique"),
+            ));
+        }
+
+        let Some(command) = hook.command.as_deref() else {
+            issues.push(ConfigValidationIssue::new(
+                format!("hooks.commands[{index}].command"),
+                "hook command is required",
+            ));
+            continue;
+        };
+
+        match command.first().map(String::as_str).map(str::trim) {
+            Some(program) if !program.is_empty() => {}
+            _ => issues.push(ConfigValidationIssue::new(
+                format!("hooks.commands[{index}].command"),
+                "hook command must start with a program",
+            )),
+        }
+
+        match hook.events.as_deref() {
+            Some(events) if !events.is_empty() => {}
+            Some(_) => issues.push(ConfigValidationIssue::new(
+                format!("hooks.commands[{index}].events"),
+                "hook events must not be empty",
+            )),
+            None => issues.push(ConfigValidationIssue::new(
+                format!("hooks.commands[{index}].events"),
+                "hook events are required",
+            )),
+        }
+
+        if hook.timeout_ms.is_some_and(|timeout| timeout == 0) {
+            issues.push(ConfigValidationIssue::new(
+                format!("hooks.commands[{index}].timeout_ms"),
+                "hook timeout must be greater than 0",
             ));
         }
     }
@@ -643,6 +722,54 @@ pub struct OutputConfig {
     pub on_failure: Option<OutputFailurePolicy>,
     pub debounce_ms: Option<u64>,
     pub vars: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HooksConfig {
+    pub timeout_ms: Option<u64>,
+    pub commands: Option<Vec<HookCommandConfig>>,
+}
+
+impl HooksConfig {
+    fn merge(&mut self, local: Self) {
+        override_option(&mut self.timeout_ms, local.timeout_ms);
+        override_option(&mut self.commands, local.commands);
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HookCommandConfig {
+    pub enabled: Option<bool>,
+    pub name: Option<String>,
+    pub events: Option<Vec<HookEvent>>,
+    pub command: Option<Vec<String>>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum HookEvent {
+    RouteStarted,
+    RouteFinished,
+    RoutesRemoved,
+    RoutesMarkedStale,
+    RenderRequested,
+    OutputRendered,
+}
+
+impl HookEvent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RouteStarted => "route_started",
+            Self::RouteFinished => "route_finished",
+            Self::RoutesRemoved => "routes_removed",
+            Self::RoutesMarkedStale => "routes_marked_stale",
+            Self::RenderRequested => "render_requested",
+            Self::OutputRendered => "output_rendered",
+        }
+    }
 }
 
 impl OutputConfig {
@@ -1596,6 +1723,41 @@ mod tests {
     }
 
     #[test]
+    fn parses_hook_config_formats() {
+        let toml = parse_config(
+            ConfigFormat::Toml,
+            "project = \"demo\"\n[hooks]\ntimeout_ms = 2500\n[[hooks.commands]]\nname = \"reload\"\nevents = [\"route_started\", \"output_rendered\"]\ncommand = [\"bindport\", \"render\"]\ntimeout_ms = 1000\n",
+        )
+        .expect("toml hooks config");
+        let json = parse_config(
+            ConfigFormat::Json,
+            r#"{"project":"demo","hooks":{"timeout_ms":2500,"commands":[{"name":"reload","events":["route_started","output_rendered"],"command":["bindport","render"],"timeout_ms":1000}]}}"#,
+        )
+        .expect("json hooks config");
+        let yaml = parse_config(
+            ConfigFormat::Yaml,
+            "project: demo\nhooks:\n  timeout_ms: 2500\n  commands:\n    - name: reload\n      events:\n        - route_started\n        - output_rendered\n      command:\n        - bindport\n        - render\n      timeout_ms: 1000\n",
+        )
+        .expect("yaml hooks config");
+
+        assert_eq!(toml, json);
+        assert_eq!(json, yaml);
+        let hooks = toml.hooks.as_ref().expect("hooks");
+        assert_eq!(hooks.timeout_ms, Some(2_500));
+        let command = &hooks.commands.as_ref().expect("hook commands")[0];
+        assert_eq!(command.name.as_deref(), Some("reload"));
+        assert_eq!(
+            command.events,
+            Some(vec![HookEvent::RouteStarted, HookEvent::OutputRendered])
+        );
+        assert_eq!(
+            command.command,
+            Some(vec![String::from("bindport"), String::from("render")])
+        );
+        assert_eq!(command.timeout_ms, Some(1_000));
+    }
+
+    #[test]
     fn service_paths_infer_service_from_cwd() {
         let root = temp_test_dir("service-paths");
         let web_src = root.join("apps").join("web").join("src");
@@ -2071,12 +2233,39 @@ mod tests {
                     ..OutputConfig::default()
                 },
             ]),
+            hooks: Some(HooksConfig {
+                timeout_ms: Some(0),
+                commands: Some(vec![
+                    HookCommandConfig {
+                        name: Some(String::from("reload")),
+                        events: Some(Vec::new()),
+                        command: Some(vec![String::from(" ")]),
+                        timeout_ms: Some(0),
+                        ..HookCommandConfig::default()
+                    },
+                    HookCommandConfig {
+                        name: Some(String::from("reload")),
+                        command: Some(vec![String::from("true")]),
+                        ..HookCommandConfig::default()
+                    },
+                    HookCommandConfig {
+                        name: Some(String::from("missing-command")),
+                        events: Some(vec![HookEvent::RouteStarted]),
+                        ..HookCommandConfig::default()
+                    },
+                    HookCommandConfig {
+                        enabled: Some(false),
+                        name: Some(String::from("disabled-placeholder")),
+                        ..HookCommandConfig::default()
+                    },
+                ]),
+            }),
             ..BindPortConfig::default()
         };
 
         let issues = config.validate();
 
-        assert_eq!(issues.len(), 11);
+        assert_eq!(issues.len(), 18);
         assert!(issues.iter().any(|issue| {
             issue.field == "services[0].name" && issue.message == "service name is required"
         }));
@@ -2125,6 +2314,33 @@ mod tests {
         }));
         assert!(issues.iter().any(|issue| {
             issue.field == "outputs[4].name" && issue.message == "output name is required"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.timeout_ms"
+                && issue.message == "hook timeout must be greater than 0"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.commands[0].command"
+                && issue.message == "hook command must start with a program"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.commands[0].events"
+                && issue.message == "hook events must not be empty"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.commands[0].timeout_ms"
+                && issue.message == "hook timeout must be greater than 0"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.commands[1].name"
+                && issue.message.contains("duplicate hook name `reload`")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.commands[1].events" && issue.message == "hook events are required"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "hooks.commands[2].command"
+                && issue.message == "hook command is required"
         }));
         assert!(BindPortConfig::default().validate().is_empty());
         assert_eq!(

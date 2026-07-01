@@ -2,7 +2,9 @@ const content = document.getElementById("content");
 const generatedAt = document.getElementById("generated-at");
 const actionStatus = document.getElementById("action-status");
 const serviceSearch = document.getElementById("service-search");
+const stateFilter = document.getElementById("state-filter");
 const stateFilterButtons = Array.from(document.querySelectorAll("[data-state-filter]"));
+const viewButtons = Array.from(document.querySelectorAll("[data-view]"));
 const authPanel = document.getElementById("auth-panel");
 const authForm = document.getElementById("auth-form");
 const authToken = document.getElementById("auth-token");
@@ -21,9 +23,11 @@ let lastSnapshot = null;
 let lastRefreshAt = null;
 let searchQuery = "";
 let activeStateFilter = "all";
+let activeView = "services";
 let dashboardToken = sessionStorage.getItem(TOKEN_STORAGE_KEY) || "";
 let refreshTimer = null;
 const expandedServiceKeys = new Set();
+const expandedHookKeys = new Set();
 const groups = [
   { key: "active", label: "Active" },
   { key: "stopped", label: "Stopped" },
@@ -156,6 +160,20 @@ function serviceSearchText(service) {
   ].map(text).join(" ").toLowerCase();
 }
 
+function hookSearchText(hook) {
+  return [
+    hook.status,
+    hook.trust,
+    hook.name,
+    hook.source,
+    hook.command_display,
+    hook.hook_hash,
+    hook.target && hook.target.display,
+    hook.target && hook.target.hash,
+    hook.events && hook.events.join(" ")
+  ].map(text).join(" ").toLowerCase();
+}
+
 function serviceKey(service) {
   return [
     service.project,
@@ -166,6 +184,16 @@ function serviceKey(service) {
     service.pid,
     service.command,
     service.cwd
+  ].map(text).join("\u001f");
+}
+
+function hookKey(hook) {
+  return [
+    hook.name,
+    hook.source,
+    hook.hook_hash,
+    hook.target && hook.target.hash,
+    hook.command_display
   ].map(text).join("\u001f");
 }
 
@@ -195,6 +223,13 @@ function updateFilterButtons() {
       button.dataset.stateFilter === activeStateFilter ? "true" : "false"
     );
   }
+}
+
+function updateViewButtons() {
+  for (const button of viewButtons) {
+    button.setAttribute("aria-pressed", button.dataset.view === activeView ? "true" : "false");
+  }
+  stateFilter.hidden = activeView !== "services";
 }
 
 function renderLastSnapshot() {
@@ -301,6 +336,118 @@ function renderServiceRow(service) {
   </tr>`;
 }
 
+function renderHookSummary(hooks) {
+  const counts = Object.fromEntries(["approved", "pending", "changed", "denied"].map((key) => [key, 0]));
+  for (const hook of hooks) {
+    const status = text(hook.status).toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+  }
+  return `<section class="summary" aria-label="Hook summary">
+    ${Object.entries(counts).map(([key, count]) => `
+      <div class="summary-item">
+        <span class="summary-label">${escapeHtml(key)}</span>
+        <span class="summary-value trust-${escapeHtml(key)}">${count}</span>
+      </div>
+    `).join("")}
+  </section>`;
+}
+
+function renderHookDetails(hook) {
+  const events = Array.isArray(hook.events) ? hook.events.join(", ") : "-";
+  const command = Array.isArray(hook.command) ? hook.command.join(" ") : hook.command_display;
+  return `<dl class="detail-grid">
+    <div class="detail-item">
+      <dt>Trust</dt>
+      <dd class="trust-${escapeHtml(hook.status)}">${escapeHtml(hook.trust)}</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Source</dt>
+      <dd>${escapeHtml(hook.source)}</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Events</dt>
+      <dd>${escapeHtml(events)}</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Timeout</dt>
+      <dd>${escapeHtml(hook.timeout_ms)}ms</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Target</dt>
+      <dd>${escapeHtml(hook.target && hook.target.display)} (${escapeHtml(hook.target && hook.target.kind)})</dd>
+    </div>
+    <div class="detail-item">
+      <dt>Target Hash</dt>
+      <dd><code>${escapeHtml(hook.target && hook.target.hash)}</code></dd>
+    </div>
+    <div class="detail-item">
+      <dt>Hook Hash</dt>
+      <dd><code>${escapeHtml(hook.hook_hash)}</code></dd>
+    </div>
+    <div class="detail-item command-detail">
+      <dt>Command</dt>
+      <dd><code>${escapeHtml(command)}</code></dd>
+    </div>
+  </dl>`;
+}
+
+function renderHookRow(hook) {
+  const key = hookKey(hook);
+  const detailsId = detailIdForKey(`hook:${key}`);
+  const expanded = expandedHookKeys.has(key);
+  return `<tr class="service-row">
+    <td class="detail-cell" data-label="Details">${renderDetailToggle(detailsId, key, expanded)}</td>
+    <td data-label="Status" class="trust-${escapeHtml(hook.status)}">${escapeHtml(hook.status)}</td>
+    <td data-label="Hook">${escapeHtml(hook.name)}</td>
+    <td data-label="Events">${escapeHtml(Array.isArray(hook.events) ? hook.events.join(", ") : "-")}</td>
+    <td data-label="Target">${escapeHtml(hook.target && hook.target.display)}</td>
+    <td data-label="Hash"><code>${escapeHtml(hook.hook_hash)}</code></td>
+  </tr>
+  <tr id="${detailsId}" class="detail-row"${expanded ? "" : " hidden"}>
+    <td class="detail-panel-cell" colspan="6">${renderHookDetails(hook)}</td>
+  </tr>`;
+}
+
+function renderHooks(hooks) {
+  const visibleHooks = hooks.filter((hook) => !searchQuery || hookSearchText(hook).includes(searchQuery));
+  if (hooks.length === 0) {
+    content.className = "empty";
+    content.textContent = "No hooks configured.";
+    return;
+  }
+  if (visibleHooks.length === 0) {
+    content.className = "empty";
+    content.textContent = "No hooks match the current filters.";
+    return;
+  }
+  syncExpandedHookKeys(visibleHooks);
+  content.className = "";
+  content.innerHTML = `
+    ${renderHookSummary(visibleHooks)}
+    <section class="service-group" aria-labelledby="hooks-heading">
+      <div class="group-heading">
+        <h2 id="hooks-heading">Hooks</h2>
+        <span class="group-count">${visibleHooks.length}</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th><span class="visually-hidden">Details</span></th>
+              <th>Status</th>
+              <th>Hook</th>
+              <th>Events</th>
+              <th>Target</th>
+              <th>Hash</th>
+            </tr>
+          </thead>
+          <tbody>${visibleHooks.map(renderHookRow).join("")}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderGroup(group, services) {
   if (services.length === 0) return "";
   const cleanup = ["stopped", "stale"].includes(group.key)
@@ -335,7 +482,12 @@ function renderGroup(group, services) {
 function render(snapshot) {
   authPanel.hidden = true;
   updateTokenLogoutVisibility();
+  updateViewButtons();
   renderRefreshMeta(snapshot);
+  if (activeView === "hooks") {
+    renderHooks((snapshot.hooks && snapshot.hooks.items) || []);
+    return;
+  }
   const services = snapshot.services || [];
   syncExpandedServiceKeys(services);
   if (services.length === 0) {
@@ -357,6 +509,15 @@ function render(snapshot) {
     ${renderSummary(grouped)}
     ${groups.map((group) => renderGroup(group, grouped[group.key])).join("")}
   `;
+}
+
+function syncExpandedHookKeys(hooks) {
+  const currentKeys = new Set(hooks.map(hookKey));
+  for (const key of expandedHookKeys) {
+    if (!currentKeys.has(key)) {
+      expandedHookKeys.delete(key);
+    }
+  }
 }
 
 function syncExpandedServiceKeys(services) {
@@ -416,8 +577,13 @@ content.addEventListener("click", async (event) => {
     if (key) {
       if (expanded) {
         expandedServiceKeys.delete(key);
+        expandedHookKeys.delete(key);
       } else {
-        expandedServiceKeys.add(key);
+        if (activeView === "hooks") {
+          expandedHookKeys.add(key);
+        } else {
+          expandedServiceKeys.add(key);
+        }
       }
     }
     toggle.setAttribute("aria-expanded", String(!expanded));
@@ -516,6 +682,14 @@ for (const button of stateFilterButtons) {
   });
 }
 
+for (const button of viewButtons) {
+  button.addEventListener("click", () => {
+    activeView = button.dataset.view;
+    updateViewButtons();
+    renderLastSnapshot();
+  });
+}
+
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
   setDashboardToken(authToken.value.trim());
@@ -526,6 +700,7 @@ tokenLogout.addEventListener("click", () => {
   setDashboardToken("");
   authToken.value = "";
   expandedServiceKeys.clear();
+  expandedHookKeys.clear();
   lastSnapshot = null;
   content.className = "empty";
   content.textContent = "Checking dashboard access...";

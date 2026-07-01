@@ -23,6 +23,7 @@ const DASHBOARD_ACTION_HEADER: &str = "X-BindPort-Dashboard-Action";
 
 pub type DashboardCleanCallback =
     Arc<dyn Fn(&mut Registry, CleanSummary) -> Result<(), String> + Send + Sync + 'static>;
+pub type DashboardStatusCallback = Arc<dyn Fn() -> serde_json::Value + Send + Sync + 'static>;
 
 #[derive(Clone)]
 pub struct DashboardOptions {
@@ -34,6 +35,7 @@ pub struct DashboardOptions {
     pub auth: DashboardAuth,
     pub static_dir: Option<PathBuf>,
     pub clean_callback: Option<DashboardCleanCallback>,
+    pub status_callback: Option<DashboardStatusCallback>,
 }
 
 impl fmt::Debug for DashboardOptions {
@@ -47,6 +49,7 @@ impl fmt::Debug for DashboardOptions {
             .field("auth", &self.auth)
             .field("static_dir", &self.static_dir)
             .field("clean_callback", &self.clean_callback.is_some())
+            .field("status_callback", &self.status_callback.is_some())
             .finish()
     }
 }
@@ -68,6 +71,7 @@ impl Default for DashboardOptions {
             auth: DashboardAuth::default(),
             static_dir: None,
             clean_callback: None,
+            status_callback: None,
         }
     }
 }
@@ -366,7 +370,7 @@ fn response_for_request(request: &HttpRequest, options: &DashboardOptions) -> Ht
         ),
         #[cfg(debug_assertions)]
         Some(Route::DevVersion) => dev_version_response(options),
-        Some(Route::Status) if request_authorized(request, options) => status_response(),
+        Some(Route::Status) if request_authorized(request, options) => status_response(options),
         Some(Route::Status) => HttpResponse::unauthorized(),
         Some(Route::Clean(states)) => clean_response(request, options, &states),
         Some(Route::Health) => HttpResponse::ok("text/plain; charset=utf-8", "ok\n"),
@@ -435,9 +439,16 @@ fn host_allowed(host: Option<&str>, options: &DashboardOptions) -> bool {
             .any(|allowed| allowed.eq_ignore_ascii_case(name))
 }
 
-fn status_response() -> HttpResponse {
+fn status_response(options: &DashboardOptions) -> HttpResponse {
     match Registry::open_default().and_then(|mut registry| registry.status_snapshot()) {
-        Ok(snapshot) => match serde_json::to_string_pretty(&snapshot) {
+        Ok(snapshot) => match serde_json::to_value(&snapshot).and_then(|mut value| {
+            if let Some(callback) = options.status_callback.as_ref()
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert(String::from("hooks"), callback());
+            }
+            serde_json::to_string_pretty(&value)
+        }) {
             Ok(json) => HttpResponse::ok("application/json; charset=utf-8", &json),
             Err(error) => HttpResponse::internal_error(&json_error_body(format!(
                 "failed to serialize status JSON: {error}"

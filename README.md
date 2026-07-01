@@ -158,22 +158,26 @@ never required; missing config means built-in defaults are used.
 Use `bindport config explain` to inspect the discovered config file, local
 override file, effective config-field sources, and the project/service identity
 source for the current directory. Use `bindport config validate` to check
-service names, service paths, and output configuration before running a wrapped
-command.
+service names, service paths, output configuration, and hook configuration
+before running a wrapped command.
 
 The current implementation reads top-level `project`, `service`,
 `default_range`, `skip_ports`, `[[services]]` entries, `[dashboard]` /
-`[dashboard.auth]`, `output_defaults`, and `[[outputs]]`. Output configuration is
-used by `bindport render` to write text output files from the current registry
-snapshot. `bindport doctor outputs` validates output config, template lookup,
-and planned render paths without writing files. Template lookup, listing,
-showing, and export are available through `bindport templates`. Wrapped command
-start/exit events auto-render outputs when `auto_render = true`;
+`[dashboard.auth]`, `output_defaults`, `[[outputs]]`, and `[hooks]`. Output
+configuration is used by `bindport render` to write text output files from the
+current registry snapshot. `bindport doctor outputs` validates output config,
+template lookup, planned render paths, and hook trust status without writing
+files. Template lookup, listing, showing, and export are available through
+`bindport templates`. Wrapped command start/exit events auto-render outputs
+when `auto_render = true`;
 `debounce_ms` spaces automatic renders, `on_failure = "block"` validates
 required outputs before child startup, `delete_on` can remove DB-owned output
 files for stopped/stale/removed routes, and CLI or dashboard cleanup triggers
-removed-route output cleanup. `bindport render --repair` reconciles DB-owned
-files without adopting unknown files.
+removed-route output cleanup. Hooks can subscribe to the same lifecycle events,
+but checked-in project config cannot enable hook execution by itself. Approve
+or deny configured hooks per machine with `bindport hooks trust|deny|reset`.
+`bindport render --repair` reconciles DB-owned files without adopting unknown
+files.
 Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
