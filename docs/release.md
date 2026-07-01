@@ -10,7 +10,7 @@ reviewed artifacts to crates.io and npm.
 
 ## Current Status
 
-BindPort v0.4.0 is the release described by this document. Cargo and npm are
+BindPort v0.5.0 is the release described by this document. Cargo and npm are
 alternate supported install paths after the release workflow and manual publish
 steps complete.
 
@@ -38,14 +38,21 @@ The minimum release gate is:
 3. The child inherits stdio.
 4. SIGINT and SIGTERM are forwarded.
 5. BindPort exits with the child's exit code.
-6. `bindport status --json` reports the latest service plus run history.
-7. `bindport dashboard serve` starts on loopback by default and exposes
+6. `bindport status --json` reports the latest service plus run history using
+   the documented status schema.
+7. Configured service commands can pass assigned values through env templates
+   or explicit command arguments such as `--port {port}`.
+8. `bindport dashboard serve` starts on loopback by default and exposes
    `/api/status`.
-8. The dashboard shows active, stopped, and stale services with URL copy/open
+9. The dashboard shows active, stopped, and stale services with URL copy/open
    actions.
-9. Dashboard cleanup can remove stopped or stale entries, trigger output
+10. Dashboard cleanup can remove stopped or stale entries, trigger output
    cleanup, and cannot mutate active services.
-10. Local and CI checks pass.
+11. Hooks are disabled until trusted, report pending/approved/denied/changed
+    status, and can be inspected from CLI and dashboard surfaces.
+12. Health checks report `unknown`, `pending`, `healthy`, or `failing` for
+    supported loopback HTTP targets.
+13. Local and CI checks pass.
 
 The package-script gate is covered by the
 `package_script_runs_bindport_next_dev_flow` integration test. It runs
@@ -79,6 +86,12 @@ tests, and the checked-in monorepo fixture. Manual acceptance should verify the
 fixture from both service directories and confirm opt-in `.env.local` output
 does not write unless configured.
 
+The v0.5 service-command/hooks/agent UX gate is covered by integration tests for
+configured service commands and arguments, status/open behavior, hook trust and
+dry-run flows, stale cleanup confirmation, dashboard parity, and health status.
+Manual acceptance should still verify a real local project with a tool that uses
+CLI port flags, such as Storybook.
+
 ## Local Release Checks
 
 Run the standard local gate before any release prep branch:
@@ -102,8 +115,8 @@ mise run release-prep
 mise run release-prep patch
 mise run release-prep minor
 mise run release-prep major
-mise run release-prep v0.4.0
-mise run release-prep 0.4.0
+mise run release-prep v0.5.0
+mise run release-prep 0.5.0
 ```
 
 When no argument is provided, `release-prep` defaults to `patch`.
@@ -149,13 +162,13 @@ Run it locally after a release-prep branch updates versions and package
 artifacts:
 
 ```sh
-mise run release-check 0.4.0
+mise run release-check 0.5.0
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/release-check.sh --version 0.4.0
+scripts/release-check.sh --version 0.5.0
 ```
 
 The same validation gate is available as the manual `Release Check` GitHub
@@ -173,7 +186,7 @@ After the release prep PR is merged, finish the release from clean, synced
 `main` with:
 
 ```sh
-mise run release-finish v0.4.0
+mise run release-finish v0.5.0
 ```
 
 `release-finish` is the normal post-merge path. It verifies the checkout, asks
@@ -187,9 +200,9 @@ skipped and the remaining crates continue in order.
 Use these options for recovery or non-interactive runs:
 
 ```sh
-mise run release-finish --yes v0.4.0
-mise run release-finish --skip-github-release v0.4.0
-mise run release-finish --skip-cargo-publish v0.4.0
+mise run release-finish --yes v0.5.0
+mise run release-finish --skip-github-release v0.5.0
+mise run release-finish --skip-cargo-publish v0.5.0
 ```
 
 `release-finish` waits for the manual `Release` workflow. If the
@@ -199,8 +212,8 @@ the local command continues polling until the workflow completes or times out.
 The lower-level release dispatch command remains available:
 
 ```sh
-mise run release-publish --dry-run v0.4.0
-mise run release-publish v0.4.0
+mise run release-publish --dry-run v0.5.0
+mise run release-publish v0.5.0
 ```
 
 When no version is provided, `release-publish` and `release-finish` use the
@@ -262,13 +275,13 @@ publishes or dry-runs those crates in dependency order:
 exists. To exercise the Cargo publish helper directly, run the local dry-run:
 
 ```sh
-mise run cargo-publish 0.4.0
+mise run cargo-publish 0.5.0
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/cargo-publish.sh --version 0.4.0 --dry-run
+scripts/cargo-publish.sh --version 0.5.0 --dry-run
 ```
 
 The dry-run requires the Cargo workspace version and `npm/bindport/package.json`
@@ -283,7 +296,7 @@ After the GitHub Release has been created from `main`, publish to crates.io
 directly with:
 
 ```sh
-mise run cargo-publish --execute 0.4.0
+mise run cargo-publish --execute 0.5.0
 ```
 
 Real publishing additionally requires:
@@ -394,6 +407,50 @@ from a fresh checkout or clean worktree:
     worktrees, and confirm `bindport status --json` reports distinct identities
     without port collisions.
 
+## v0.5.0 Manual Acceptance
+
+Before merging the v0.5.0 release prep PR, smoke test service commands, hooks,
+health, cleanup, and agent-facing status/open behavior from a fresh checkout or
+clean worktree:
+
+1. Build the release binary with `cargo build --release --locked`.
+2. Create a project config with one service command that passes the assigned
+   port as a CLI argument, such as `--port {port}`, and one env template such as
+   `NEXT_PUBLIC_BINDPORT_URL = "{route_url}"`.
+3. Run the configured service with `bindport run <service>` and confirm the
+   child process receives both the assigned port argument and rendered env.
+4. Run `bindport status --json` and confirm the payload matches
+   [status.schema.json](status.schema.json), including `services`, `runs`,
+   `hooks`, route metadata, health, outputs, and proxy fields.
+5. Run `bindport open <service> --print` and confirm it prints `route_url` when
+   configured, otherwise the direct loopback URL.
+6. Run `bindport open <service> --browser` against an HTTP or HTTPS URL and
+   confirm non-HTTP(S) route URLs are rejected before launching a browser.
+7. Configure a local hook and run `bindport hooks status`; confirm the hook is
+   pending until trusted and appears in `status --json` and the dashboard hooks
+   view.
+8. Run `bindport hooks trust <name>`, rerun the service, and confirm the trusted
+   hook runs only for its configured lifecycle events. Change the hook command or
+   target and confirm the status changes to `changed` until retrusted.
+9. Run `bindport render --dry-run` with hooks configured and confirm hook
+   dry-run output is reported without executing the hook command.
+10. Configure a loopback HTTP health URL, run the service, and confirm
+    `status --json` and the dashboard move through expected `pending`,
+    `healthy`, or `failing` states. Confirm unsupported or non-loopback health
+    URLs remain `unknown`.
+11. Create stopped and stale registry entries, run
+    `bindport clean --dry-run --json`, and confirm the report counts entries
+    without removing them.
+12. Run stale cleanup without `--yes` in a non-interactive context and confirm it
+    is rejected. Rerun with `--yes` and confirm only the intended stale entries
+    are removed.
+13. Run `bindport doctor` and `bindport doctor outputs` and confirm service
+    identity, route/output diagnostics, hook trust visibility, and obvious port
+    conflicts are reported.
+14. Start `bindport dashboard serve`, confirm `/api/status` matches CLI status,
+    and verify dashboard cleanup actions remain blocked for active services.
+15. Run `mise run ci` on the release branch before requesting review.
+
 ## Versioning
 
 - `0.0.x`: unreleased bootstrap only.
@@ -401,6 +458,8 @@ from a fresh checkout or clean worktree:
 - `0.2.0`: local dashboard API, embedded UI, and stopped/stale cleanup.
 - `0.3.0`: template output rendering and built-in Traefik file-provider output.
 - `0.4.0`: monorepo config depth, validation, local overrides, and env outputs.
+- `0.5.0`: service command config, hooks, health checks, cleanup hardening, and
+  agent-facing status/open workflows.
 - Pre-1.0 minor releases may contain breaking changes.
 - A stable release prep commit should update all package versions together.
 
@@ -459,14 +518,14 @@ Before a real npm publish:
 Local npm publish dry-run from downloaded release tarballs:
 
 ```sh
-gh release download v0.4.0 --pattern "*.tgz" --dir dist/npm
-mise run npm-publish v0.4.0 --dist dist/npm
+gh release download v0.5.0 --pattern "*.tgz" --dir dist/npm
+mise run npm-publish v0.5.0 --dist dist/npm
 ```
 
 Real local npm publish, when intentionally bypassing the workflow:
 
 ```sh
-mise run npm-publish v0.4.0 --dist dist/npm --execute
+mise run npm-publish v0.5.0 --dist dist/npm --execute
 ```
 
 Publish order matters: native platform packages are published first, then the
@@ -517,7 +576,7 @@ run:
     "dev": "bindport -- next dev"
   },
   "devDependencies": {
-    "bindport": "^0.4.0"
+    "bindport": "^0.5.0"
   }
 }
 ```

@@ -2,7 +2,8 @@
 
 `bindport status --json` returns the local registry snapshot. The top-level
 `schema_version` is currently `0.4`; pre-1.0 releases may extend the schema, but
-existing fields should remain stable within a major version.
+existing fields should remain stable within a major version. The checked-in
+JSON Schema for the current payload is [status.schema.json](status.schema.json).
 
 Top-level fields:
 
@@ -16,7 +17,7 @@ Top-level fields:
 Service fields most useful to agents:
 
 - `project`, `service`, `identity_key`: stable service identity.
-- `state`: `active`, `stopped`, `stale`, or a future registry state.
+- `state`: `active`, `stopped`, or `stale`.
 - `host`, `port`, `url`: direct loopback URL for the wrapped process.
 - `hostname`, `route_url`, `health_url`: configured route metadata when present.
 - `health`: `unknown`, `pending`, `healthy`, or `failing`.
@@ -26,7 +27,7 @@ Service fields most useful to agents:
 `bindport open [service]` resolves the best active service URL from the same
 snapshot. It prints `route_url` when configured, otherwise the direct loopback
 `url`. Use `--project PROJECT` when multiple active services share the same
-service name.
+service name. `--browser` only launches HTTP or HTTPS URLs.
 
 Examples:
 

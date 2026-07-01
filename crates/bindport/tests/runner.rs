@@ -148,6 +148,15 @@ fn wait_for_open_url(registry_path: &Path, args: &[&str], timeout: Duration) -> 
     }
 }
 
+fn object_keys(value: &Value) -> BTreeSet<&str> {
+    value
+        .as_object()
+        .expect("json object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
 #[test]
 fn dash_dash_runs_child_with_assigned_port() {
     let registry_path = temp_registry_path("dash-dash");
@@ -1282,6 +1291,70 @@ fn wrapped_command_flags_are_passed_to_child() {
 }
 
 #[test]
+fn status_schema_document_matches_current_contract() {
+    let schema = serde_json::from_str::<Value>(include_str!("../../../docs/status.schema.json"))
+        .expect("status schema json");
+
+    assert_eq!(schema["properties"]["schema_version"]["const"], "0.4");
+    assert_eq!(schema["additionalProperties"].as_bool(), Some(false));
+
+    let top_level_required = schema["required"]
+        .as_array()
+        .expect("top-level required fields")
+        .iter()
+        .map(|field| field.as_str().expect("required field"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        top_level_required,
+        BTreeSet::from([
+            "generated_at",
+            "hooks",
+            "outputs",
+            "runs",
+            "schema_version",
+            "services",
+        ])
+    );
+
+    let service_required = schema["$defs"]["service"]["required"]
+        .as_array()
+        .expect("service required fields")
+        .iter()
+        .map(|field| field.as_str().expect("service required field"))
+        .collect::<BTreeSet<_>>();
+    assert!(
+        BTreeSet::from([
+            "project",
+            "service",
+            "state",
+            "port",
+            "host",
+            "url",
+            "hostname",
+            "route_url",
+            "health_url",
+            "worktree_path",
+            "worktree_hash",
+            "git_common_dir",
+            "branch",
+            "branch_label",
+            "commit",
+            "identity_key",
+            "pid",
+            "command",
+            "cwd",
+            "started_at",
+            "exited_at",
+            "exit_code",
+            "health",
+            "outputs",
+            "proxy",
+        ])
+        .is_subset(&service_required)
+    );
+}
+
+#[test]
 fn status_json_starts_empty() {
     let registry_path = temp_registry_path("empty-status");
     let output = bindport_with_registry(&registry_path)
@@ -1292,10 +1365,27 @@ fn status_json_starts_empty() {
     assert!(output.status.success());
 
     let status = serde_json::from_slice::<Value>(&output.stdout).expect("status json");
+    assert_eq!(
+        object_keys(&status),
+        BTreeSet::from([
+            "generated_at",
+            "hooks",
+            "outputs",
+            "runs",
+            "schema_version",
+            "services",
+        ])
+    );
     assert_eq!(status["schema_version"], "0.4");
+    assert!(
+        status["generated_at"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(status["outputs"].as_array().expect("outputs").len(), 0);
     assert_eq!(status["services"].as_array().expect("services").len(), 0);
     assert_eq!(status["runs"].as_array().expect("runs").len(), 0);
+    assert_eq!(status["hooks"]["items"].as_array().expect("hooks").len(), 0);
 }
 
 #[test]
@@ -1321,6 +1411,49 @@ fn status_json_reports_finished_run() {
 
     assert_eq!(services.len(), 1);
     assert_eq!(runs.len(), 1);
+    assert!(
+        BTreeSet::from([
+            "project",
+            "service",
+            "state",
+            "port",
+            "host",
+            "url",
+            "hostname",
+            "route_url",
+            "health_url",
+            "worktree_path",
+            "worktree_hash",
+            "git_common_dir",
+            "branch",
+            "branch_label",
+            "commit",
+            "identity_key",
+            "pid",
+            "command",
+            "cwd",
+            "started_at",
+            "exited_at",
+            "exit_code",
+            "health",
+            "outputs",
+            "proxy",
+        ])
+        .is_subset(&object_keys(&services[0]))
+    );
+    assert!(
+        BTreeSet::from([
+            "id",
+            "lease_id",
+            "pid",
+            "command",
+            "cwd",
+            "started_at",
+            "exited_at",
+            "exit_code",
+        ])
+        .is_subset(&object_keys(&runs[0]))
+    );
     assert_eq!(services[0]["state"], "stopped");
     assert_eq!(services[0]["exit_code"], 0);
     assert!(services[0]["port"].as_u64().expect("port") >= DEFAULT_PORT_RANGE.start as u64);
