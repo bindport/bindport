@@ -109,6 +109,46 @@ tls = false
 middlewares = []
 ```
 
+Hook settings:
+
+```toml
+[hooks]
+timeout_ms = 5000
+
+[[hooks.commands]]
+name = "reload-proxy"
+events = ["route_started", "route_finished", "routes_removed", "output_rendered"]
+command = ["docker", "kill", "-s", "HUP", "traefik"]
+timeout_ms = 2000
+```
+
+Hooks are disabled until explicitly trusted with the local CLI. A checked-in
+project config can declare hooks, but config cannot approve hook execution by
+itself. Use `bindport hooks status` to inspect pending, approved, denied, or
+changed hooks, then approve a reviewed hook with:
+
+```sh
+bindport hooks trust reload-proxy
+```
+
+Trust decisions are stored in BindPort state outside the repository. The
+default scope is the current worktree. Use `--scope repo` to trust the same hook
+definition across worktrees that share the same git repository. A hook is
+blocked again as `changed` when its command definition changes. If the command
+target is a local path such as `./scripts/reload-proxy`, BindPort also
+fingerprints that file and invalidates trust when it changes. Commands resolved
+from `PATH`, such as `docker`, are treated as opaque targets.
+
+Hook commands are structured argv arrays and are spawned directly, not through
+a shell. Use `["sh", "-c", "..."]` only when shell behavior is intentional.
+Supported events are `route_started`, `route_finished`, `routes_removed`,
+`routes_marked_stale`, `render_requested`, and `output_rendered`. Hook
+processes receive a minimal environment: `PATH` from the parent process plus
+BindPort lifecycle metadata through `BINDPORT_HOOK_EVENTS`,
+`BINDPORT_HOOK_SOURCES`, and `BINDPORT_HOOK_CONTEXT`. Other parent environment
+values are not inherited, and secret values are not copied into hook metadata or
+the registry.
+
 Unknown top-level keys are reported by `bindport doctor`. Some example files may
 show intended future fields such as `identity` or `health_url`; they are not
 applied by the current runtime.
@@ -158,9 +198,9 @@ bindport doctor outputs
 ```
 
 `config validate` catches missing or duplicate service names, unsafe service
-paths, and output configuration errors. `doctor outputs` validates template
-lookup, render planning, safe output paths, and output ownership checks without
-writing files.
+paths, output configuration errors, and incomplete hook configuration. `doctor
+outputs` validates template lookup, render planning, safe output paths, output
+ownership checks, and hook trust status without writing files.
 
 ## Examples
 

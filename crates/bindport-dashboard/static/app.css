@@ -9,6 +9,10 @@
   --stale: #a15c00;
   --conflict: #9f1d20;
   --other: #9f1d20;
+  --approved: #138a4b;
+  --pending: #a15c00;
+  --changed: #8a5cf6;
+  --denied: #9f1d20;
 }
 body {
   margin: 0;
@@ -78,6 +82,11 @@ h2 {
   border-radius: 8px;
   padding: 12px;
   background: var(--soft);
+}
+.view-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 #auth-form {
   align-items: flex-end;
@@ -336,6 +345,10 @@ code {
 .state-stale { color: var(--stale); }
 .state-conflict { color: var(--conflict); }
 .state-other { color: var(--other); }
+.trust-approved { color: var(--approved); }
+.trust-pending { color: var(--pending); }
+.trust-changed { color: var(--changed); }
+.trust-denied { color: var(--denied); }
 .empty, .error {
   border: 1px solid var(--border);
   border-radius: 8px;

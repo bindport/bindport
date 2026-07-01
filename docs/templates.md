@@ -257,6 +257,28 @@ output. The default `debounce_ms = 250` spaces rapid events; set
 `debounce_ms = 0` to render immediately on every automatic event. Manual
 `bindport render` and `bindport render --repair` bypass debounce.
 
+Hooks subscribe to the same lifecycle events as output rendering. Approved
+hooks can run after route start, route finish, CLI or dashboard cleanup,
+stale-route reconciliation, manual render requests, or successful output
+renders. Hooks run even when no output is configured, which lets a project use
+BindPort as a small local event bridge without forcing a generated file.
+
+Hook execution is intentionally disabled by default. Put hook definitions in
+checked-in config when a team should share the same event commands, then review
+and approve them on each machine with `bindport hooks trust <name>` or
+`bindport hooks trust --all`. The default trust scope is the current worktree;
+use `--scope repo` when the same reviewed hook should apply across worktrees
+that share a git repository. `bindport hooks status` shows whether each hook is
+pending, approved, denied, or changed since the last decision. Trust decisions
+live in BindPort state outside the repository, and local path command targets
+are fingerprinted so edits to scripts such as `./scripts/reload-proxy` require
+re-approval.
+
+`bindport render --dry-run` prints matching approved hooks without executing
+them, and `bindport doctor outputs` shows hook source, trust, events, command,
+timeout, target fingerprint summary, and redacted BindPort hook environment
+keys.
+
 Auto-render failures are warnings and do not change the wrapped command's exit
 code by default. Set `on_failure = "block"` on an output when startup should
 fail if BindPort cannot validate the required output plan before spawning the

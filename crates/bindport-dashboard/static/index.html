@@ -24,12 +24,16 @@
         <button class="filter-button auth-button" type="submit">Unlock</button>
       </form>
     </section>
+    <nav class="view-tabs" aria-label="Dashboard views">
+      <button class="filter-button" type="button" data-view="services" aria-pressed="true">Services</button>
+      <button class="filter-button" type="button" data-view="hooks" aria-pressed="false">Hooks</button>
+    </nav>
     <section class="controls" aria-label="Dashboard filters">
       <label class="search-control" for="service-search">
         <span class="control-label">Search</span>
-        <input id="service-search" type="search" autocomplete="off" placeholder="Project, service, branch, command">
+        <input id="service-search" type="search" autocomplete="off" placeholder="Project, service, hook, command">
       </label>
-      <div class="state-filter" role="group" aria-label="Filter by state">
+      <div id="state-filter" class="state-filter" role="group" aria-label="Filter by state">
         <button class="filter-button" type="button" data-state-filter="all" aria-pressed="true">All</button>
         <button class="filter-button" type="button" data-state-filter="active" aria-pressed="false">Active</button>
         <button class="filter-button" type="button" data-state-filter="stopped" aria-pressed="false">Stopped</button>
