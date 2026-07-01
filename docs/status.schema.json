@@ -1,0 +1,436 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bindport.dev/schemas/status.schema.json",
+  "title": "BindPort status snapshot",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "outputs",
+    "services",
+    "runs",
+    "hooks"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.4"
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/outputSummary"
+      }
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/service"
+      }
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    },
+    "hooks": {
+      "$ref": "#/$defs/hooks"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nullableString": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableInteger": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "outputSummary": {
+      "type": "object",
+      "required": [
+        "name",
+        "pending",
+        "rendered",
+        "removed",
+        "error"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "pending": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rendered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "serviceOutput": {
+      "type": "object",
+      "required": [
+        "name",
+        "status",
+        "reason",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "rendered",
+            "removed",
+            "error"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "proxy": {
+      "type": "object",
+      "required": [
+        "adapter",
+        "rendered",
+        "target"
+      ],
+      "properties": {
+        "adapter": {
+          "type": "string"
+        },
+        "rendered": {
+          "type": "boolean"
+        },
+        "target": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": false
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "project",
+        "service",
+        "state",
+        "port",
+        "host",
+        "url",
+        "hostname",
+        "route_url",
+        "health_url",
+        "worktree_path",
+        "worktree_hash",
+        "git_common_dir",
+        "branch",
+        "branch_label",
+        "commit",
+        "identity_key",
+        "pid",
+        "command",
+        "cwd",
+        "started_at",
+        "exited_at",
+        "exit_code",
+        "health",
+        "outputs",
+        "proxy"
+      ],
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "stopped",
+            "stale"
+          ]
+        },
+        "port": {
+          "$ref": "#/$defs/port"
+        },
+        "host": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "hostname": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "route_url": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "health_url": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "worktree_path": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "worktree_hash": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "git_common_dir": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "branch": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "branch_label": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "commit": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "identity_key": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "pid": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "exited_at": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "exit_code": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "health": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "pending",
+            "healthy",
+            "failing"
+          ]
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/serviceOutput"
+          }
+        },
+        "proxy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/proxy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "id",
+        "lease_id",
+        "pid",
+        "command",
+        "cwd",
+        "started_at",
+        "exited_at",
+        "exit_code"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "lease_id": {
+          "type": "integer"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "exited_at": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "exit_code": {
+          "$ref": "#/$defs/nullableInteger"
+        }
+      },
+      "additionalProperties": false
+    },
+    "hooks": {
+      "type": "object",
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hook"
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "hook": {
+      "type": "object",
+      "required": [
+        "name",
+        "status",
+        "trust",
+        "source",
+        "events",
+        "command",
+        "command_display",
+        "timeout_ms",
+        "hook_hash",
+        "target"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "denied",
+            "changed",
+            "pending"
+          ]
+        },
+        "trust": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "route_started",
+              "route_finished",
+              "routes_removed",
+              "routes_marked_stale",
+              "render_requested",
+              "output_rendered"
+            ]
+          }
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command_display": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hook_hash": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/hookTarget"
+        }
+      },
+      "additionalProperties": false
+    },
+    "hookTarget": {
+      "type": "object",
+      "required": [
+        "kind",
+        "display",
+        "hash"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "local_file",
+            "missing_file",
+            "opaque"
+          ]
+        },
+        "display": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
