@@ -113,7 +113,7 @@ fn run_subcommand(args: &[String]) -> ExitCode {
         Err(error) => {
             eprintln!("bindport: {error}");
             eprintln!(
-                "usage: bindport run [service] [--env NAME=VALUE] [--hostname TEMPLATE] [--route-url TEMPLATE] -- <command>"
+                "usage: bindport run [service] [--env NAME=VALUE] [--hostname TEMPLATE] [--route-url TEMPLATE] [-- <command>]"
             );
             ExitCode::FAILURE
         }
@@ -121,15 +121,13 @@ fn run_subcommand(args: &[String]) -> ExitCode {
 }
 
 fn parse_run_options(args: &[String]) -> Result<(RunOptions, &[String]), String> {
-    let separator = args
-        .iter()
-        .position(|arg| arg == "--")
-        .ok_or_else(|| String::from("missing `--` before wrapped command"))?;
-    let (option_args, command) = args.split_at(separator);
-    let command = &command[1..];
-    if command.is_empty() {
-        return Err(String::from("no command provided after `--`"));
-    }
+    let (option_args, command) = match args.iter().position(|arg| arg == "--") {
+        Some(separator) => {
+            let (option_args, command) = args.split_at(separator);
+            (option_args, &command[1..])
+        }
+        None => (args, &args[args.len()..]),
+    };
 
     let mut options = RunOptions::default();
     let mut index = 0;
@@ -228,15 +226,11 @@ fn run_wrapped_command_result(
     command: &[String],
     options: &RunOptions,
 ) -> Result<ExitCode, RunCommandError> {
-    if command.is_empty() {
-        return Err(RunnerError::NoCommand.into());
-    }
-
     let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
     let config = resolve_config(&cwd)?;
     let identity = resolve_run_identity(&cwd, command, options, &config);
     let service_config = configured_service(&config, &identity);
-    let run_templates = resolve_run_templates(options, service_config);
+    let run_templates = resolve_run_templates(command, options, service_config);
     let requires_output_preflight = has_blocking_auto_outputs(&config)?;
     let mut registry = open_optional_registry();
     let mut skip_ports = config.skip_ports.clone();
@@ -268,7 +262,6 @@ fn run_wrapped_command_result(
     }
 
     let mut retries = 0;
-    let command_display = command.join(" ");
 
     loop {
         let allocation_hints = AllocationHints {
@@ -277,6 +270,8 @@ fn run_wrapped_command_result(
         };
         let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
         let run_metadata = resolve_run_metadata(&identity, port, &run_templates)?;
+        let child_command = resolved_child_command(command, &run_metadata)?;
+        let command_display = child_command.join(" ");
         if requires_output_preflight {
             let Some(registry) = registry.as_mut() else {
                 return Err(RenderCommandError::InvalidArgument(String::from(
@@ -288,7 +283,7 @@ fn run_wrapped_command_result(
                 pending_route_record(&identity, port, &run_metadata, &command_display, &cwd);
             preflight_blocking_outputs(&cwd, &config, registry, pending_route)?;
         }
-        let mut child = spawn_child_on_port(command, port, &run_metadata.env)?;
+        let mut child = spawn_child_on_port(&child_command, port, &run_metadata.env)?;
         let attempt_started_at = Instant::now();
         let run = RunStart {
             project: identity.project.clone(),
@@ -454,6 +449,7 @@ fn resolve_run_identity(
 
 #[derive(Debug, Default)]
 struct RunTemplates {
+    command: Option<Vec<String>>,
     hostname: Option<String>,
     route_url: Option<String>,
     env: Vec<(String, String)>,
@@ -461,6 +457,7 @@ struct RunTemplates {
 
 #[derive(Debug)]
 struct RunMetadata {
+    command: Option<Vec<String>>,
     hostname: Option<String>,
     route_url: Option<String>,
     env: Vec<(String, String)>,
@@ -516,10 +513,14 @@ fn configured_service<'a>(
 }
 
 fn resolve_run_templates(
+    command: &[String],
     options: &RunOptions,
     service_config: Option<&ServiceConfig>,
 ) -> RunTemplates {
     let mut templates = RunTemplates::default();
+    if command.is_empty() {
+        templates.command = service_config.and_then(ServiceConfig::command_argv);
+    }
 
     if let Some(env) = service_config.and_then(|service| service.env.as_ref()) {
         templates.env.extend(
@@ -588,12 +589,48 @@ fn resolve_run_metadata(
             expand_template(template, &env_values).map(|value| (name.clone(), value))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let command = templates
+        .command
+        .as_ref()
+        .map(|command| expand_command_templates(command, &env_values))
+        .transpose()?;
 
     Ok(RunMetadata {
+        command,
         hostname,
         route_url,
         env,
     })
+}
+
+fn expand_command_templates(
+    command: &[String],
+    values: &TemplateValues<'_>,
+) -> Result<Vec<String>, TemplateError> {
+    command
+        .iter()
+        .map(|template| expand_template(template, values))
+        .collect()
+}
+
+fn resolved_child_command(
+    explicit_command: &[String],
+    metadata: &RunMetadata,
+) -> Result<Vec<String>, RunnerError> {
+    let command = if explicit_command.is_empty() {
+        metadata.command.as_deref().unwrap_or(explicit_command)
+    } else {
+        explicit_command
+    };
+
+    if command
+        .first()
+        .is_none_or(|program| program.trim().is_empty())
+    {
+        return Err(RunnerError::NoCommand);
+    }
+
+    Ok(command.to_vec())
 }
 
 struct TemplateValues<'a> {
@@ -3826,8 +3863,8 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  bindport -- <command>        Run a command with an assigned PORT");
-    println!("  bindport run [service] [options] -- <command>");
-    println!("                                  Run a command with service env templates");
+    println!("  bindport run [service] [options] [-- <command>]");
+    println!("                                  Run a command or configured service command");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport config explain      Explain resolved config and identity sources");
@@ -4059,6 +4096,10 @@ mod tests {
             vec![(String::from("NEXT_PUBLIC_URL"), String::from("{route_url}"))]
         );
         assert_eq!(command, strings(["next", "dev"]).as_slice());
+        let service_only = strings(["web"]);
+        let (options, command) = parse_run_options(&service_only).expect("service-only options");
+        assert_eq!(options.service.as_deref(), Some("web"));
+        assert!(command.is_empty());
 
         assert_eq!(
             parse_env_assignment("PORT").expect_err("missing assignment"),
@@ -4083,6 +4124,11 @@ mod tests {
             identity_key: String::from("v1:test"),
         };
         let templates = RunTemplates {
+            command: Some(vec![
+                String::from("storybook"),
+                String::from("--port"),
+                String::from("{port}"),
+            ]),
             hostname: Some(String::from("{service}.{project}.localhost")),
             route_url: Some(String::from("https://{hostname}")),
             env: vec![
@@ -4110,6 +4156,14 @@ mod tests {
                 ),
                 (String::from("JSON"), String::from(r#"{"port":29100}"#)),
             ]
+        );
+        assert_eq!(
+            metadata.command,
+            Some(vec![
+                String::from("storybook"),
+                String::from("--port"),
+                String::from("29100"),
+            ])
         );
     }
 
@@ -4577,7 +4631,7 @@ mod tests {
                     services: Some(vec![ServiceConfig {
                         name: Some(String::from("web")),
                         path: Some(String::from("apps/web")),
-                        command: Some(String::from("next dev")),
+                        command: Some(vec![String::from("next"), String::from("dev")]),
                         ..ServiceConfig::default()
                     }]),
                     dashboard: Some(bindport_core::DashboardConfig::default()),
@@ -4794,6 +4848,7 @@ mod tests {
             identity_key: String::from("v1:demo:web"),
         };
         let metadata = RunMetadata {
+            command: None,
             hostname: Some(String::from("feature-tree.demo.localhost")),
             route_url: Some(String::from("https://feature-tree.demo.localhost")),
             env: Vec::new(),

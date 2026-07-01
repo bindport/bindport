@@ -907,11 +907,90 @@ fn run_subcommand_accepts_dash_dash_separator() {
 }
 
 #[test]
+fn configured_service_command_expands_port_arguments() {
+    let registry_path = temp_registry_path("configured-command-registry");
+    let root = temp_test_dir("configured-command-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            r#"project = "storybook-project"
+default_range = "{port}-{port}"
+skip_ports = []
+
+[[services]]
+name = "storybook"
+command = ["sh", "-c", "printf '%s|%s|%s' \"$PORT\" \"$1\" \"$2\"", "sh"]
+args = ["--port", "{{port}}"]
+"#
+        ),
+    )
+    .expect("write service config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "storybook"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout"),
+        format!("{port}|--port|{port}")
+    );
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("run bindport status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["services"][0]["service"], "storybook");
+    assert!(
+        status["services"][0]["command"]
+            .as_str()
+            .expect("command")
+            .ends_with(&format!("--port {port}"))
+    );
+}
+
+#[test]
+fn explicit_child_command_overrides_configured_service_command() {
+    let registry_path = temp_registry_path("configured-command-override-registry");
+    let root = temp_test_dir("configured-command-override-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"override-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\ncommand = [\"sh\", \"-c\", \"exit 99\"]\n"
+        ),
+    )
+    .expect("write service config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "printf '%s' \"$PORT\""])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, port.to_string().as_bytes());
+}
+
+#[test]
 fn command_surface_reports_invalid_arguments() {
     let registry_path = temp_registry_path("invalid-command-surface-registry");
     let cases: &[(&[&str], &str)] = &[
         (&["unknown"], "unknown bindport command: unknown"),
-        (&["run"], "missing `--` before wrapped command"),
+        (&["run"], "no command provided after `--`"),
         (&["run", "--"], "no command provided after `--`"),
         (
             &["run", "web", "api", "--", "true"],

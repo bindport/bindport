@@ -28,7 +28,7 @@ debounce_ms = 250
 [[services]]
 name = "web"
 path = "."
-command = "next dev"
+command = ["next", "dev"]
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"

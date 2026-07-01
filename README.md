@@ -48,8 +48,9 @@ The current source tree includes:
   package-manager workspaces, `package.json`, command inference, and
   `bindport run <service> -- ...`, with git branch/worktree metadata recorded
   when available.
-- Service env templates for wrapped commands through `[[services]].env` and
-  `bindport run --env`, including route hostname metadata when configured.
+- Service command, argument, and env templates through `[[services]].command`,
+  `[[services]].args`, `[[services]].env`, and `bindport run --env`, including
+  route hostname metadata when configured.
 - Basic SQLite-backed lease/run/output recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, OS listener conflicts, and the next candidate port.
@@ -178,10 +179,10 @@ are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
 appear in `bindport status`. Service entries currently apply `name`, `path`,
-`env`, `hostname`, and `route_url`. The example `identity` and deeper service fields
-such as `command` and `health_url` document the intended future shape and are
-not applied yet; `bindport doctor` reports ignored top-level keys so typos and
-future-only sections are visible.
+`command`, `args`, `env`, `hostname`, and `route_url`. The example `identity`
+and deeper service fields such as `health_url` document the intended future
+shape and are not applied yet; `bindport doctor` reports ignored top-level keys
+so typos and future-only sections are visible.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
@@ -207,17 +208,40 @@ path = "apps/api"
 hostname = "{branch}.orderful-api.localhost"
 ```
 
-Wrapped commands always receive `PORT=<assigned>`. Service env templates can
-add more variables:
+Wrapped commands always receive `PORT=<assigned>`. Service command, argument,
+and env templates can pass the assigned port as an argv value for tools that do
+not read `PORT` from the environment:
 
 ```toml
 [[services]]
 name = "web"
 path = "apps/web"
+command = ["storybook", "dev"]
+args = ["--port", "{port}", "--host", "0.0.0.0"]
 hostname = "{branch}.{project}.localhost"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
+```
+
+Run the configured command with:
+
+```sh
+bindport run web
+```
+
+Explicit child commands still override service command config:
+
+```sh
+bindport run web -- next dev
+```
+
+For one-off commands that need a CLI flag before a service command is
+configured, use a shell wrapper so `$PORT` is expanded by the child shell after
+BindPort assigns it:
+
+```sh
+bindport run web -- sh -c 'storybook dev --port "$PORT" --host 0.0.0.0'
 ```
 
 Supported template placeholders are `{port}`, `{host}`, `{url}`, `{project}`,
