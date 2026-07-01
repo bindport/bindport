@@ -11,17 +11,31 @@ root-owned daemon.
 
 ## Current Status
 
-BindPort v0.3.0 is the latest released version available through Cargo:
+BindPort v0.4.0 is the current release candidate. Once published, it installs
+the same Rust CLI through Cargo or JavaScript package managers.
+
+Install globally with Cargo:
 
 ```sh
 cargo install bindport
+```
+
+Or install it as a JavaScript project dependency:
+
+```sh
+npm install --save-dev bindport
+```
+
+Then run the CLI directly or from project scripts:
+
+```sh
 bindport --help
 bindport -- doctor
 bindport dashboard serve
 bindport -- -- sh -c 'echo "$PORT"'
 ```
 
-The current source tree is preparing v0.4.0 and includes:
+The current source tree includes:
 
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
@@ -51,18 +65,20 @@ The current source tree is preparing v0.4.0 and includes:
   controls.
 - MIT license, security policy, third-party notices stub, CI/audit/release
   workflows, and local `mise` tasks.
-- npm wrapper plus Linux/macOS x64/arm64 platform package metadata for
-  publishing native binaries through JavaScript package managers.
+- npm wrapper plus Linux/macOS x64/arm64 platform packages for installing
+  native binaries through JavaScript package managers.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
 The current support target is Linux and macOS-style local development. Windows
 is not claimed as supported until the cross-platform hardening milestone.
 
-The runner and dashboard are available from Cargo or from a source checkout:
+The runner and dashboard are available from Cargo, npm project scripts, or a
+source checkout:
 
 ```sh
 bindport -- next dev
 bindport dashboard serve
+npm exec -- bindport --help
 cargo run -p bindport -- -- next dev
 cargo run -p bindport -- dashboard serve
 ```

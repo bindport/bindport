@@ -290,17 +290,20 @@ run = "trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --exit-code 1
 
 [tasks.ci]
 description = "Run the main local CI checks"
-depends = [
-    "fmt",
-    "clippy",
-    "platform-guard",
-    "workflow-lint",
-    "audit",
-    "dependency-guard",
-    "secret-scan",
-    "security-scan",
-    "test",
-    "coverage",
-    "build",
-    "npm-smoke",
-]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+mise run fmt
+mise run clippy
+mise run platform-guard
+mise run workflow-lint
+mise run audit
+mise run dependency-guard
+mise run secret-scan
+mise run security-scan
+mise run test
+mise run coverage
+mise run build
+mise run npm-smoke
+'''

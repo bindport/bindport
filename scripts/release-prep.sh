@@ -93,6 +93,7 @@ update_workspace_dependency_versions() {
     const crates = [
       "bindport-adapters",
       "bindport-core",
+      "bindport-dashboard",
       "bindport-registry",
       "bindport-runner",
     ];

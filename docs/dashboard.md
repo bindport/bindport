@@ -10,7 +10,7 @@ Serve it in the foreground from a source checkout with:
 cargo run -p bindport -- dashboard serve
 ```
 
-Or, after installing a version that includes the dashboard command:
+Or, after installing BindPort:
 
 ```sh
 bindport dashboard serve
