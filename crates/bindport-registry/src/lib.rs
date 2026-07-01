@@ -549,6 +549,93 @@ impl Registry {
         Ok(summary)
     }
 
+    pub fn prune_oldest_stale_leases(
+        &mut self,
+        start_port: u16,
+        end_port: u16,
+        max_total_leases: usize,
+        dry_run: bool,
+    ) -> Result<CleanSummary, RegistryError> {
+        if start_port > end_port {
+            return Ok(CleanSummary::default());
+        }
+
+        self.reconcile_stale_active_leases()?;
+
+        let total_leases = self.connection.query_row(
+            "SELECT COUNT(*)
+             FROM leases
+             WHERE port BETWEEN ?1 AND ?2",
+            params![start_port, end_port],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+
+        if total_leases <= max_total_leases {
+            return Ok(CleanSummary::default());
+        }
+
+        let prune_count = total_leases - max_total_leases;
+        let transaction = self.connection.transaction()?;
+        let stale_lease_ids = {
+            let mut statement = transaction.prepare(
+                "SELECT id
+                 FROM leases
+                 WHERE state = 'stale'
+                 AND port BETWEEN ?1 AND ?2
+                 ORDER BY COALESCE(released_at, last_seen_at, allocated_at), id
+                 LIMIT ?3",
+            )?;
+            let rows = statement
+                .query_map(params![start_port, end_port, prune_count as i64], |row| {
+                    row.get(0)
+                })?;
+
+            rows.collect::<Result<Vec<i64>, _>>()?
+        };
+
+        if stale_lease_ids.is_empty() {
+            transaction.commit()?;
+            return Ok(CleanSummary::default());
+        }
+
+        let mut summary = CleanSummary {
+            stale_leases: stale_lease_ids.len(),
+            ..CleanSummary::default()
+        };
+
+        for lease_id in &stale_lease_ids {
+            summary.runs += transaction.query_row(
+                "SELECT COUNT(*)
+                 FROM runs
+                 WHERE lease_id = ?1",
+                params![lease_id],
+                |row| row.get::<_, i64>(0),
+            )? as usize;
+        }
+
+        if dry_run {
+            transaction.commit()?;
+            return Ok(summary);
+        }
+
+        for lease_id in &stale_lease_ids {
+            transaction.execute(
+                "DELETE FROM runs
+                 WHERE lease_id = ?1",
+                params![lease_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM leases
+                 WHERE id = ?1",
+                params![lease_id],
+            )?;
+        }
+
+        transaction.commit()?;
+
+        Ok(summary)
+    }
+
     pub fn output_file_ownership(
         &self,
         output_name: &str,
@@ -1669,6 +1756,45 @@ mod tests {
         let snapshot = registry.status_snapshot().expect("snapshot");
         assert!(snapshot.services.is_empty());
         assert!(snapshot.runs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_oldest_stale_leases_removes_only_pressure_excess() {
+        let mut registry = Registry::open(temp_registry_path("prune-stale")).expect("registry");
+
+        for index in 0..4 {
+            registry
+                .record_run_started(&test_run_start(
+                    "bindport",
+                    &format!("web-{index}"),
+                    29_500 + index,
+                    2_000_000_000 + index as u32,
+                ))
+                .expect("record stale candidate");
+        }
+
+        let dry_run = registry
+            .prune_oldest_stale_leases(29_500, 29_503, 2, true)
+            .expect("dry-run prune stale");
+
+        assert_eq!(dry_run.stale_leases, 2);
+        assert_eq!(dry_run.runs, 2);
+        assert_eq!(
+            registry.status_snapshot().expect("snapshot").services.len(),
+            4
+        );
+
+        let summary = registry
+            .prune_oldest_stale_leases(29_500, 29_503, 2, false)
+            .expect("prune stale");
+
+        assert_eq!(summary.stale_leases, 2);
+        assert_eq!(summary.runs, 2);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(snapshot.services.len(), 2);
+        assert_eq!(snapshot.runs.len(), 2);
     }
 
     #[test]

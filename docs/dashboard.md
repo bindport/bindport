@@ -157,7 +157,8 @@ The dashboard is local by default and has a narrow write surface:
   so simple cross-site form posts cannot trigger cleanup in a browser.
 
 Use `bindport clean --dry-run` from the CLI when you want to preview cleanup
-counts before removing registry entries.
+counts before removing registry entries. CLI stale cleanup requires an
+interactive confirmation or `--yes` for reviewed noninteractive cleanup.
 
 When `dashboard.auth.required` or `--auth required` is enabled, `/api/status`
 and `/api/clean*` require `Authorization: Bearer <token>`. The HTML shell
