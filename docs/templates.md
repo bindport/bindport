@@ -128,10 +128,11 @@ templates can shadow `bindport-env-local` when a framework needs aliases such as
 Like every output, `.env.local` files are written through the SQLite-backed
 ownership checks. Existing unowned files are not overwritten. Automatic output
 rendering happens after route state changes are recorded, so startup-critical
-environment should still use `[[services]].env` or `bindport run --env`; use the
-env-file output for tools that reread files or for explicit `bindport render`
-workflows. Set `root = "."` when shared output defaults point generated config
-files somewhere else and the env file should land in a package directory.
+environment should still use configured service `command`, `args`, `env`, or
+`bindport run --env`; use the env-file output for tools that reread files or for
+explicit `bindport render` workflows. Set `root = "."` when shared output
+defaults point generated config files somewhere else and the env file should
+land in a package directory.
 
 ## Traefik File Provider Setup
 

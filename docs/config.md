@@ -63,6 +63,8 @@ Service entries:
 [[services]]
 name = "web"
 path = "apps/web"
+command = ["storybook", "dev"]
+args = ["--port", "{port}", "--host", "0.0.0.0"]
 hostname = "{branch}.orderful-website.localhost"
 route_url = "http://{hostname}"
 env.PORT = "{port}"
@@ -108,13 +110,13 @@ middlewares = []
 ```
 
 Unknown top-level keys are reported by `bindport doctor`. Some example files may
-show intended future fields such as `identity`, `command`, or `health_url`; they
-are not applied by the current runtime.
+show intended future fields such as `identity` or `health_url`; they are not
+applied by the current runtime.
 
 ## Template Placeholders
 
-Wrapped commands always receive `PORT=<assigned>`. Service env, hostname, and
-route URL templates can use:
+Wrapped commands always receive `PORT=<assigned>`. Service `command`, `args`,
+env, hostname, and route URL templates can use:
 
 ```text
 {port}
@@ -133,6 +135,17 @@ route URL templates can use:
 ```
 
 Use `{{` and `}}` when a template value needs literal braces.
+
+`command` and `args` are structured argv arrays. They are spawned directly, not
+through a shell. When `bindport run <service>` is called without an explicit
+`-- <command>`, BindPort expands those argv templates after allocation and runs
+the configured command. Explicit child commands still override service command
+config for one-off runs:
+
+```sh
+bindport run web
+bindport run web -- next dev
+```
 
 ## Validation
 

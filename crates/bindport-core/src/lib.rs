@@ -342,6 +342,7 @@ fn validate_services(services: Option<&[ServiceConfig]>, issues: &mut Vec<Config
         if let Some(path) = service.path.as_deref() {
             validate_service_path(index, path, issues);
         }
+        validate_service_command(index, service, issues);
     }
 }
 
@@ -367,6 +368,30 @@ fn validate_service_path(index: usize, path: &str, issues: &mut Vec<ConfigValida
             field,
             "service path must be relative to the config file and must not contain `..`",
         ));
+    }
+}
+
+fn validate_service_command(
+    index: usize,
+    service: &ServiceConfig,
+    issues: &mut Vec<ConfigValidationIssue>,
+) {
+    let Some(command) = service.command.as_deref() else {
+        if service.args.as_ref().is_some_and(|args| !args.is_empty()) {
+            issues.push(ConfigValidationIssue::new(
+                format!("services[{index}].args"),
+                "service args require a service command",
+            ));
+        }
+        return;
+    };
+
+    match command.first().map(String::as_str).map(str::trim) {
+        Some(program) if !program.is_empty() => {}
+        _ => issues.push(ConfigValidationIssue::new(
+            format!("services[{index}].command"),
+            "service command must start with a program",
+        )),
     }
 }
 
@@ -448,10 +473,21 @@ pub enum ConfiguredServiceSource {
 pub struct ServiceConfig {
     pub name: Option<String>,
     pub path: Option<String>,
-    pub command: Option<String>,
+    pub command: Option<Vec<String>>,
+    pub args: Option<Vec<String>>,
     pub env: Option<BTreeMap<String, String>>,
     pub hostname: Option<String>,
     pub route_url: Option<String>,
+}
+
+impl ServiceConfig {
+    pub fn command_argv(&self) -> Option<Vec<String>> {
+        let mut command = self.command.clone()?;
+        if let Some(args) = self.args.as_ref() {
+            command.extend(args.iter().cloned());
+        }
+        Some(command)
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -1506,17 +1542,17 @@ mod tests {
     fn parses_config_formats() {
         let toml = parse_config(
             ConfigFormat::Toml,
-            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nregister_service = true\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\npath = \"apps/web\"\nhostname = \"{branch}.{project}.localhost\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
+            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nregister_service = true\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\npath = \"apps/web\"\ncommand = [\"storybook\", \"dev\"]\nargs = [\"--port\", \"{port}\"]\nhostname = \"{branch}.{project}.localhost\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
         )
         .expect("toml config");
         let json = parse_config(
             ConfigFormat::Json,
-            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"register_service":true,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","path":"apps/web","hostname":"{branch}.{project}.localhost","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
+            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"register_service":true,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","path":"apps/web","command":["storybook","dev"],"args":["--port","{port}"],"hostname":"{branch}.{project}.localhost","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
         )
         .expect("json config");
         let yaml = parse_config(
             ConfigFormat::Yaml,
-            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  register_service: true\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    path: apps/web\n    hostname: \"{branch}.{project}.localhost\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
+            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  register_service: true\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    path: apps/web\n    command:\n      - storybook\n      - dev\n    args:\n      - --port\n      - \"{port}\"\n    hostname: \"{branch}.{project}.localhost\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
         )
         .expect("yaml config");
 
@@ -1535,6 +1571,15 @@ mod tests {
         assert_eq!(auth.token_env.as_deref(), Some("BINDPORT_DASHBOARD_TOKEN"));
         let service = toml.service_config("web").expect("service config by name");
         assert_eq!(service.path.as_deref(), Some("apps/web"));
+        assert_eq!(
+            service.command_argv(),
+            Some(vec![
+                String::from("storybook"),
+                String::from("dev"),
+                String::from("--port"),
+                String::from("{port}"),
+            ])
+        );
         assert_eq!(
             service.hostname.as_deref(),
             Some("{branch}.{project}.localhost")
@@ -1987,6 +2032,16 @@ mod tests {
                     name: Some(String::from("web")),
                     ..ServiceConfig::default()
                 },
+                ServiceConfig {
+                    name: Some(String::from("args-only")),
+                    args: Some(vec![String::from("--port")]),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("empty-command")),
+                    command: Some(Vec::new()),
+                    ..ServiceConfig::default()
+                },
             ]),
             outputs: Some(vec![
                 OutputConfig {
@@ -2021,7 +2076,7 @@ mod tests {
 
         let issues = config.validate();
 
-        assert_eq!(issues.len(), 9);
+        assert_eq!(issues.len(), 11);
         assert!(issues.iter().any(|issue| {
             issue.field == "services[0].name" && issue.message == "service name is required"
         }));
@@ -2043,6 +2098,14 @@ mod tests {
         assert!(issues.iter().any(|issue| {
             issue.field == "services[3].name"
                 && issue.message.contains("duplicate service name `web`")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[4].args"
+                && issue.message == "service args require a service command"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[5].command"
+                && issue.message == "service command must start with a program"
         }));
         assert!(issues.iter().any(|issue| {
             issue.field == "outputs[0].target"

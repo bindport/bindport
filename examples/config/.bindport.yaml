@@ -36,7 +36,9 @@ output_defaults:
 services:
   - name: web
     path: .
-    command: next dev
+    command:
+      - next
+      - dev
     env:
       PORT: "{port}"
       HOSTNAME: "0.0.0.0"

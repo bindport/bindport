@@ -12,6 +12,7 @@ project = "orderful"
 [[services]]
 name = "web"
 path = "apps/web"
+command = ["next", "dev"]
 hostname = "{branch}.orderful-website.localhost"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
@@ -20,6 +21,7 @@ env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
 [[services]]
 name = "api"
 path = "apps/api"
+command = ["cargo", "run"]
 hostname = "{branch}.orderful-api.localhost"
 env.PORT = "{port}"
 env.BINDPORT_ROUTE_URL = "{route_url}"
@@ -29,14 +31,30 @@ Run from a service directory and BindPort selects the deepest matching path:
 
 ```sh
 cd apps/web
-bindport -- next dev
+bindport run web
 
 cd ../api
-bindport -- cargo run
+bindport run api
 ```
 
 CLI and environment overrides still win. Use `bindport run api -- ...` or
 `BINDPORT_SERVICE=api` when a command is launched from a shared directory.
+Explicit child commands override configured service commands for one-off runs:
+
+```sh
+bindport run web -- next dev --turbo
+```
+
+For tools that need the assigned port as a CLI flag, prefer configured argv
+templates:
+
+```toml
+[[services]]
+name = "storybook"
+path = "apps/storybook"
+command = ["storybook", "dev"]
+args = ["--port", "{port}", "--host", "0.0.0.0"]
+```
 
 ## Workspace Inference
 
@@ -116,9 +134,9 @@ auto_render = false
 
 The Traefik output is safe to auto-render because file-provider watchers reload
 after route state changes. `.env.local` is also an output, but many frameworks
-read it only during startup. Use `[[services]].env` or `bindport run --env` for
-values that must exist before the process starts; use the env-file output for
-manual refreshes or tools that reread dotenv files. When shared
+read it only during startup. Use configured service `command`, `args`, `env`, or
+`bindport run --env` for values that must exist before the process starts; use
+the env-file output for manual refreshes or tools that reread dotenv files. When shared
 `output_defaults.root` points at a generated config directory, set `root = "."`
 on env-file outputs that intentionally write back into package directories.
 

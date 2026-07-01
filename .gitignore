@@ -11,6 +11,7 @@
 Cargo.lock.bak
 
 # Node / npm wrapper artifacts
+dist/
 node_modules/
 npm/*/dist/
 npm/*/*.tgz
