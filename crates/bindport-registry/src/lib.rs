@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    env, fmt, fs, io,
+    env, fmt, fs,
+    io::{self, Read, Write},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -12,7 +14,9 @@ use serde::Serialize;
 
 pub const DEFAULT_REGISTRY_FILE: &str = "registry.sqlite";
 pub const REGISTRY_PATH_ENV: &str = "BINDPORT_REGISTRY_PATH";
-pub const STATUS_SCHEMA_VERSION: &str = "0.3";
+pub const STATUS_SCHEMA_VERSION: &str = "0.4";
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_millis(300);
+const HEALTH_PENDING_GRACE_MS: i64 = 2_000;
 
 pub fn default_registry_directory_name() -> &'static str {
     SERVICE_NAME
@@ -114,6 +118,7 @@ pub struct RunStart {
     pub port: u16,
     pub hostname: Option<String>,
     pub route_url: Option<String>,
+    pub health_url: Option<String>,
     pub pid: u32,
     pub command: String,
     pub cwd: PathBuf,
@@ -188,6 +193,7 @@ pub struct StatusService {
     pub url: String,
     pub hostname: Option<String>,
     pub route_url: Option<String>,
+    pub health_url: Option<String>,
     pub worktree_path: Option<String>,
     pub worktree_hash: Option<String>,
     pub git_common_dir: Option<String>,
@@ -204,6 +210,11 @@ pub struct StatusService {
     pub health: String,
     pub outputs: Vec<StatusServiceOutput>,
     pub proxy: Option<StatusProxy>,
+}
+
+struct StatusServiceRow {
+    service: StatusService,
+    run_age_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -393,11 +404,11 @@ impl Registry {
             "INSERT INTO leases (
                 project, service, worktree_path, worktree_hash, git_common_dir,
                 branch, branch_label, git_commit, identity_key, port, host,
-                hostname, route_url, state,
+                hostname, route_url, health_url, state,
                 allocated_at, last_seen_at
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                'active', ?14, ?14
+                ?14, 'active', ?15, ?15
              )",
             params![
                 run.project,
@@ -413,6 +424,7 @@ impl Registry {
                 run.host,
                 run.hostname,
                 run.route_url,
+                run.health_url,
                 now
             ],
         )?;
@@ -679,6 +691,7 @@ impl Registry {
                 host TEXT NOT NULL,
                 hostname TEXT,
                 route_url TEXT,
+                health_url TEXT,
                 state TEXT NOT NULL,
                 allocated_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
@@ -737,7 +750,7 @@ impl Registry {
                 last_render_at_ms INTEGER NOT NULL
             );
 
-            PRAGMA user_version = 6;
+            PRAGMA user_version = 7;
             ",
         )?;
 
@@ -757,6 +770,7 @@ impl Registry {
             ("identity_key", "TEXT"),
             ("hostname", "TEXT"),
             ("route_url", "TEXT"),
+            ("health_url", "TEXT"),
         ] {
             if !existing.iter().any(|existing| existing == column) {
                 self.connection.execute(
@@ -796,82 +810,101 @@ impl Registry {
     }
 
     fn status_services(&self) -> Result<Vec<StatusService>, RegistryError> {
-        let mut statement = self.connection.prepare(
-            "SELECT
-                leases.project,
-                leases.service,
-                leases.state,
-                leases.port,
-                leases.host,
-                leases.worktree_path,
-                leases.worktree_hash,
-                leases.git_common_dir,
-                leases.branch,
-                leases.branch_label,
-                leases.git_commit,
-                leases.identity_key,
-                leases.hostname,
-                leases.route_url,
-                runs.pid,
-                runs.command,
-                runs.cwd,
-                runs.started_at,
-                runs.exited_at,
-                runs.exit_code
-             FROM leases
-             JOIN runs ON runs.lease_id = leases.id
-             JOIN (
-                SELECT MAX(runs.id) AS latest_run_id
-                FROM leases
-                JOIN runs ON runs.lease_id = leases.id
-                GROUP BY COALESCE(
+        let rows = {
+            let mut statement = self.connection.prepare(
+                "SELECT
+                    leases.project,
+                    leases.service,
+                    leases.state,
+                    leases.port,
+                    leases.host,
+                    leases.worktree_path,
+                    leases.worktree_hash,
+                    leases.git_common_dir,
+                    leases.branch,
+                    leases.branch_label,
+                    leases.git_commit,
                     leases.identity_key,
-                    leases.project
-                        || char(31)
-                        || leases.service
-                        || char(31)
-                        || COALESCE(leases.worktree_path, '')
-                        || char(31)
-                        || COALESCE(leases.branch_label, '')
-                        || char(31)
-                        || leases.host
-                )
-             ) latest_services ON latest_services.latest_run_id = runs.id
-             ORDER BY runs.started_at DESC, runs.id DESC",
-        )?;
-        let rows = statement.query_map([], |row| {
-            let host = row.get::<_, String>(4)?;
-            let port = row.get::<_, u16>(3)?;
+                    leases.hostname,
+                    leases.route_url,
+                    leases.health_url,
+                    runs.pid,
+                    runs.command,
+                    runs.cwd,
+                    runs.started_at,
+                    runs.exited_at,
+                    runs.exit_code,
+                    CAST((julianday('now') - julianday(runs.started_at)) * 86400000 AS INTEGER)
+                 FROM leases
+                 JOIN runs ON runs.lease_id = leases.id
+                 JOIN (
+                    SELECT MAX(runs.id) AS latest_run_id
+                    FROM leases
+                    JOIN runs ON runs.lease_id = leases.id
+                    GROUP BY COALESCE(
+                        leases.identity_key,
+                        leases.project
+                            || char(31)
+                            || leases.service
+                            || char(31)
+                            || COALESCE(leases.worktree_path, '')
+                            || char(31)
+                            || COALESCE(leases.branch_label, '')
+                            || char(31)
+                            || leases.host
+                    )
+                 ) latest_services ON latest_services.latest_run_id = runs.id
+                 ORDER BY runs.started_at DESC, runs.id DESC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                let host = row.get::<_, String>(4)?;
+                let port = row.get::<_, u16>(3)?;
 
-            Ok(StatusService {
-                project: row.get(0)?,
-                service: row.get(1)?,
-                state: row.get(2)?,
-                port,
-                url: format!("http://{host}:{port}"),
-                host,
-                worktree_path: row.get(5)?,
-                worktree_hash: row.get(6)?,
-                git_common_dir: row.get(7)?,
-                branch: row.get(8)?,
-                branch_label: row.get(9)?,
-                commit: row.get(10)?,
-                identity_key: row.get(11)?,
-                hostname: row.get(12)?,
-                route_url: row.get(13)?,
-                pid: row.get(14)?,
-                command: row.get(15)?,
-                cwd: row.get(16)?,
-                started_at: row.get(17)?,
-                exited_at: row.get(18)?,
-                exit_code: row.get(19)?,
-                health: String::from("unknown"),
-                outputs: Vec::new(),
-                proxy: None,
-            })
-        })?;
+                Ok(StatusServiceRow {
+                    run_age_ms: row.get::<_, Option<i64>>(21)?.unwrap_or(i64::MAX),
+                    service: StatusService {
+                        project: row.get(0)?,
+                        service: row.get(1)?,
+                        state: row.get(2)?,
+                        port,
+                        url: format!("http://{host}:{port}"),
+                        host,
+                        worktree_path: row.get(5)?,
+                        worktree_hash: row.get(6)?,
+                        git_common_dir: row.get(7)?,
+                        branch: row.get(8)?,
+                        branch_label: row.get(9)?,
+                        commit: row.get(10)?,
+                        identity_key: row.get(11)?,
+                        hostname: row.get(12)?,
+                        route_url: row.get(13)?,
+                        health_url: row.get(14)?,
+                        pid: row.get(15)?,
+                        command: row.get(16)?,
+                        cwd: row.get(17)?,
+                        started_at: row.get(18)?,
+                        exited_at: row.get(19)?,
+                        exit_code: row.get(20)?,
+                        health: String::from("unknown"),
+                        outputs: Vec::new(),
+                        proxy: None,
+                    },
+                })
+            })?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut services = Vec::with_capacity(rows.len());
+        for mut row in rows {
+            row.service.health = health_status(
+                &row.service.state,
+                row.service.health_url.as_deref(),
+                row.run_age_ms,
+            );
+            services.push(row.service);
+        }
+
+        Ok(services)
     }
 
     fn attach_service_outputs(&self, services: &mut [StatusService]) -> Result<(), RegistryError> {
@@ -981,6 +1014,185 @@ fn status_proxy_for_outputs(outputs: &[StatusServiceOutput]) -> Option<StatusPro
         })
 }
 
+fn health_status(state: &str, health_url: Option<&str>, run_age_ms: i64) -> String {
+    if state != "active" {
+        return String::from("unknown");
+    }
+
+    let Some(health_url) = health_url.filter(|url| !url.trim().is_empty()) else {
+        return String::from("unknown");
+    };
+
+    if run_age_ms < HEALTH_PENDING_GRACE_MS {
+        return String::from("pending");
+    }
+
+    match check_http_health(health_url) {
+        HealthProbe::Healthy => String::from("healthy"),
+        HealthProbe::Failing => String::from("failing"),
+        HealthProbe::Unknown => String::from("unknown"),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HealthProbe {
+    Healthy,
+    Failing,
+    Unknown,
+}
+
+fn check_http_health(url: &str) -> HealthProbe {
+    let target = match http_health_target(url) {
+        Ok(Some(target)) => target,
+        Ok(None) => return HealthProbe::Unknown,
+        Err(()) => return HealthProbe::Failing,
+    };
+
+    match probe_http_target(&target) {
+        Ok(status) if (200..400).contains(&status) => HealthProbe::Healthy,
+        Ok(_) | Err(_) => HealthProbe::Failing,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HttpHealthTarget {
+    address: SocketAddr,
+    path: String,
+    authority: String,
+}
+
+fn http_health_target(url: &str) -> Result<Option<HttpHealthTarget>, ()> {
+    let url = url.trim();
+    let Some(rest) = url.strip_prefix("http://") else {
+        return if url.starts_with("https://") {
+            Ok(None)
+        } else {
+            Err(())
+        };
+    };
+    let (authority, path) = rest
+        .split_once('/')
+        .map(|(authority, path)| (authority, format!("/{path}")))
+        .unwrap_or((rest, String::from("/")));
+    let (host, port) = parse_http_authority(authority).ok_or(())?;
+    let Some(address) = loopback_socket_addr(&host, port) else {
+        return Ok(None);
+    };
+
+    Ok(Some(HttpHealthTarget {
+        address,
+        path,
+        authority: authority.to_string(),
+    }))
+}
+
+fn parse_http_authority(authority: &str) -> Option<(String, u16)> {
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+
+    if let Some(rest) = authority.strip_prefix('[') {
+        let (host, remainder) = rest.split_once(']')?;
+        if host.is_empty() {
+            return None;
+        }
+        let port = match remainder.strip_prefix(':') {
+            Some(port) if !port.is_empty() => port.parse().ok()?,
+            Some(_) => return None,
+            None if remainder.is_empty() => 80,
+            None => return None,
+        };
+
+        return Some((host.to_string(), port));
+    }
+
+    match authority.matches(':').count() {
+        0 => Some((authority.to_string(), 80)),
+        1 => {
+            let (host, port) = authority.rsplit_once(':')?;
+            if host.is_empty() || port.is_empty() {
+                return None;
+            }
+
+            Some((host.to_string(), port.parse().ok()?))
+        }
+        _ => None,
+    }
+}
+
+fn loopback_socket_addr(host: &str, port: u16) -> Option<SocketAddr> {
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return address
+            .is_loopback()
+            .then_some(SocketAddr::new(address, port));
+    }
+
+    let normalized = host.trim_end_matches('.');
+    let lower = normalized.to_ascii_lowercase();
+    (lower == "localhost" || lower.ends_with(".localhost"))
+        .then_some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+}
+
+fn probe_http_target(target: &HttpHealthTarget) -> io::Result<u16> {
+    let mut stream = TcpStream::connect_timeout(&target.address, HEALTH_CHECK_TIMEOUT)?;
+    stream.set_read_timeout(Some(HEALTH_CHECK_TIMEOUT))?;
+    stream.set_write_timeout(Some(HEALTH_CHECK_TIMEOUT))?;
+    write!(
+        stream,
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        target.path, target.authority
+    )?;
+
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 128];
+    while response.len() < 1024 {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(bytes) => {
+                response.extend_from_slice(&buffer[..bytes]);
+                if response.contains(&b'\n') {
+                    break;
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) && !response.is_empty() =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    if response.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "empty health response",
+        ));
+    }
+
+    let response = std::str::from_utf8(&response)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let status = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "missing HTTP status in `{}`",
+                    response.lines().next().unwrap_or_default()
+                ),
+            )
+        })?;
+
+    Ok(status)
+}
+
 fn utc_now(connection: &Connection) -> Result<String, RegistryError> {
     connection
         .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", [], |row| {
@@ -1008,7 +1220,11 @@ fn process_is_running(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        net::TcpListener,
+        thread,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn test_run_start(project: &str, service: &str, port: u16, pid: u32) -> RunStart {
         RunStart {
@@ -1019,10 +1235,47 @@ mod tests {
             port,
             hostname: None,
             route_url: None,
+            health_url: None,
             pid,
             command: String::from("next dev"),
             cwd: PathBuf::from("/tmp/bindport"),
         }
+    }
+
+    fn mark_latest_run_started_before_grace(registry: &Registry) {
+        registry
+            .connection
+            .execute(
+                "UPDATE runs
+                 SET started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 seconds')",
+                [],
+            )
+            .expect("backdate run start");
+    }
+
+    fn free_loopback_port() -> u16 {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral port");
+        listener.local_addr().expect("local addr").port()
+    }
+
+    fn start_health_server(status: &'static str) -> u16 {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind health server");
+        let port = listener.local_addr().expect("health server addr").port();
+
+        thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+            let mut request = [0_u8; 512];
+            let _ = stream.read(&mut request);
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        });
+
+        port
     }
 
     #[test]
@@ -1055,6 +1308,139 @@ mod tests {
         assert!(snapshot.services[0].proxy.is_none());
         assert_eq!(snapshot.services[0].exit_code, Some(0));
         assert_eq!(snapshot.runs.len(), 1);
+    }
+
+    #[test]
+    fn health_targets_are_restricted_to_loopback_without_dns() {
+        let target = http_health_target("http://127.0.0.1:29100/health")
+            .expect("loopback URL parses")
+            .expect("loopback URL is supported");
+        assert_eq!(
+            target.address,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 29_100)
+        );
+        assert_eq!(target.authority, "127.0.0.1:29100");
+        assert_eq!(target.path, "/health");
+
+        let target = http_health_target("http://feature.branch.localhost:29101/ready")
+            .expect("localhost URL parses")
+            .expect("localhost URL is supported");
+        assert_eq!(
+            target.address,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 29_101)
+        );
+        assert_eq!(target.authority, "feature.branch.localhost:29101");
+
+        assert!(
+            http_health_target("http://169.254.169.254/latest")
+                .expect("metadata URL parses")
+                .is_none()
+        );
+        assert!(
+            http_health_target("http://example.invalid/health")
+                .expect("external URL parses")
+                .is_none()
+        );
+        assert!(
+            http_health_target("https://127.0.0.1:29100/health")
+                .expect("https URL parses as unsupported")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn status_health_is_pending_during_startup_grace() {
+        let mut registry = Registry::open(temp_registry_path("health-pending")).expect("registry");
+        let mut run = test_run_start("bindport", "web", 29_123, std::process::id());
+        run.health_url = Some(format!("http://127.0.0.1:{}/health", free_loopback_port()));
+
+        registry.record_run_started(&run).expect("record start");
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(
+            snapshot.services[0].health_url.as_deref(),
+            run.health_url.as_deref()
+        );
+        assert_eq!(snapshot.services[0].health, "pending");
+    }
+
+    #[test]
+    fn status_health_reports_healthy_http_response() {
+        let direct_port = start_health_server("204 No Content");
+        let direct_url = format!("http://127.0.0.1:{direct_port}/health");
+        let direct_target = http_health_target(&direct_url)
+            .expect("direct health URL parses")
+            .expect("direct health URL is supported");
+        let direct_status = probe_http_target(&direct_target).expect("direct health probe");
+        assert!((200..400).contains(&direct_status));
+
+        let health_port = start_health_server("204 No Content");
+        let mut registry = Registry::open(temp_registry_path("health-healthy")).expect("registry");
+        let mut run = test_run_start("bindport", "web", 29_123, std::process::id());
+        run.health_url = Some(format!("http://127.0.0.1:{health_port}/health"));
+
+        registry.record_run_started(&run).expect("record start");
+        mark_latest_run_started_before_grace(&registry);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(
+            snapshot.services[0].health_url.as_deref(),
+            run.health_url.as_deref()
+        );
+        assert_eq!(snapshot.services[0].health, "healthy");
+    }
+
+    #[test]
+    fn status_health_reports_failing_http_response() {
+        let mut registry = Registry::open(temp_registry_path("health-failing")).expect("registry");
+        let mut run = test_run_start("bindport", "web", 29_123, std::process::id());
+        run.health_url = Some(format!("http://127.0.0.1:{}/health", free_loopback_port()));
+
+        registry.record_run_started(&run).expect("record start");
+        mark_latest_run_started_before_grace(&registry);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(
+            snapshot.services[0].health_url.as_deref(),
+            run.health_url.as_deref()
+        );
+        assert_eq!(snapshot.services[0].health, "failing");
+    }
+
+    #[test]
+    fn status_health_reports_unknown_for_non_loopback_http_targets() {
+        let mut registry =
+            Registry::open(temp_registry_path("health-non-loopback")).expect("registry");
+        let mut run = test_run_start("bindport", "web", 29_123, std::process::id());
+        run.health_url = Some(String::from("http://192.0.2.1/health"));
+
+        registry.record_run_started(&run).expect("record start");
+        mark_latest_run_started_before_grace(&registry);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(
+            snapshot.services[0].health_url.as_deref(),
+            run.health_url.as_deref()
+        );
+        assert_eq!(snapshot.services[0].health, "unknown");
+    }
+
+    #[test]
+    fn status_health_reports_unknown_for_unsupported_schemes() {
+        let mut registry =
+            Registry::open(temp_registry_path("health-unsupported")).expect("registry");
+        let mut run = test_run_start("bindport", "web", 29_123, std::process::id());
+        run.health_url = Some(String::from("https://web.localhost/health"));
+
+        registry.record_run_started(&run).expect("record start");
+        mark_latest_run_started_before_grace(&registry);
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(
+            snapshot.services[0].health_url.as_deref(),
+            run.health_url.as_deref()
+        );
+        assert_eq!(snapshot.services[0].health, "unknown");
     }
 
     #[test]
@@ -1288,6 +1674,7 @@ mod tests {
                 port: 29_124,
                 hostname: Some(String::from("feature-tree.bindport.localhost")),
                 route_url: Some(String::from("http://feature-tree.bindport.localhost")),
+                health_url: None,
                 pid: 12_346,
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport-worktree"),
@@ -1334,6 +1721,7 @@ mod tests {
                 port: 29_124,
                 hostname: Some(String::from("status.localhost")),
                 route_url: Some(String::from("http://status.localhost")),
+                health_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),
@@ -1434,6 +1822,7 @@ mod tests {
                 port: 29_123,
                 hostname: None,
                 route_url: None,
+                health_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),
@@ -1451,6 +1840,7 @@ mod tests {
                 port: 29_124,
                 hostname: None,
                 route_url: None,
+                health_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),
@@ -1468,6 +1858,7 @@ mod tests {
                 port: 29_125,
                 hostname: None,
                 route_url: None,
+                health_url: None,
                 pid: std::process::id(),
                 command: String::from("next dev"),
                 cwd: PathBuf::from("/tmp/bindport"),

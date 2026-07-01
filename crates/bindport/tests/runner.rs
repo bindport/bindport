@@ -242,7 +242,7 @@ fn dashboard_serves_status_api() {
     let body = http_body(&response);
     let status = serde_json::from_str::<Value>(body).expect("status json");
 
-    assert_eq!(status["schema_version"], "0.3");
+    assert_eq!(status["schema_version"], "0.4");
     assert!(status["outputs"].as_array().expect("outputs").is_empty());
     assert_eq!(status["services"][0]["project"], "dashboard-fixture");
     assert_eq!(status["services"][0]["service"], "web");
@@ -562,6 +562,7 @@ fn dashboard_status_api_handles_100_services() {
                 port: 29_100 + index,
                 hostname: None,
                 route_url: None,
+                health_url: None,
                 pid: std::process::id(),
                 command: String::from("bulk fixture"),
                 cwd: PathBuf::from("/tmp/bindport-bulk-fixture"),
@@ -1094,7 +1095,7 @@ fn service_config_injects_env_templates_and_route_metadata() {
     fs::write(
         root.join(".bindport.toml"),
         format!(
-            "project = \"hoststamp\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"{{branch}}.{{project}}.localhost\"\nenv.BINDPORT_ASSIGNED_PORT = \"{{port}}\"\nenv.BINDPORT_ROUTE = \"{{route_url}}\"\nenv.BINDPORT_DIRECT_URL = \"{{url}}\"\nenv.HOSTNAME = \"0.0.0.0\"\n"
+            "project = \"hoststamp\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"{{branch}}.{{project}}.localhost\"\nhealth_url = \"{{route_url}}/health\"\nenv.BINDPORT_ASSIGNED_PORT = \"{{port}}\"\nenv.BINDPORT_ROUTE = \"{{route_url}}\"\nenv.BINDPORT_HEALTH = \"{{health_url}}\"\nenv.BINDPORT_DIRECT_URL = \"{{url}}\"\nenv.HOSTNAME = \"0.0.0.0\"\n"
         ),
     )
     .expect("write service config");
@@ -1105,7 +1106,7 @@ fn service_config_injects_env_templates_and_route_metadata() {
             "--",
             "sh",
             "-c",
-            "printf '%s|%s|%s|%s' \"$BINDPORT_ASSIGNED_PORT\" \"$BINDPORT_ROUTE\" \"$BINDPORT_DIRECT_URL\" \"$HOSTNAME\"",
+            "printf '%s|%s|%s|%s|%s' \"$BINDPORT_ASSIGNED_PORT\" \"$BINDPORT_ROUTE\" \"$BINDPORT_HEALTH\" \"$BINDPORT_DIRECT_URL\" \"$HOSTNAME\"",
         ])
         .output()
         .expect("run bindport");
@@ -1117,7 +1118,9 @@ fn service_config_injects_env_templates_and_route_metadata() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout"),
-        format!("{port}|http://feature-tree.hoststamp.localhost|http://127.0.0.1:{port}|0.0.0.0")
+        format!(
+            "{port}|http://feature-tree.hoststamp.localhost|http://feature-tree.hoststamp.localhost/health|http://127.0.0.1:{port}|0.0.0.0"
+        )
     );
 
     let status_output = bindport_with_registry(&registry_path)
@@ -1133,6 +1136,10 @@ fn service_config_injects_env_templates_and_route_metadata() {
     assert_eq!(
         service["route_url"],
         "http://feature-tree.hoststamp.localhost"
+    );
+    assert_eq!(
+        service["health_url"],
+        "http://feature-tree.hoststamp.localhost/health"
     );
     assert_eq!(service["port"], port);
 }
@@ -1261,7 +1268,7 @@ fn status_json_starts_empty() {
     assert!(output.status.success());
 
     let status = serde_json::from_slice::<Value>(&output.stdout).expect("status json");
-    assert_eq!(status["schema_version"], "0.3");
+    assert_eq!(status["schema_version"], "0.4");
     assert_eq!(status["outputs"].as_array().expect("outputs").len(), 0);
     assert_eq!(status["services"].as_array().expect("services").len(), 0);
     assert_eq!(status["runs"].as_array().expect("runs").len(), 0);
@@ -2200,7 +2207,7 @@ fn render_command_writes_config_files_and_records_ownership() {
         .display()
         .to_string();
 
-    assert_eq!(status["schema_version"], "0.3");
+    assert_eq!(status["schema_version"], "0.4");
     assert_eq!(status["outputs"][0]["name"], "traefik");
     assert_eq!(status["outputs"][0]["pending"], 0);
     assert_eq!(status["outputs"][0]["rendered"], 1);
@@ -2880,6 +2887,7 @@ fn runner_auto_renders_stale_routes_reconciled_during_route_event() {
             port: stale_port,
             hostname: Some(String::from("web.localhost")),
             route_url: Some(String::from("http://web.localhost")),
+            health_url: None,
             pid: 2_000_000_000,
             command: String::from("stale fixture"),
             cwd: root.clone(),
@@ -3380,6 +3388,7 @@ fn reserve_registry_port(registry_path: &Path, port: u16) {
             port,
             hostname: None,
             route_url: None,
+            health_url: None,
             pid: std::process::id(),
             command: String::from("busy fixture"),
             cwd: PathBuf::from("/tmp/bindport-busy-fixture"),
@@ -3405,6 +3414,7 @@ fn record_registry_service(registry_path: &Path, service: &str, port: u16) {
             port,
             hostname: Some(format!("{service}.localhost")),
             route_url: None,
+            health_url: None,
             pid: std::process::id(),
             command: String::from("doctor output fixture"),
             cwd: std::env::temp_dir().join("bindport-doctor-output-fixture"),

@@ -67,6 +67,7 @@ command = ["storybook", "dev"]
 args = ["--port", "{port}", "--host", "0.0.0.0"]
 hostname = "{branch}.orderful-website.localhost"
 route_url = "http://{hostname}"
+health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
@@ -149,14 +150,16 @@ BindPort lifecycle metadata through `BINDPORT_HOOK_EVENTS`,
 values are not inherited, and secret values are not copied into hook metadata or
 the registry.
 
-Unknown top-level keys are reported by `bindport doctor`. Some example files may
-show intended future fields such as `identity` or `health_url`; they are not
-applied by the current runtime.
+Unknown top-level keys are reported by `bindport doctor`. Service-level
+`health_url` is stored with each run. Active loopback `http://` health URLs are
+probed by `status`; non-loopback and unsupported destinations stay `unknown`.
+Literal loopback IPs, `localhost`, and `*.localhost` names are treated as local
+targets without DNS resolution.
 
 ## Template Placeholders
 
 Wrapped commands always receive `PORT=<assigned>`. Service `command`, `args`,
-env, hostname, and route URL templates can use:
+env, hostname, route URL, and health URL templates can use:
 
 ```text
 {port}
@@ -166,6 +169,7 @@ env, hostname, and route URL templates can use:
 {service}
 {hostname}
 {route_url}
+{health_url}
 {branch}
 {branch_label}
 {git_branch}
@@ -175,6 +179,10 @@ env, hostname, and route URL templates can use:
 ```
 
 Use `{{` and `}}` when a template value needs literal braces.
+`bindport run --hostname TEMPLATE`, `--route-url TEMPLATE`, and
+`--health-url TEMPLATE` override service config for one run. Wrapper scripts can
+also set `BINDPORT_HOSTNAME`, `BINDPORT_ROUTE_URL`, or `BINDPORT_HEALTH_URL` to
+override the matching service config value.
 
 `command` and `args` are structured argv arrays. They are spawned directly, not
 through a shell. When `bindport run <service>` is called without an explicit

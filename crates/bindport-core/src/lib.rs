@@ -348,6 +348,16 @@ fn validate_services(services: Option<&[ServiceConfig]>, issues: &mut Vec<Config
             validate_service_path(index, path, issues);
         }
         validate_service_command(index, service, issues);
+        if service
+            .health_url
+            .as_deref()
+            .is_some_and(|url| url.trim().is_empty())
+        {
+            issues.push(ConfigValidationIssue::new(
+                format!("services[{index}].health_url"),
+                "service health URL must not be empty",
+            ));
+        }
     }
 }
 
@@ -557,6 +567,7 @@ pub struct ServiceConfig {
     pub env: Option<BTreeMap<String, String>>,
     pub hostname: Option<String>,
     pub route_url: Option<String>,
+    pub health_url: Option<String>,
 }
 
 impl ServiceConfig {
@@ -1669,17 +1680,17 @@ mod tests {
     fn parses_config_formats() {
         let toml = parse_config(
             ConfigFormat::Toml,
-            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nregister_service = true\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\npath = \"apps/web\"\ncommand = [\"storybook\", \"dev\"]\nargs = [\"--port\", \"{port}\"]\nhostname = \"{branch}.{project}.localhost\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
+            "project = \"demo\"\ndefault_range = \"29100-29199\"\nskip_ports = [29100]\n[dashboard]\nhost = \"127.0.0.1\"\nport = 27080\nregister_service = true\nallowed_hosts = [\"localhost\"]\n[dashboard.auth]\nrequired = true\ntoken_env = \"BINDPORT_DASHBOARD_TOKEN\"\n[[services]]\nname = \"web\"\npath = \"apps/web\"\ncommand = [\"storybook\", \"dev\"]\nargs = [\"--port\", \"{port}\"]\nhostname = \"{branch}.{project}.localhost\"\nroute_url = \"http://{hostname}\"\nhealth_url = \"{route_url}/health\"\nenv.PORT = \"{port}\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"{route_url}\"\n",
         )
         .expect("toml config");
         let json = parse_config(
             ConfigFormat::Json,
-            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"register_service":true,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","path":"apps/web","command":["storybook","dev"],"args":["--port","{port}"],"hostname":"{branch}.{project}.localhost","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
+            r#"{"project":"demo","default_range":"29100-29199","skip_ports":[29100],"dashboard":{"host":"127.0.0.1","port":27080,"register_service":true,"allowed_hosts":["localhost"],"auth":{"required":true,"token_env":"BINDPORT_DASHBOARD_TOKEN"}},"services":[{"name":"web","path":"apps/web","command":["storybook","dev"],"args":["--port","{port}"],"hostname":"{branch}.{project}.localhost","route_url":"http://{hostname}","health_url":"{route_url}/health","env":{"PORT":"{port}","NEXT_PUBLIC_BINDPORT_URL":"{route_url}"}}]}"#,
         )
         .expect("json config");
         let yaml = parse_config(
             ConfigFormat::Yaml,
-            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  register_service: true\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    path: apps/web\n    command:\n      - storybook\n      - dev\n    args:\n      - --port\n      - \"{port}\"\n    hostname: \"{branch}.{project}.localhost\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
+            "project: demo\ndefault_range: 29100-29199\nskip_ports:\n  - 29100\ndashboard:\n  host: 127.0.0.1\n  port: 27080\n  register_service: true\n  allowed_hosts:\n    - localhost\n  auth:\n    required: true\n    token_env: BINDPORT_DASHBOARD_TOKEN\nservices:\n  - name: web\n    path: apps/web\n    command:\n      - storybook\n      - dev\n    args:\n      - --port\n      - \"{port}\"\n    hostname: \"{branch}.{project}.localhost\"\n    route_url: \"http://{hostname}\"\n    health_url: \"{route_url}/health\"\n    env:\n      PORT: \"{port}\"\n      NEXT_PUBLIC_BINDPORT_URL: \"{route_url}\"\n",
         )
         .expect("yaml config");
 
@@ -1711,6 +1722,8 @@ mod tests {
             service.hostname.as_deref(),
             Some("{branch}.{project}.localhost")
         );
+        assert_eq!(service.route_url.as_deref(), Some("http://{hostname}"));
+        assert_eq!(service.health_url.as_deref(), Some("{route_url}/health"));
         assert_eq!(
             service
                 .env
@@ -2204,6 +2217,11 @@ mod tests {
                     command: Some(Vec::new()),
                     ..ServiceConfig::default()
                 },
+                ServiceConfig {
+                    name: Some(String::from("empty-health")),
+                    health_url: Some(String::from(" ")),
+                    ..ServiceConfig::default()
+                },
             ]),
             outputs: Some(vec![
                 OutputConfig {
@@ -2265,7 +2283,7 @@ mod tests {
 
         let issues = config.validate();
 
-        assert_eq!(issues.len(), 18);
+        assert_eq!(issues.len(), 19);
         assert!(issues.iter().any(|issue| {
             issue.field == "services[0].name" && issue.message == "service name is required"
         }));
@@ -2295,6 +2313,10 @@ mod tests {
         assert!(issues.iter().any(|issue| {
             issue.field == "services[5].command"
                 && issue.message == "service command must start with a program"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[6].health_url"
+                && issue.message == "service health URL must not be empty"
         }));
         assert!(issues.iter().any(|issue| {
             issue.field == "outputs[0].target"

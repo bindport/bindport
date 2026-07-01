@@ -54,6 +54,7 @@ const DASHBOARD_TOKEN_ENV: &str = "BINDPORT_DASHBOARD_TOKEN";
 const DASHBOARD_STATIC_DIR_ENV: &str = "BINDPORT_DASHBOARD_STATIC_DIR";
 const BINDPORT_HOSTNAME_ENV: &str = "BINDPORT_HOSTNAME";
 const BINDPORT_ROUTE_URL_ENV: &str = "BINDPORT_ROUTE_URL";
+const BINDPORT_HEALTH_URL_ENV: &str = "BINDPORT_HEALTH_URL";
 const DASHBOARD_STATE_FILE: &str = "dashboard.state";
 const DASHBOARD_LOG_FILE: &str = "dashboard.log";
 const HOOK_TRUST_FILE: &str = "hooks-trust.json";
@@ -109,6 +110,7 @@ struct RunOptions {
     service: Option<String>,
     hostname: Option<String>,
     route_url: Option<String>,
+    health_url: Option<String>,
     env: Vec<(String, String)>,
 }
 
@@ -118,7 +120,7 @@ fn run_subcommand(args: &[String]) -> ExitCode {
         Err(error) => {
             eprintln!("bindport: {error}");
             eprintln!(
-                "usage: bindport run [service] [--env NAME=VALUE] [--hostname TEMPLATE] [--route-url TEMPLATE] [-- <command>]"
+                "usage: bindport run [service] [--env NAME=VALUE] [--hostname TEMPLATE] [--route-url TEMPLATE] [--health-url TEMPLATE] [-- <command>]"
             );
             ExitCode::FAILURE
         }
@@ -162,6 +164,15 @@ fn parse_run_options(args: &[String]) -> Result<(RunOptions, &[String]), String>
                         .get(index)
                         .cloned()
                         .ok_or_else(|| String::from("--route-url requires a value"))?,
+                );
+            }
+            "--health-url" => {
+                index += 1;
+                options.health_url = Some(
+                    option_args
+                        .get(index)
+                        .cloned()
+                        .ok_or_else(|| String::from("--health-url requires a value"))?,
                 );
             }
             option if option.starts_with("--") => {
@@ -298,6 +309,7 @@ fn run_wrapped_command_result(
             port,
             hostname: run_metadata.hostname.clone(),
             route_url: run_metadata.route_url.clone(),
+            health_url: run_metadata.health_url.clone(),
             pid: child.pid(),
             command: command_display.clone(),
             cwd: cwd.clone(),
@@ -457,6 +469,7 @@ struct RunTemplates {
     command: Option<Vec<String>>,
     hostname: Option<String>,
     route_url: Option<String>,
+    health_url: Option<String>,
     env: Vec<(String, String)>,
 }
 
@@ -465,6 +478,7 @@ struct RunMetadata {
     command: Option<Vec<String>>,
     hostname: Option<String>,
     route_url: Option<String>,
+    health_url: Option<String>,
     env: Vec<(String, String)>,
 }
 
@@ -548,6 +562,11 @@ fn resolve_run_templates(
         .clone()
         .or_else(|| env_template_value(BINDPORT_ROUTE_URL_ENV))
         .or_else(|| service_config.and_then(|service| service.route_url.clone()));
+    templates.health_url = options
+        .health_url
+        .clone()
+        .or_else(|| env_template_value(BINDPORT_HEALTH_URL_ENV))
+        .or_else(|| service_config.and_then(|service| service.health_url.clone()));
 
     templates
 }
@@ -569,13 +588,13 @@ fn resolve_run_metadata(
     port: u16,
     templates: &RunTemplates,
 ) -> Result<RunMetadata, TemplateError> {
-    let base_values = TemplateValues::new(identity, port, None, None);
+    let base_values = TemplateValues::new(identity, port, None, None, None);
     let hostname = templates
         .hostname
         .as_deref()
         .map(|template| expand_template(template, &base_values))
         .transpose()?;
-    let route_values = TemplateValues::new(identity, port, hostname.as_deref(), None);
+    let route_values = TemplateValues::new(identity, port, hostname.as_deref(), None, None);
     let route_url = templates
         .route_url
         .as_deref()
@@ -586,7 +605,25 @@ fn resolve_run_metadata(
                 .as_ref()
                 .map(|hostname| format!("http://{hostname}"))
         });
-    let env_values = TemplateValues::new(identity, port, hostname.as_deref(), route_url.as_deref());
+    let health_values = TemplateValues::new(
+        identity,
+        port,
+        hostname.as_deref(),
+        route_url.as_deref(),
+        None,
+    );
+    let health_url = templates
+        .health_url
+        .as_deref()
+        .map(|template| expand_template(template, &health_values))
+        .transpose()?;
+    let env_values = TemplateValues::new(
+        identity,
+        port,
+        hostname.as_deref(),
+        route_url.as_deref(),
+        health_url.as_deref(),
+    );
     let env = templates
         .env
         .iter()
@@ -604,6 +641,7 @@ fn resolve_run_metadata(
         command,
         hostname,
         route_url,
+        health_url,
         env,
     })
 }
@@ -643,6 +681,7 @@ struct TemplateValues<'a> {
     port: u16,
     hostname: Option<&'a str>,
     route_url: Option<&'a str>,
+    health_url: Option<&'a str>,
     host: &'static str,
     url: String,
 }
@@ -653,6 +692,7 @@ impl<'a> TemplateValues<'a> {
         port: u16,
         hostname: Option<&'a str>,
         route_url: Option<&'a str>,
+        health_url: Option<&'a str>,
     ) -> Self {
         let host = "127.0.0.1";
 
@@ -661,6 +701,7 @@ impl<'a> TemplateValues<'a> {
             port,
             hostname,
             route_url,
+            health_url,
             host,
             url: format!("http://{host}:{port}"),
         }
@@ -675,6 +716,7 @@ impl<'a> TemplateValues<'a> {
             "service" => Some(self.identity.service.clone()),
             "hostname" => self.hostname.map(str::to_string),
             "route_url" => Some(self.route_url.unwrap_or(&self.url).to_string()),
+            "health_url" => self.health_url.map(str::to_string),
             "branch" | "branch_label" => Some(
                 self.identity
                     .git
@@ -1335,6 +1377,7 @@ fn register_dashboard_service(
         port: server.port(),
         hostname: None,
         route_url: Some(server.url()),
+        health_url: None,
         pid: std::process::id(),
         command: redacted_dashboard_command(),
         cwd: cwd.to_path_buf(),
@@ -5109,6 +5152,7 @@ fn print_help() {
     println!("  --env NAME=VALUE             Add a templated child environment variable");
     println!("  --hostname <template>        Set route hostname metadata");
     println!("  --route-url <template>       Set route URL metadata");
+    println!("  --health-url <template>      Set service health check URL metadata");
 }
 
 fn print_config_help() {
@@ -5449,6 +5493,8 @@ mod tests {
             "{branch}.{project}.localhost",
             "--route-url",
             "https://{hostname}",
+            "--health-url",
+            "{route_url}/health",
             "--",
             "next",
             "dev",
@@ -5461,6 +5507,7 @@ mod tests {
             Some("{branch}.{project}.localhost")
         );
         assert_eq!(options.route_url.as_deref(), Some("https://{hostname}"));
+        assert_eq!(options.health_url.as_deref(), Some("{route_url}/health"));
         assert_eq!(
             options.env,
             vec![(String::from("NEXT_PUBLIC_URL"), String::from("{route_url}"))]
@@ -5501,8 +5548,10 @@ mod tests {
             ]),
             hostname: Some(String::from("{service}.{project}.localhost")),
             route_url: Some(String::from("https://{hostname}")),
+            health_url: Some(String::from("{route_url}/health")),
             env: vec![
                 (String::from("URL"), String::from("{route_url}")),
+                (String::from("HEALTH"), String::from("{health_url}")),
                 (String::from("JSON"), String::from(r#"{{"port":{port}}}"#)),
             ],
         };
@@ -5518,11 +5567,19 @@ mod tests {
             Some("https://web.hoststamp.localhost")
         );
         assert_eq!(
+            metadata.health_url.as_deref(),
+            Some("https://web.hoststamp.localhost/health")
+        );
+        assert_eq!(
             metadata.env,
             vec![
                 (
                     String::from("URL"),
                     String::from("https://web.hoststamp.localhost")
+                ),
+                (
+                    String::from("HEALTH"),
+                    String::from("https://web.hoststamp.localhost/health")
                 ),
                 (String::from("JSON"), String::from(r#"{"port":29100}"#)),
             ]
@@ -5545,7 +5602,7 @@ mod tests {
             git: None,
             identity_key: String::from("v1:test"),
         };
-        let values = TemplateValues::new(&identity, 29100, None, None);
+        let values = TemplateValues::new(&identity, 29100, None, None, None);
 
         assert!(matches!(
             expand_template("{project", &values),
@@ -5599,6 +5656,7 @@ mod tests {
             29_100,
             Some("feature-tree.demo.localhost"),
             Some("https://feature-tree.demo.localhost"),
+            Some("https://feature-tree.demo.localhost/health"),
         );
 
         assert_eq!(values.value("port").as_deref(), Some("29100"));
@@ -5616,6 +5674,10 @@ mod tests {
         assert_eq!(
             values.value("route_url").as_deref(),
             Some("https://feature-tree.demo.localhost")
+        );
+        assert_eq!(
+            values.value("health_url").as_deref(),
+            Some("https://feature-tree.demo.localhost/health")
         );
         assert_eq!(values.value("branch").as_deref(), Some("feature-tree"));
         assert_eq!(
@@ -5643,7 +5705,7 @@ mod tests {
             git: None,
             identity_key: String::from("v1:no-git"),
         };
-        let values = TemplateValues::new(&no_git, 29_101, None, None);
+        let values = TemplateValues::new(&no_git, 29_101, None, None, None);
         assert_eq!(
             values.value("route_url").as_deref(),
             Some("http://127.0.0.1:29101")
@@ -6222,6 +6284,7 @@ mod tests {
             command: None,
             hostname: Some(String::from("feature-tree.demo.localhost")),
             route_url: Some(String::from("https://feature-tree.demo.localhost")),
+            health_url: Some(String::from("https://feature-tree.demo.localhost/health")),
             env: Vec::new(),
         };
         let pending = pending_route_record(
@@ -6408,6 +6471,7 @@ mod tests {
             url: String::from("http://127.0.0.1:29100"),
             hostname: Some(String::from("feature-tree.demo.localhost")),
             route_url: Some(String::from("https://feature-tree.demo.localhost")),
+            health_url: Some(String::from("https://feature-tree.demo.localhost/health")),
             worktree_path: Some(String::from("/workspace/demo-feature-tree")),
             worktree_hash: Some(String::from("abc123456789")),
             git_common_dir: Some(String::from("/workspace/demo/.git")),

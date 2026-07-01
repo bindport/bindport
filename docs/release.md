@@ -55,10 +55,12 @@ registry recording `next dev`. This proves package-manager script dispatch
 without adding a real Next.js dependency to the repository.
 
 `status --json` exposes route-oriented fields (`hostname`, `route_url`,
-`outputs`, and `proxy`). Service config and run options can populate
-`hostname` and `route_url`; rendered output records populate top-level output
-summaries and per-service output status. `proxy` is a compatibility alias for
-recorded `traefik` output status.
+`health_url`, `health`, `outputs`, and `proxy`). Service config and run options
+can populate `hostname`, `route_url`, and `health_url`; rendered output records
+populate top-level output summaries and per-service output status. `proxy` is a
+compatibility alias for recorded `traefik` output status. Health probes are
+limited to loopback `http://` destinations; non-loopback and unsupported
+destinations remain `unknown`.
 
 The dashboard gate is covered by integration tests for status API parity,
 static asset serving, token auth, stopped/stale cleanup, self-registration,
@@ -318,7 +320,9 @@ fresh checkout or clean worktree:
 4. Start `bindport dashboard serve` and verify `/api/status` matches
    `bindport status --json`.
 5. Verify the dashboard shows active, stopped, and stale groups as applicable.
-6. Verify URL copy/open actions when `hostname` and `route_url` are configured.
+6. Verify URL copy/open actions when `hostname` and `route_url` are configured,
+   and confirm health is `unknown`, `pending`, `healthy`, or `failing` as
+   expected for the service loopback health URL.
 7. Remove stopped or stale entries from the dashboard and confirm active entries
    remain.
 8. Run `bindport dashboard start`, `bindport dashboard status`, and
