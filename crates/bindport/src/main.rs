@@ -3,7 +3,7 @@
 use std::{
     collections::BTreeSet,
     env, fs,
-    io::{self, BufRead, Write},
+    io::{self, BufRead, IsTerminal, Write},
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Child, Command, ExitCode, ExitStatus, Stdio},
@@ -254,6 +254,19 @@ fn run_wrapped_command_result(
 
     let mut disable_registry = false;
     if let Some(registry) = registry.as_mut() {
+        match prune_stale_leases_for_range(&cwd, &config, registry) {
+            Ok(summary) if summary.total_leases() > 0 => {
+                eprintln!(
+                    "bindport: pruned {} stale registry entries under configured range pressure",
+                    summary.total_leases()
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                print_registry_warning("failed to prune stale registry leases", &error);
+            }
+        }
+
         match registry.active_ports() {
             Ok(active_ports) => skip_ports.extend(active_ports),
             Err(error) => {
@@ -373,6 +386,39 @@ fn run_wrapped_command_result(
 
         return Ok(status_to_exit_code(&status));
     }
+}
+
+fn prune_stale_leases_for_range(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    registry: &mut Registry,
+) -> Result<CleanSummary, RegistryError> {
+    let limit = stale_lease_prune_limit(config.port_range, &config.skip_ports);
+    let summary = registry.prune_oldest_stale_leases(
+        config.port_range.start,
+        config.port_range.end,
+        limit,
+        false,
+    )?;
+
+    if summary.total_leases() > 0 {
+        let events = RouteEventCollector::single(
+            RouteEventSource::StaleReconcile,
+            RouteEventKind::RoutesRemoved,
+        );
+        if let Err(error) = auto_render_outputs_for_events(cwd, config, registry, &events) {
+            print_auto_render_warning(&events.warning_context(), &error);
+        }
+    }
+
+    Ok(summary)
+}
+
+fn stale_lease_prune_limit(range: PortRange, skip_ports: &[u16]) -> usize {
+    let skipped_in_range = ports_in_range(skip_ports, range).len() as u32;
+    let usable_ports = range.len().saturating_sub(skipped_in_range);
+
+    (usable_ports / 2) as usize
 }
 
 #[derive(Debug)]
@@ -3513,6 +3559,7 @@ struct CleanOptions {
     json: bool,
     stopped: bool,
     stale: bool,
+    yes: bool,
     help: bool,
 }
 
@@ -3536,7 +3583,7 @@ fn clean_registry(args: &[String]) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(CleanCommandError::InvalidArgument(error)) => {
             eprintln!("bindport: {error}");
-            eprintln!("usage: bindport clean [--dry-run] [--stopped] [--stale] [--json]");
+            eprintln!("usage: bindport clean [--dry-run] [--stopped] [--stale] [--json] [--yes]");
             ExitCode::FAILURE
         }
         Err(CleanCommandError::Registry(error)) => {
@@ -3545,6 +3592,18 @@ fn clean_registry(args: &[String]) -> ExitCode {
         }
         Err(CleanCommandError::Json(error)) => {
             eprintln!("bindport: failed to serialize clean JSON: {error}");
+            ExitCode::FAILURE
+        }
+        Err(CleanCommandError::Io(error)) => {
+            eprintln!("bindport: failed to read cleanup confirmation: {error}");
+            ExitCode::FAILURE
+        }
+        Err(CleanCommandError::ConfirmationRequired(message)) => {
+            eprintln!("bindport: {message}");
+            ExitCode::FAILURE
+        }
+        Err(CleanCommandError::Aborted) => {
+            eprintln!("bindport: cleanup aborted");
             ExitCode::FAILURE
         }
     }
@@ -3560,7 +3619,13 @@ fn clean_registry_result(args: &[String]) -> Result<(), CleanCommandError> {
 
     let states = options.states();
     let mut registry = Registry::open_default()?;
-    let summary = registry.clean_leases(&states, options.dry_run)?;
+    let preview = registry.clean_leases(&states, true)?;
+    confirm_stale_cleanup(&options, preview)?;
+    let summary = if options.dry_run {
+        preview
+    } else {
+        registry.clean_leases(&states, false)?
+    };
 
     if !options.dry_run && summary.total_leases() > 0 {
         let events =
@@ -3595,6 +3660,7 @@ fn parse_clean_options(args: &[String]) -> Result<CleanOptions, CleanCommandErro
         json: false,
         stopped: false,
         stale: false,
+        yes: false,
         help: false,
     };
 
@@ -3604,6 +3670,7 @@ fn parse_clean_options(args: &[String]) -> Result<CleanOptions, CleanCommandErro
             "--json" => options.json = true,
             "--stopped" => options.stopped = true,
             "--stale" => options.stale = true,
+            "--yes" | "-y" => options.yes = true,
             "--all" => {
                 options.stopped = true;
                 options.stale = true;
@@ -3623,6 +3690,37 @@ fn parse_clean_options(args: &[String]) -> Result<CleanOptions, CleanCommandErro
     }
 
     Ok(options)
+}
+
+fn confirm_stale_cleanup(
+    options: &CleanOptions,
+    preview: CleanSummary,
+) -> Result<(), CleanCommandError> {
+    if options.dry_run || options.yes || preview.stale_leases == 0 {
+        return Ok(());
+    }
+
+    if !io::stdin().is_terminal() {
+        return Err(CleanCommandError::ConfirmationRequired(String::from(
+            "stale cleanup requires confirmation; rerun with --yes",
+        )));
+    }
+
+    eprint!(
+        "Remove {} stale registry entries? [y/N] ",
+        preview.stale_leases
+    );
+    io::stderr().flush().ok();
+
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    let answer = answer.trim();
+
+    if answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes") {
+        Ok(())
+    } else {
+        Err(CleanCommandError::Aborted)
+    }
 }
 
 fn print_clean_json(summary: CleanSummary, dry_run: bool) -> Result<(), CleanCommandError> {
@@ -3658,6 +3756,9 @@ enum CleanCommandError {
     InvalidArgument(String),
     Registry(RegistryError),
     Json(serde_json::Error),
+    Io(io::Error),
+    ConfirmationRequired(String),
+    Aborted,
 }
 
 impl From<RegistryError> for CleanCommandError {
@@ -3669,6 +3770,12 @@ impl From<RegistryError> for CleanCommandError {
 impl From<serde_json::Error> for CleanCommandError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+impl From<io::Error> for CleanCommandError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
     }
 }
 
@@ -4884,9 +4991,13 @@ fn print_allocation_diagnostics(
     if previous_port_available {
         print_previous_port_diagnostics(previous_port, config, &active_ports);
     }
-    let listener_conflicts = listener_conflicts(config.port_range);
+    let listener_conflicts = listener_conflicts(config.port_range, &active_ports);
     println!(
-        "os listener conflicts in range: {}",
+        "known registry listener conflicts in range: {}",
+        format_limited_ports(&listener_conflicts.known_registry)
+    );
+    println!(
+        "unknown os listener conflicts in range: {}",
         format_listener_conflict_scan(&listener_conflicts)
     );
 
@@ -4957,36 +5068,44 @@ fn ports_in_range(ports: &[u16], range: PortRange) -> Vec<u16> {
 }
 
 struct ListenerConflictScan {
-    conflicts: Vec<u16>,
+    known_registry: Vec<u16>,
+    unknown: Vec<u16>,
     scanned_ports: u32,
     total_ports: u32,
 }
 
-fn listener_conflicts(range: PortRange) -> ListenerConflictScan {
+fn listener_conflicts(range: PortRange, known_registry_ports: &[u16]) -> ListenerConflictScan {
     let total_ports = range.len();
     let scanned_ports = total_ports.min(DOCTOR_MAX_LISTENER_PROBES);
-    let conflicts = (0..scanned_ports)
-        .filter_map(|offset| {
-            let port = range.start as u32 + offset;
-            let port = u16::try_from(port).expect("port remains within configured range");
+    let known_registry_ports = ports_in_range(known_registry_ports, range);
+    let mut known_registry = Vec::new();
+    let mut unknown = Vec::new();
 
-            if is_port_available(port) {
-                None
-            } else {
-                Some(port)
-            }
-        })
-        .collect();
+    for offset in 0..scanned_ports {
+        let port = range.start as u32 + offset;
+        let port = u16::try_from(port).expect("port remains within configured range");
+
+        if is_port_available(port) {
+            continue;
+        }
+
+        if known_registry_ports.contains(&port) {
+            known_registry.push(port);
+        } else {
+            unknown.push(port);
+        }
+    }
 
     ListenerConflictScan {
-        conflicts,
+        known_registry,
+        unknown,
         scanned_ports,
         total_ports,
     }
 }
 
 fn format_listener_conflict_scan(scan: &ListenerConflictScan) -> String {
-    let mut summary = format_limited_ports(&scan.conflicts);
+    let mut summary = format_limited_ports(&scan.unknown);
 
     if scan.scanned_ports < scan.total_ports {
         summary.push_str(&format!(
@@ -5214,6 +5333,7 @@ fn print_clean_help() {
     println!("  --stale       Remove stale entries only");
     println!("  --all         Remove stopped and stale entries (default)");
     println!("  --json        Print machine-readable cleanup counts");
+    println!("  --yes, -y     Confirm stale entry deletion without prompting");
 }
 
 fn print_hooks_help() {
@@ -5965,9 +6085,11 @@ mod tests {
         assert_eq!(options.states(), vec![CleanState::Stopped]);
         assert!(options.dry_run);
         assert!(options.json);
+        assert!(!options.yes);
 
-        let options = parse_clean_options(&strings(["--stale"])).expect("stale clean");
+        let options = parse_clean_options(&strings(["--stale", "--yes"])).expect("stale clean");
         assert_eq!(options.states(), vec![CleanState::Stale]);
+        assert!(options.yes);
 
         let options = parse_clean_options(&strings(["--help"])).expect("help clean");
         assert!(options.help);
@@ -6014,14 +6136,25 @@ mod tests {
             format_limited_ports(&many_ports),
             "1, 2, 3, 4, 5, 6, 7, 8, 9, 10 (+2 more)"
         );
+        assert_eq!(
+            stale_lease_prune_limit(
+                PortRange {
+                    start: 29_100,
+                    end: 29_110,
+                },
+                &[29_100, 29_101, 30_000],
+            ),
+            4
+        );
         let scan = ListenerConflictScan {
-            conflicts: vec![29_100, 29_101],
+            known_registry: vec![29_100],
+            unknown: vec![29_101],
             scanned_ports: 2,
             total_ports: 10,
         };
         assert_eq!(
             format_listener_conflict_scan(&scan),
-            "29100, 29101 (scanned first 2 of 10 ports)"
+            "29101 (scanned first 2 of 10 ports)"
         );
     }
 

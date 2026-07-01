@@ -351,4 +351,5 @@ template files under project `.bindport/templates` or global
   modified. Use `bindport render --repair` to record externally modified
   DB-owned files without adopting unknown files.
 - If cleanup does not delete a generated file, confirm the route was removed
-  from the registry and that `delete_on` includes the lifecycle state you expect.
+  from the registry, that stale CLI cleanup was confirmed with `--yes` when run
+  noninteractively, and that `delete_on` includes the lifecycle state you expect.

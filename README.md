@@ -53,7 +53,8 @@ The current source tree includes:
   route hostname metadata when configured.
 - Basic SQLite-backed lease/run/output recording with `bindport status --json`.
 - `bindport doctor` diagnostics for config, registry, effective identity,
-  active registry ports, OS listener conflicts, and the next candidate port.
+  active registry ports, known registry listener conflicts, unknown OS listener
+  conflicts, and the next candidate port.
 - `bindport doctor outputs` diagnostics for configured output templates and
   planned render paths without writing files.
 - Built-in `bindport-env-local` output template for explicit `.env.local`
@@ -270,9 +271,10 @@ bindport clean --dry-run
 bindport clean
 ```
 
-`bindport clean` removes stopped and stale entries by default. Use `--stopped`
-or `--stale` to scope cleanup, and `--json` for machine-readable counts. Active
-services are not removed.
+`bindport clean` removes stopped and stale entries by default. Stale entries
+require confirmation before deletion; pass `--yes` for reviewed noninteractive
+cleanup. Use `--stopped` or `--stale` to scope cleanup, and `--json` for
+machine-readable counts. Active services are not removed.
 
 ## Documentation
 

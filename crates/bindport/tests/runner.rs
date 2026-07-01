@@ -1420,6 +1420,54 @@ fn clean_dry_run_reports_without_removing_stopped_entries() {
     assert_eq!(status["runs"].as_array().expect("runs").len(), 0);
 }
 
+#[cfg(unix)]
+#[test]
+fn clean_requires_yes_for_noninteractive_stale_entries() {
+    let registry_path = temp_registry_path("clean-stale-confirmation");
+    let mut registry = Registry::open(&registry_path).expect("registry");
+    registry
+        .record_run_started(&RunStart {
+            project: String::from("stale-clean"),
+            service: String::from("web"),
+            identity: None,
+            host: String::from("127.0.0.1"),
+            port: 29_501,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+            pid: 2_000_000_000,
+            command: String::from("stale fixture"),
+            cwd: PathBuf::from("/tmp/bindport-stale-clean-fixture"),
+        })
+        .expect("record stale candidate");
+
+    let rejected = bindport_with_registry(&registry_path)
+        .args(["clean", "--stale", "--json"])
+        .output()
+        .expect("run bindport clean");
+
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("stale cleanup requires confirmation; rerun with --yes")
+    );
+
+    let accepted = bindport_with_registry(&registry_path)
+        .args(["clean", "--stale", "--json", "--yes"])
+        .output()
+        .expect("run bindport clean with confirmation");
+
+    assert!(
+        accepted.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+
+    let report = serde_json::from_slice::<Value>(&accepted.stdout).expect("clean json");
+    assert_eq!(report["leases"], 1);
+    assert_eq!(report["states"]["stale"], 1);
+}
+
 #[test]
 fn clean_keeps_active_entries() {
     let registry_path = temp_registry_path("clean-keeps-active");
@@ -3174,7 +3222,8 @@ fn doctor_reports_identity_registry_and_next_candidate() {
     assert!(stdout.contains("identity key: v1:"));
     assert!(stdout.contains("registry active ports in range: none"));
     assert!(stdout.contains("previous identity port: none"));
-    assert!(stdout.contains("os listener conflicts in range: "));
+    assert!(stdout.contains("known registry listener conflicts in range: "));
+    assert!(stdout.contains("unknown os listener conflicts in range: "));
     assert!(stdout.contains("allocation scan start: "));
     assert!((29_340..=29_349).contains(&candidate));
 }
