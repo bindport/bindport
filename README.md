@@ -39,7 +39,7 @@ The current source tree includes:
 
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
-- CLI support for `--help`, `--version`, `status`, `config explain`,
+- CLI support for `--help`, `--version`, `status`, `open`, `config explain`,
   `config validate`, `doctor`, `clean`, `dashboard`, and one-shot
   `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
@@ -102,6 +102,7 @@ cargo run -p bindport -- --help
 cargo run -p bindport -- doctor
 cargo run -p bindport -- init
 cargo run -p bindport -- status --json
+cargo run -p bindport -- open web --print
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- doctor outputs
@@ -283,6 +284,8 @@ machine-readable counts. Active services are not removed.
 - [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
+- [Status](docs/status.md): `status --json` schema, service URL selection, and
+  agent-oriented lookup guidance.
 - [Templates](docs/templates.md): output template lookup, built-in Traefik
   file-provider setup, custom templates, render lifecycle, and troubleshooting.
 - [Monorepos](docs/monorepos.md): root config, path-scoped services, workspace
