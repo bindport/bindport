@@ -183,10 +183,9 @@ are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
 appear in `bindport status`. Service entries currently apply `name`, `path`,
-`command`, `args`, `env`, `hostname`, and `route_url`. The example `identity`
-and deeper service fields such as `health_url` document the intended future
-shape and are not applied yet; `bindport doctor` reports ignored top-level keys
-so typos and future-only sections are visible.
+`command`, `args`, `env`, `hostname`, `route_url`, and `health_url`. Active
+services with a loopback `http://` health URL report `pending`, `healthy`, or
+`failing`; non-loopback and unsupported destinations remain `unknown`.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
@@ -223,6 +222,8 @@ path = "apps/web"
 command = ["storybook", "dev"]
 args = ["--port", "{port}", "--host", "0.0.0.0"]
 hostname = "{branch}.{project}.localhost"
+route_url = "http://{hostname}"
+health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
@@ -249,14 +250,16 @@ bindport run web -- sh -c 'storybook dev --port "$PORT" --host 0.0.0.0'
 ```
 
 Supported template placeholders are `{port}`, `{host}`, `{url}`, `{project}`,
-`{service}`, `{hostname}`, `{route_url}`, `{branch}`, `{branch_label}`,
-`{git_branch}`, `{worktree}`, `{worktree_label}`, and `{worktree_hash}`.
+`{service}`, `{hostname}`, `{route_url}`, `{health_url}`, `{branch}`,
+`{branch_label}`, `{git_branch}`, `{worktree}`, `{worktree_label}`, and
+`{worktree_hash}`.
 Use `{{` and `}}` when a template value needs literal braces, for example a
 JSON-valued environment variable.
-`bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, and
-`--route-url TEMPLATE` override service config for a single run.
-`BINDPORT_HOSTNAME` and `BINDPORT_ROUTE_URL` can also override the matching
-service config values for wrapper scripts.
+`bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, `--route-url TEMPLATE`,
+and `--health-url TEMPLATE` override service config for a single run.
+`BINDPORT_HOSTNAME`, `BINDPORT_ROUTE_URL`, and
+`BINDPORT_HEALTH_URL` can also override the matching service config values for
+wrapper scripts.
 
 ## Registry Cleanup
 

@@ -14,6 +14,7 @@ name = "web"
 path = "apps/web"
 command = ["next", "dev"]
 hostname = "{branch}.orderful-website.localhost"
+health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
@@ -23,6 +24,7 @@ name = "api"
 path = "apps/api"
 command = ["cargo", "run"]
 hostname = "{branch}.orderful-api.localhost"
+health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.BINDPORT_ROUTE_URL = "{route_url}"
 ```

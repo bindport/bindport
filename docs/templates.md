@@ -148,6 +148,7 @@ project = "orderful-website"
 [[services]]
 name = "web"
 hostname = "{branch}.orderful-website.localhost"
+health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
