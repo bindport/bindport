@@ -226,7 +226,8 @@ The `Release` workflow is manual-only. It verifies that it is running from
 standard release check gate, verifies that the workflow did not modify source
 files, builds release binaries, verifies release Git credentials with a
 non-mutating dry-run tag push, creates or reuses annotated Git tag `vX.Y.Z`, and
-creates or updates the GitHub Release.
+creates the GitHub Release. If a GitHub Release already exists for the tag, the
+workflow refuses to mutate existing release assets.
 
 Release artifacts are uploaded to the GitHub Release:
 
@@ -239,10 +240,15 @@ Release artifacts are uploaded to the GitHub Release:
 - `bindport-macos-arm64`
 - `bindport-macos-arm64.sha256`
 - `bindport-linux-x64-X.Y.Z.tgz`
+- `bindport-linux-x64-X.Y.Z.tgz.sha256`
 - `bindport-linux-arm64-X.Y.Z.tgz`
+- `bindport-linux-arm64-X.Y.Z.tgz.sha256`
 - `bindport-darwin-x64-X.Y.Z.tgz`
+- `bindport-darwin-x64-X.Y.Z.tgz.sha256`
 - `bindport-darwin-arm64-X.Y.Z.tgz`
+- `bindport-darwin-arm64-X.Y.Z.tgz.sha256`
 - `bindport-X.Y.Z.tgz`
+- `bindport-X.Y.Z.tgz.sha256`
 
 Dry runs run the release checks and release Git credential preflight. They do
 not create Git tags or GitHub Releases. They still build release binaries so the
@@ -352,15 +358,15 @@ fresh checkout or clean worktree:
 
 1. Build the release binary with `cargo build --release --locked`.
 2. Create a project config with a `bindport-traefik` output and a branch-based
-   service hostname such as `hostname = "{branch}.orderful-website.localhost"`.
+   service hostname such as `hostname = "{branch}.example-web.localhost"`.
 3. Run a wrapped command with that service and confirm BindPort writes a
    generated Traefik file under the configured output root.
 4. Point an existing Traefik file provider at the generated directory with
    `watch = true`, then confirm Traefik reloads the generated file.
 5. Visit a rendered hostname such as
-   `feature-tree.orderful-website.localhost` and confirm it forwards to the
+   `feature-tree.example-web.localhost` and confirm it forwards to the
    correct wrapped process.
-6. Repeat with a second project name such as `hoststamp` to confirm the hostname
+6. Repeat with a second project name such as `example-api` to confirm the hostname
    template keeps local app domains distinct.
 7. Run `bindport render --dry-run`, `bindport render --all`, and
    `bindport doctor outputs` and confirm the planned output paths match the
@@ -510,8 +516,8 @@ native binaries.
 Before a real npm publish:
 
 1. Run the GitHub `Release` workflow for the version.
-2. Confirm the GitHub Release contains all raw binaries, checksums, and npm
-   tarballs.
+2. Confirm the GitHub Release contains all raw binaries, checksums, npm
+   tarballs, and npm tarball checksums.
 3. Run the `npm Publish` workflow with `execute=false`.
 4. Run the `npm Publish` workflow with `execute=true` after the dry-run passes.
 
@@ -519,6 +525,7 @@ Local npm publish dry-run from downloaded release tarballs:
 
 ```sh
 gh release download v0.5.0 --pattern "*.tgz" --dir dist/npm
+gh release download v0.5.0 --pattern "*.tgz.sha256" --dir dist/npm
 mise run npm-publish v0.5.0 --dist dist/npm
 ```
 

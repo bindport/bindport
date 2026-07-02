@@ -2,17 +2,24 @@
 
 use std::{
     collections::BTreeMap,
-    fmt, fs, io,
+    fmt, fs,
+    io::{self, Write},
     path::{Component, Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
 use bindport_core::{EffectiveOutputConfig, normalize_branch_label};
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
 const BUILT_IN_ENV_LOCAL: &str = include_str!("../templates/bindport-env-local.env.j2");
+const TEMPLATE_FUEL: u64 = 200_000;
+const MAX_RENDERED_TEMPLATE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdapterKind {
@@ -199,6 +206,10 @@ impl TemplateResolver {
 #[derive(Debug)]
 pub enum TemplateError {
     InvalidName(String),
+    OutputTooLarge {
+        bytes: usize,
+        limit: usize,
+    },
     Io {
         path: PathBuf,
         source: io::Error,
@@ -216,6 +227,10 @@ impl fmt::Display for TemplateError {
             Self::InvalidName(name) => write!(
                 f,
                 "invalid template name `{name}`; use a safe relative name with no path separators or `..`"
+            ),
+            Self::OutputTooLarge { bytes, limit } => write!(
+                f,
+                "rendered template output is {bytes} bytes, exceeding the {limit} byte limit"
             ),
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
             Self::NotFound { name, source } => match source {
@@ -250,8 +265,22 @@ pub fn render_template<S: serde::Serialize>(
     let mut environment = Environment::new();
     environment.set_undefined_behavior(UndefinedBehavior::Strict);
     environment.set_auto_escape_callback(|_| AutoEscape::None);
+    environment.set_fuel(Some(TEMPLATE_FUEL));
+    environment.add_filter("dotenv", dotenv_escape);
 
-    Ok(environment.render_str(template, context)?)
+    let rendered = environment.render_str(template, context)?;
+    if rendered.len() > MAX_RENDERED_TEMPLATE_BYTES {
+        return Err(TemplateError::OutputTooLarge {
+            bytes: rendered.len(),
+            limit: MAX_RENDERED_TEMPLATE_BYTES,
+        });
+    }
+
+    Ok(rendered)
+}
+
+fn dotenv_escape(value: String) -> String {
+    serde_json::to_string(&value).unwrap_or_else(|_| String::from("\"\""))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,6 +495,10 @@ pub struct PlannedOutputFile {
 
 #[derive(Debug)]
 pub enum RenderError {
+    UnsafeHostname {
+        route_key: String,
+        hostname: String,
+    },
     TargetTemplate {
         route_key: String,
         source: TemplateError,
@@ -494,6 +527,12 @@ pub enum OutputFileError {
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsafeHostname {
+                route_key,
+                hostname,
+            } => {
+                write!(f, "route `{route_key}` has unsafe hostname `{hostname}`")
+            }
             Self::TargetTemplate { route_key, source } => {
                 write!(
                     f,
@@ -519,7 +558,7 @@ impl std::error::Error for RenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::TargetTemplate { source, .. } | Self::BodyTemplate { source, .. } => Some(source),
-            Self::TargetCollision { .. } => None,
+            Self::UnsafeHostname { .. } | Self::TargetCollision { .. } => None,
         }
     }
 }
@@ -570,6 +609,14 @@ pub fn render_output_routes(
     let mut files = Vec::with_capacity(routes.len());
 
     for route in routes {
+        if let Some(hostname) = route.hostname.as_deref()
+            && hostname.contains('`')
+        {
+            return Err(RenderError::UnsafeHostname {
+                route_key: route.key.clone(),
+                hostname: hostname.to_string(),
+            });
+        }
         let context = RenderContext {
             route: route.context(output),
             output: output.context.clone(),
@@ -760,7 +807,24 @@ fn stable_hash(bytes: &[u8]) -> u64 {
 }
 
 fn content_hash(contents: &str) -> String {
+    sha256_hex(contents.as_bytes())
+}
+
+fn content_hash_matches(contents: &str, expected_hash: &str) -> bool {
+    content_hash(contents) == expected_hash || legacy_content_hash(contents) == expected_hash
+}
+
+fn legacy_content_hash(contents: &str) -> String {
     format!("{:016x}", stable_hash(contents.as_bytes()))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
 }
 
 fn output_root(base_dir: &Path, output: &OutputContext) -> Result<PathBuf, OutputFileError> {
@@ -790,7 +854,7 @@ fn clean_root_path(base_dir: &Path, root: &str) -> Result<PathBuf, OutputFileErr
     let root_path = Path::new(root);
 
     if root_path.is_absolute() {
-        clean_components(root_path).map_err(|_| OutputFileError::UnsafeRoot {
+        Err(OutputFileError::UnsafeRoot {
             root: root.to_string(),
         })
     } else {
@@ -832,10 +896,8 @@ fn output_file_path(
 }
 
 fn symlink_check_anchor(base_dir: &Path, root: &Path, output: &OutputContext) -> PathBuf {
-    match output.root.as_deref().map(Path::new) {
-        Some(configured_root) if configured_root.is_absolute() => root.to_path_buf(),
-        _ => base_dir.to_path_buf(),
-    }
+    let _ = (root, output);
+    base_dir.to_path_buf()
 }
 
 fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, ()> {
@@ -853,22 +915,6 @@ fn safe_join(base: &Path, relative: &Path) -> Result<PathBuf, ()> {
     }
 
     Ok(path)
-}
-
-fn clean_components(path: &Path) -> Result<PathBuf, ()> {
-    let mut clean = PathBuf::new();
-
-    for component in path.components() {
-        match component {
-            Component::RootDir | Component::Prefix(_) | Component::Normal(_) => {
-                clean.push(component.as_os_str());
-            }
-            Component::CurDir => {}
-            Component::ParentDir => return Err(()),
-        }
-    }
-
-    Ok(clean)
 }
 
 fn reject_symlink_components(anchor: &Path, path: &Path) -> Result<(), OutputFileError> {
@@ -912,7 +958,7 @@ fn verify_existing_target(
         source,
     })?;
 
-    if content_hash(&contents) != *expected_hash {
+    if !content_hash_matches(&contents, expected_hash) {
         return Err(OutputFileError::ExternalModified {
             path: path.to_path_buf(),
         });
@@ -942,7 +988,7 @@ fn owned_file_state(path: &Path, expected_hash: &str) -> Result<OwnedFileState, 
         }
     };
 
-    if content_hash(&contents) != expected_hash {
+    if !content_hash_matches(&contents, expected_hash) {
         return Ok(OwnedFileState::ExternalModified);
     }
 
@@ -962,10 +1008,13 @@ fn atomic_write(anchor: &Path, path: &Path, contents: &str) -> Result<(), Output
     }
 
     let temp_path = temp_sibling(path);
-    fs::write(&temp_path, contents).map_err(|source| OutputFileError::Io {
-        path: temp_path.clone(),
-        source,
-    })?;
+    if let Err(source) = write_output_file(&temp_path, contents) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(OutputFileError::Io {
+            path: temp_path,
+            source,
+        });
+    }
     fs::rename(&temp_path, path).map_err(|source| {
         let _ = fs::remove_file(&temp_path);
         OutputFileError::Io {
@@ -973,6 +1022,17 @@ fn atomic_write(anchor: &Path, path: &Path, contents: &str) -> Result<(), Output
             source,
         }
     })
+}
+
+fn write_output_file(path: &Path, contents: &str) -> io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(contents.as_bytes())
 }
 
 fn temp_sibling(path: &Path) -> PathBuf {
@@ -1399,8 +1459,37 @@ mod tests {
         )
         .expect("built-in template renders");
 
-        assert!(rendered.contains("Host(`feature.demo.localhost`)"));
+        assert!(rendered.contains("rule: \"Host(`feature.demo.localhost`)\""));
         assert!(rendered.contains("url: \"http://127.0.0.1:29100\""));
+    }
+
+    #[test]
+    fn built_in_traefik_template_escapes_yaml_scalars() {
+        let template = TemplateResolver::new(None, None)
+            .resolve("bindport-traefik", None)
+            .expect("built-in template");
+        let rendered = render_template(
+            &template.contents,
+            minijinja::context! {
+                route => minijinja::context! {
+                    key => "demo:web:feature",
+                    state => "active",
+                    hostname => "feature\".demo.localhost",
+                    slug => "demo-web-feature",
+                    target_url => "http://127.0.0.1:29100/path\"",
+                },
+                vars => minijinja::context! {
+                    entrypoints => ["web\nbad"],
+                    middlewares => ["auth\"middleware"],
+                },
+            },
+        )
+        .expect("built-in template renders");
+
+        assert!(rendered.contains("rule: \"Host(`feature\\\".demo.localhost`)\""));
+        assert!(rendered.contains("- \"web\\nbad\""));
+        assert!(rendered.contains("- \"auth\\\"middleware\""));
+        assert!(rendered.contains("url: \"http://127.0.0.1:29100/path\\\"\""));
     }
 
     #[test]
@@ -1426,13 +1515,40 @@ mod tests {
         )
         .expect("built-in template renders");
 
-        assert!(rendered.contains("BINDPORT_PROJECT=demo"));
-        assert!(rendered.contains("BINDPORT_SERVICE=web"));
-        assert!(rendered.contains("BINDPORT_STATE=active"));
+        assert!(rendered.contains("BINDPORT_PROJECT=\"demo\""));
+        assert!(rendered.contains("BINDPORT_SERVICE=\"web\""));
+        assert!(rendered.contains("BINDPORT_STATE=\"active\""));
         assert!(rendered.contains("PORT=29100"));
-        assert!(rendered.contains("BINDPORT_TARGET_URL=http://127.0.0.1:29100"));
-        assert!(rendered.contains("BINDPORT_HOSTNAME=feature.demo.localhost"));
-        assert!(rendered.contains("BINDPORT_ROUTE_URL=http://feature.demo.localhost"));
+        assert!(rendered.contains("BINDPORT_TARGET_URL=\"http://127.0.0.1:29100\""));
+        assert!(rendered.contains("BINDPORT_HOSTNAME=\"feature.demo.localhost\""));
+        assert!(rendered.contains("BINDPORT_ROUTE_URL=\"http://feature.demo.localhost\""));
+    }
+
+    #[test]
+    fn built_in_env_local_template_escapes_newlines() {
+        let template = TemplateResolver::new(None, None)
+            .resolve("bindport-env-local", None)
+            .expect("built-in template");
+        let rendered = render_template(
+            &template.contents,
+            minijinja::context! {
+                route => minijinja::context! {
+                    project => "demo\nNODE_OPTIONS=--require ./evil.js",
+                    service => "web",
+                    state => "active",
+                    port => 29100,
+                    host => "127.0.0.1",
+                    url => "http://127.0.0.1:29100",
+                    target_url => "http://127.0.0.1:29100",
+                    hostname => "feature.demo.localhost",
+                    route_url => "http://feature.demo.localhost",
+                },
+            },
+        )
+        .expect("built-in template renders");
+
+        assert!(rendered.contains("BINDPORT_PROJECT=\"demo\\nNODE_OPTIONS=--require ./evil.js\""));
+        assert!(!rendered.contains("\nNODE_OPTIONS=--require ./evil.js\n"));
     }
 
     #[test]
@@ -1505,6 +1621,37 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "multiple routes render to target `debug/web.txt`: route-1, route-2"
+        );
+    }
+
+    #[test]
+    fn render_output_routes_rejects_hostname_backticks() {
+        let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+            name: String::from("debug"),
+            template: String::from("debug-template"),
+            root: None,
+            target: String::from("debug/{{ route.service }}.txt"),
+            target_host: String::from("127.0.0.1"),
+            target_scheme: String::from("http"),
+            auto_render: true,
+            delete_on: vec![OutputDeleteState::Removed],
+            on_failure: OutputFailurePolicy::Warn,
+            debounce_ms: 250,
+            vars: BTreeMap::new(),
+        });
+        let route = test_route("route-1", "active", Some("x`) || PathPrefix(`/admin"));
+
+        let error = render_output_routes(&output, "ok", &[route]).expect_err("unsafe hostname");
+
+        assert!(matches!(
+            error,
+            RenderError::UnsafeHostname { ref route_key, ref hostname }
+                if route_key == "route-1" && hostname.contains("PathPrefix")
+        ));
+        assert!(std::error::Error::source(&error).is_none());
+        assert_eq!(
+            error.to_string(),
+            "route `route-1` has unsafe hostname `x`) || PathPrefix(`/admin`"
         );
     }
 
@@ -1748,6 +1895,31 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn render_plan_paths_rejects_absolute_root_outside_base() {
+        let root = temp_test_dir("plan-path-absolute-root");
+        let mut plan = test_render_plan("routes/demo.yml", "body");
+        plan.output.root = Some(String::from("/tmp/bindport-outside-root"));
+
+        let error = render_plan_paths(&plan, &root).expect_err("absolute root outside base");
+
+        assert!(matches!(
+            error,
+            OutputFileError::UnsafeRoot { ref root } if root == "/tmp/bindport-outside-root"
+        ));
+    }
+
+    #[test]
+    fn render_plan_paths_rejects_absolute_root_inside_base() {
+        let root = temp_test_dir("plan-path-absolute-root-inside");
+        let mut plan = test_render_plan("routes/demo.yml", "body");
+        plan.output.root = Some(root.join(".bindport/out").display().to_string());
+
+        let error = render_plan_paths(&plan, &root).expect_err("absolute root inside base");
+
+        assert!(matches!(error, OutputFileError::UnsafeRoot { .. }));
+    }
+
     #[cfg(unix)]
     #[test]
     fn render_plan_paths_rejects_directory_root_as_target() {
@@ -1759,7 +1931,20 @@ mod tests {
 
         assert!(matches!(
             error,
-            OutputFileError::UnsafeTarget { ref target } if target.is_empty()
+            OutputFileError::UnsafeRoot { ref root } if root == "/"
+        ));
+    }
+
+    #[test]
+    fn content_hash_uses_sha256_and_accepts_legacy_hashes() {
+        let contents = "rendered output";
+        let hash = content_hash(contents);
+
+        assert_eq!(hash.len(), 64);
+        assert!(content_hash_matches(contents, &hash));
+        assert!(content_hash_matches(
+            contents,
+            &legacy_content_hash(contents)
         ));
     }
 
@@ -1851,7 +2036,7 @@ mod tests {
         )
         .expect_err("directory target");
 
-        assert!(matches!(error, OutputFileError::UnsafeTarget { .. }));
+        assert!(matches!(error, OutputFileError::UnsafeRoot { .. }));
     }
 
     #[test]
@@ -1922,6 +2107,24 @@ mod tests {
         let error = write_render_plan(&plan, &root, &[]).expect_err("unsafe target");
 
         assert!(matches!(error, OutputFileError::UnsafeTarget { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_render_plan_creates_output_files_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_test_dir("write-plan-private-mode");
+        let plan = test_render_plan("routes/private.env", "secret=true\n");
+
+        let written = write_render_plan(&plan, &root, &[]).expect("write plan");
+
+        let mode = fs::metadata(&written[0].path)
+            .expect("output metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

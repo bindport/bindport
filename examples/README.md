@@ -24,12 +24,12 @@ means a branch such as `feature/tree` in project `example-app` becomes
 the project name or service hostname accordingly, for example:
 
 ```toml
-project = "orderful-website"
+project = "example-web"
 
 [[services]]
 name = "web"
 path = "."
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 ```
 
 For a monorepo, keep one config at the repo root and scope services by relative
@@ -40,7 +40,7 @@ root package as the inferred project and the nearest package as the inferred
 service when explicit config does not provide them.
 
 ```toml
-project = "orderful"
+project = "example"
 
 [[services]]
 name = "web"

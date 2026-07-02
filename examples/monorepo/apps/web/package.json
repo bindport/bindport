@@ -1,5 +1,5 @@
 {
-  "name": "@orderful/web",
+  "name": "@example/web",
   "private": true,
   "scripts": {
     "dev": "bindport -- next dev"

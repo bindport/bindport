@@ -34,6 +34,9 @@ bindport.local.yml
 If no project config exists, BindPort falls back to the optional user config at
 `$XDG_CONFIG_HOME/bindport/config.toml`, or `~/.config/bindport/config.toml`
 when `XDG_CONFIG_HOME` is unset. `bindport init` creates that fallback config.
+YAML config is supported for simple documents only: anchors and aliases are
+rejected, and YAML config files have a 256 KiB size limit. TOML remains the
+reference format.
 
 Runtime identity precedence is:
 
@@ -51,7 +54,7 @@ resolved project/service identity for the current directory.
 Current top-level fields:
 
 ```toml
-project = "orderful"
+project = "example"
 service = "web"
 default_range = "29000-29999"
 skip_ports = [29000, 29070]
@@ -65,13 +68,20 @@ name = "web"
 path = "apps/web"
 command = ["storybook", "dev"]
 args = ["--port", "{port}", "--host", "0.0.0.0"]
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 route_url = "http://{hostname}"
 health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
 ```
+
+Service `env` is for application-level values. Config cannot set
+execution-sensitive names that can change child process loading or tool config,
+including `PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `NODE_OPTIONS`,
+`BASH_ENV`, `ENV`, language package path variables, shell path variables, and
+`GIT_CONFIG_*`. Pass those explicitly with `bindport run --env NAME=value` when
+a one-off run really needs them.
 
 Dashboard settings:
 
@@ -109,6 +119,12 @@ entrypoints = ["web"]
 tls = false
 middlewares = []
 ```
+
+Output `root` values must be relative to the config file and must not contain
+`..`. That rule applies to committed config and machine-local overrides. Point
+Traefik or another consumer at the generated project-relative directory instead
+of making BindPort render to an arbitrary absolute path. Output targets are
+relative text file paths under the output root.
 
 Hook settings:
 
@@ -154,7 +170,8 @@ Unknown top-level keys are reported by `bindport doctor`. Service-level
 `health_url` is stored with each run. Active loopback `http://` health URLs are
 probed by `status`; non-loopback and unsupported destinations stay `unknown`.
 Literal loopback IPs, `localhost`, and `*.localhost` names are treated as local
-targets without DNS resolution.
+targets without DNS resolution. `hostname`, `route_url`, and `health_url`
+config values must not contain control characters.
 
 ## Template Placeholders
 
@@ -206,9 +223,11 @@ bindport doctor outputs
 ```
 
 `config validate` catches missing or duplicate service names, unsafe service
-paths, output configuration errors, and incomplete hook configuration. `doctor
-outputs` validates template lookup, render planning, safe output paths, output
-ownership checks, and hook trust status without writing files.
+paths, restricted service env names, control characters in route metadata, YAML
+anchors or aliases, output configuration errors, and incomplete hook
+configuration. `doctor outputs` validates template lookup, render planning,
+safe output paths, output ownership checks, and hook trust status without
+writing files.
 
 ## Examples
 

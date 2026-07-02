@@ -78,14 +78,21 @@ impl RunningChild {
     }
 
     pub fn wait(&mut self) -> Result<ExitStatus, RunnerError> {
-        let status = self.child.wait().map_err(|source| RunnerError::Wait {
-            command: self.program.clone(),
-            source,
-        });
+        let pre_reap = wait_until_child_exits_without_reaping(self.child.id());
         let signal_forwarding = self
             .signal_forwarding
             .deactivate()
             .map_err(|source| RunnerError::SignalForwarding { source });
+        let status = match pre_reap {
+            Ok(()) => self.child.wait().map_err(|source| RunnerError::Wait {
+                command: self.program.clone(),
+                source,
+            }),
+            Err(source) => Err(RunnerError::Wait {
+                command: self.program.clone(),
+                source,
+            }),
+        };
 
         match (status, signal_forwarding) {
             (Ok(status), Ok(())) => Ok(status),
@@ -94,9 +101,41 @@ impl RunningChild {
     }
 }
 
+#[cfg(unix)]
+fn wait_until_child_exits_without_reaping(pid: u32) -> io::Result<()> {
+    loop {
+        let mut siginfo = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                siginfo.as_mut_ptr(),
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            return Ok(());
+        }
+
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_until_child_exits_without_reaping(_pid: u32) -> io::Result<()> {
+    Ok(())
+}
+
 impl Drop for RunningChild {
     fn drop(&mut self) {
         let _ = self.signal_forwarding.deactivate();
+        if matches!(self.child.try_wait(), Ok(None)) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
@@ -481,6 +520,16 @@ extern "C" fn forward_signal_to_child(signal: libc::c_int) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::{
+        fs,
+        sync::{Mutex, MutexGuard},
+        thread,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    #[cfg(unix)]
+    static SIGNAL_FORWARDING_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn allocate_port_skips_reserved_ports() {
@@ -630,6 +679,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn signal_forwarding_rejects_concurrent_children_and_restores_handlers() {
+        let _lock = signal_forwarding_test_lock();
         let before_int = current_signal_action(libc::SIGINT);
         let before_term = current_signal_action(libc::SIGTERM);
         let before_mask = current_signal_mask();
@@ -661,6 +711,75 @@ mod tests {
         assert_signal_action_matches(libc::SIGTERM, &before_term);
         assert_signal_mask_matches(libc::SIGINT, &before_mask);
         assert_signal_mask_matches(libc::SIGTERM, &before_mask);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_running_child_kills_and_reaps_process() {
+        let _lock = signal_forwarding_test_lock();
+        let pid_path = temp_test_path("drop-child-pid");
+        let pid_path_arg = pid_path.display().to_string();
+        let command = vec![
+            String::from("sh"),
+            String::from("-c"),
+            String::from("printf '%s' \"$$\" > \"$1\"; while :; do sleep 1; done"),
+            String::from("bindport-drop-test"),
+            pid_path_arg,
+        ];
+
+        let child_pid;
+        {
+            let child = spawn_child_on_port(&command, 29_000, &[]).expect("spawn child");
+            assert!(child.pid() > 0);
+            child_pid = read_pid_file(&pid_path);
+        }
+
+        for _ in 0..100 {
+            if !test_process_is_running(child_pid) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("dropped child process {child_pid} is still running");
+    }
+
+    #[cfg(unix)]
+    fn read_pid_file(path: &std::path::Path) -> u32 {
+        for _ in 0..100 {
+            if let Ok(contents) = fs::read_to_string(path)
+                && let Ok(pid) = contents.trim().parse::<u32>()
+            {
+                return pid;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("pid file was not written: {}", path.display());
+    }
+
+    #[cfg(unix)]
+    fn test_process_is_running(pid: u32) -> bool {
+        let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        result == 0 || matches!(io::Error::last_os_error().raw_os_error(), Some(libc::EPERM))
+    }
+
+    #[cfg(unix)]
+    fn temp_test_path(name: &str) -> std::path::PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+
+        std::env::temp_dir().join(format!(
+            "bindport-runner-{name}-{}-{now}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(unix)]
+    fn signal_forwarding_test_lock() -> MutexGuard<'static, ()> {
+        SIGNAL_FORWARDING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[cfg(unix)]

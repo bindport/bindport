@@ -1,4 +1,4 @@
-project = "orderful"
+project = "example"
 default_range = "29000-29999"
 skip_ports = [29000, 29070, 29118, 29167, 29168, 29169, 29900, 29901, 29920, 29999]
 
@@ -24,7 +24,7 @@ debounce_ms = 250
 [[services]]
 name = "web"
 path = "apps/web"
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
@@ -32,7 +32,7 @@ env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
 [[services]]
 name = "api"
 path = "apps/api"
-hostname = "{branch}.orderful-api.localhost"
+hostname = "{branch}.example-api.localhost"
 env.PORT = "{port}"
 env.BINDPORT_ROUTE_URL = "{route_url}"
 
