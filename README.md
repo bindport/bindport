@@ -11,7 +11,7 @@ root-owned daemon.
 
 ## Current Status
 
-BindPort v0.5.0 is the current release candidate. Once published, it installs
+BindPort v0.5.1 is the current release candidate. Once published, it installs
 the same Rust CLI through Cargo or JavaScript package managers.
 
 Install globally with Cargo:
