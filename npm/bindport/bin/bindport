@@ -1,0 +1,92 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ -n "${BINDPORT_BINARY:-}" ]; then
+  exec "$BINDPORT_BINARY" "$@"
+fi
+
+os="$(uname -s 2>/dev/null || true)"
+arch="$(uname -m 2>/dev/null || true)"
+
+case "$os" in
+  Darwin)
+    platform_os="darwin"
+    ;;
+  Linux)
+    platform_os="linux"
+    ;;
+  *)
+    echo "BindPort does not provide an npm binary for $os-$arch." >&2
+    echo "Set BINDPORT_BINARY to a local bindport binary, or install with \`cargo install bindport\`." >&2
+    exit 1
+    ;;
+esac
+
+case "$arch" in
+  arm64 | aarch64)
+    platform_arch="arm64"
+    ;;
+  x86_64 | amd64)
+    platform_arch="x64"
+    ;;
+  *)
+    echo "BindPort does not provide an npm binary for $os-$arch." >&2
+    echo "Set BINDPORT_BINARY to a local bindport binary, or install with \`cargo install bindport\`." >&2
+    exit 1
+    ;;
+esac
+
+platform="$platform_os-$platform_arch"
+
+case "$platform" in
+  darwin-arm64 | darwin-x64 | linux-arm64 | linux-x64)
+    ;;
+  *)
+    echo "BindPort does not provide an npm binary for $platform." >&2
+    echo "Supported npm platforms: darwin-arm64, darwin-x64, linux-arm64, linux-x64." >&2
+    echo "Set BINDPORT_BINARY to a local bindport binary, or install with \`cargo install bindport\`." >&2
+    exit 1
+    ;;
+esac
+
+script_path="$0"
+while [ -L "$script_path" ]; do
+  script_link_dir="$(CDPATH='' cd "$(dirname "$script_path")" && pwd)"
+  script_link="$(readlink "$script_path" 2>/dev/null || true)"
+  [ -n "$script_link" ] || break
+  case "$script_link" in
+    /*)
+      script_path="$script_link"
+      ;;
+    *)
+      script_path="$script_link_dir/$script_link"
+      ;;
+  esac
+done
+script_dir="$(CDPATH='' cd "$(dirname "$script_path")" && pwd)"
+
+try_candidate() {
+  candidate="$1"
+  shift
+  if [ -x "$candidate" ]; then
+    exec "$candidate" "$@"
+  fi
+}
+
+try_candidate "$script_dir/../node_modules/@bindport/$platform/bin/bindport" "$@"
+try_candidate "$script_dir/../../@bindport/$platform/bin/bindport" "$@"
+try_candidate "$script_dir/../vendor/$platform/bindport" "$@"
+
+search_dir="$script_dir"
+while :; do
+  try_candidate "$search_dir/node_modules/@bindport/$platform/bin/bindport" "$@"
+  try_candidate "$search_dir/@bindport/$platform/bin/bindport" "$@"
+
+  parent_dir="$(dirname "$search_dir")"
+  [ "$parent_dir" != "$search_dir" ] || break
+  search_dir="$parent_dir"
+done
+
+echo "BindPort npm platform package is not installed for $platform." >&2
+echo "Set BINDPORT_BINARY to a local bindport binary, or install with \`cargo install bindport\`." >&2
+exit 1

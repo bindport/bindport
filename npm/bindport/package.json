@@ -13,15 +13,12 @@
     "directory": "npm/bindport"
   },
   "bin": {
-    "bindport": "bin/bindport.js"
+    "bindport": "bin/bindport"
   },
   "files": [
     "bin",
     "README.md"
   ],
-  "engines": {
-    "node": ">=18"
-  },
   "optionalDependencies": {
     "@bindport/darwin-arm64": "0.5.1",
     "@bindport/darwin-x64": "0.5.1",
