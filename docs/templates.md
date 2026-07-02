@@ -143,11 +143,11 @@ when files change.
 Example BindPort config for a project that wants branch-scoped local hostnames:
 
 ```toml
-project = "orderful-website"
+project = "example-web"
 
 [[services]]
 name = "web"
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
@@ -170,7 +170,7 @@ middlewares = []
 ```
 
 With that config, a branch named `feature/tree` for service `web` can render a
-host such as `feature-tree.orderful-website.localhost`, and Traefik receives an
+host such as `feature-tree.example-web.localhost`, and Traefik receives an
 upstream target like `http://127.0.0.1:29123`.
 
 If Traefik runs in a container and needs to reach the host machine instead of
@@ -191,9 +191,10 @@ providers:
     watch: true
 ```
 
-Use a project-relative `root` in committed config. Put machine-specific absolute
-paths, container mount paths, or Docker-specific target hosts in
-`.bindport.local.toml`, which should stay untracked.
+Keep `root` project-relative in both committed config and local overrides.
+Machine-specific values such as Docker target hosts belong in
+`.bindport.local.toml`, which should stay untracked. Configure the proxy or
+container mount to read the generated project-relative directory.
 
 ## Output Files
 
@@ -295,9 +296,9 @@ compatibility alias for recorded `traefik` output status.
 
 Relative `root` values are resolved beside the discovered project config. If no
 project config is discovered, they resolve from the current working directory.
-Relative targets must stay under the output root and may not traverse through
-symlinks. Absolute roots are accepted after path cleanup, but target paths are
-always relative text file paths.
+Roots must be relative and must not contain `..`. Targets must stay under the
+output root, must be relative text file paths, and may not traverse through
+symlinks.
 
 CLI and dashboard registry cleanup trigger output rendering so the default
 `delete_on = ["removed"]` behavior can remove DB-owned files for routes that
@@ -308,6 +309,10 @@ were just cleaned from the registry.
 BindPort uses MiniJinja with strict undefined placeholders and autoescaping
 disabled. That means missing values are errors, and templates must quote or
 escape their own target format correctly.
+
+Rendered output is limited to 1 MiB per file. Templates also run with a bounded
+MiniJinja fuel budget so accidental runaway templates fail instead of hanging a
+render.
 
 ## Custom Templates
 

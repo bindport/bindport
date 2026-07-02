@@ -28,7 +28,8 @@ use bindport_core::{
     DEFAULT_SKIP_PORTS, EffectiveOutputConfig, FALLBACK_CONFIG_FILE, HookCommandConfig, HookEvent,
     IdentitySources, LoadedConfig, OutputConfigError, OutputDeleteState, OutputFailurePolicy,
     PortRange, SERVICE_NAME, ServiceConfig, ServiceIdentity, default_fallback_config,
-    detect_git_identity, discover_config, normalize_branch_label, resolve_identity,
+    detect_git_identity, discover_config, is_restricted_service_env_name, normalize_branch_label,
+    resolve_identity,
 };
 use bindport_dashboard::{
     DashboardCleanCallback, DashboardOptions, DashboardServer, DashboardStatusCallback,
@@ -41,6 +42,7 @@ use bindport_registry::{
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
 };
+use sha2::{Digest, Sha256};
 
 const DOCTOR_PORT_DISPLAY_LIMIT: usize = 10;
 const DOCTOR_MAX_LISTENER_PROBES: u32 = 1024;
@@ -343,6 +345,23 @@ fn run_wrapped_command_result(
                     }
                     Some(started)
                 }
+                Err(
+                    error @ RegistryError::PortConflict {
+                        port: conflict_port,
+                    },
+                ) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    if retries < MAX_ALLOCATION_RETRIES {
+                        eprintln!(
+                            "bindport: warning: assigned port {conflict_port} was already recorded active; retrying with another port"
+                        );
+                        skip_ports.push(conflict_port);
+                        retries += 1;
+                        continue;
+                    }
+                    return Err(RenderCommandError::Registry(error).into());
+                }
                 Err(error) => {
                     print_registry_warning("failed to record run start", &error);
                     registry_disabled_warning();
@@ -589,10 +608,15 @@ fn resolve_run_templates(
     }
 
     if let Some(env) = service_config.and_then(|service| service.env.as_ref()) {
-        templates.env.extend(
-            env.iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
+        for (name, value) in env {
+            if is_restricted_service_env_name(name) {
+                eprintln!(
+                    "bindport: ignoring restricted service env `{name}` from config; pass it explicitly with --env if needed"
+                );
+                continue;
+            }
+            templates.env.push((name.clone(), value.clone()));
+        }
     }
 
     for (name, value) in &options.env {
@@ -2181,16 +2205,12 @@ fn path_clean_display_path(path: &Path) -> PathBuf {
 }
 
 fn stable_hex_hash(bytes: &[u8]) -> String {
-    format!("{:016x}", stable_hash(bytes))
-}
-
-fn stable_hash(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
     }
-    hash
+    output
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4541,14 +4561,7 @@ fn print_config_source_explanation(config: &ResolvedConfig) {
                 loaded.source.as_str(),
                 loaded.format.as_str()
             );
-            if let Some(local) = loaded.local_override.as_ref() {
-                println!(
-                    "config local override: {} ({} {})",
-                    local.path.display(),
-                    loaded.source.as_str(),
-                    local.format.as_str()
-                );
-            }
+            print_config_local_override(loaded);
         }
         None => match config.fallback_path.as_ref() {
             Some(path) => println!("config: none (optional fallback: {})", path.display()),
@@ -4564,6 +4577,24 @@ fn print_config_source_explanation(config: &ResolvedConfig) {
             loaded.unknown_keys.join(", ")
         );
         println!("config applied keys: {}", APPLIED_CONFIG_KEYS.join(", "));
+    }
+}
+
+fn print_config_local_override(loaded: &LoadedConfig) {
+    let Some(local) = loaded.local_override.as_ref() else {
+        return;
+    };
+
+    println!(
+        "config local override: {} ({} {})",
+        local.path.display(),
+        loaded.source.as_str(),
+        local.format.as_str()
+    );
+    if local.git_tracked {
+        println!(
+            "config warning: local override is tracked by git; keep `.bindport.local.*` and `bindport.local.*` untracked for machine-local values"
+        );
     }
 }
 
@@ -5043,14 +5074,7 @@ fn print_doctor_output_config(config: &ResolvedConfig) {
                 loaded.source.as_str(),
                 loaded.format.as_str()
             );
-            if let Some(local) = loaded.local_override.as_ref() {
-                println!(
-                    "config local override: {} ({} {})",
-                    local.path.display(),
-                    loaded.source.as_str(),
-                    local.format.as_str()
-                );
-            }
+            print_config_local_override(loaded);
         }
         None => match config.fallback_path.as_ref() {
             Some(path) => println!("config: none (optional fallback: {})", path.display()),
@@ -5172,14 +5196,7 @@ fn print_config_diagnostics(config: &ResolvedConfig) {
                 loaded.source.as_str(),
                 loaded.format.as_str()
             );
-            if let Some(local) = loaded.local_override.as_ref() {
-                println!(
-                    "config local override: {} ({} {})",
-                    local.path.display(),
-                    loaded.source.as_str(),
-                    local.format.as_str()
-                );
-            }
+            print_config_local_override(loaded);
         }
         None => match config.fallback_path.as_ref() {
             Some(path) => println!("config: none (optional fallback: {})", path.display()),
@@ -5928,7 +5945,7 @@ mod tests {
     #[test]
     fn run_metadata_expands_route_and_env_templates() {
         let identity = ServiceIdentity {
-            project: String::from("hoststamp"),
+            project: String::from("example-app"),
             service: String::from("web"),
             git: None,
             identity_key: String::from("v1:test"),
@@ -5953,26 +5970,26 @@ mod tests {
 
         assert_eq!(
             metadata.hostname.as_deref(),
-            Some("web.hoststamp.localhost")
+            Some("web.example-app.localhost")
         );
         assert_eq!(
             metadata.route_url.as_deref(),
-            Some("https://web.hoststamp.localhost")
+            Some("https://web.example-app.localhost")
         );
         assert_eq!(
             metadata.health_url.as_deref(),
-            Some("https://web.hoststamp.localhost/health")
+            Some("https://web.example-app.localhost/health")
         );
         assert_eq!(
             metadata.env,
             vec![
                 (
                     String::from("URL"),
-                    String::from("https://web.hoststamp.localhost")
+                    String::from("https://web.example-app.localhost")
                 ),
                 (
                     String::from("HEALTH"),
-                    String::from("https://web.hoststamp.localhost/health")
+                    String::from("https://web.example-app.localhost/health")
                 ),
                 (String::from("JSON"), String::from(r#"{"port":29100}"#)),
             ]
@@ -6501,6 +6518,7 @@ mod tests {
         let local_override = bindport_core::LoadedLocalConfig {
             path: PathBuf::from("/workspace/demo/.bindport.local.toml"),
             format: bindport_core::ConfigFormat::Toml,
+            git_tracked: false,
             config: BindPortConfig {
                 project: Some(String::from("local-demo")),
                 service: Some(String::from("web")),
@@ -6875,6 +6893,7 @@ mod tests {
             bindport_core::LoadedLocalConfig {
                 path: PathBuf::from("/workspace/demo/.bindport.local.toml"),
                 format: bindport_core::ConfigFormat::Toml,
+                git_tracked: false,
                 config: local_config,
                 unknown_keys: Vec::new(),
             }

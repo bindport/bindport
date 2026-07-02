@@ -18,5 +18,6 @@ bindport-registry.workspace = true
 bindport-runner.workspace = true
 libc.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]

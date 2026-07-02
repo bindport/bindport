@@ -6,26 +6,26 @@
 http:
   routers:
     {{ route.slug }}:
-      rule: "Host(`{{ route.hostname }}`)"
+      rule: {{ ("Host(`" ~ route.hostname ~ "`)") | tojson }}
       entryPoints:
 {% for entrypoint in entrypoints %}
-        - "{{ entrypoint }}"
+        - {{ entrypoint | tojson }}
 {% endfor %}
-      service: "{{ route.slug }}"
+      service: {{ route.slug | tojson }}
 {% if tls %}
       tls: {}
 {% endif %}
 {% if middlewares %}
       middlewares:
 {% for middleware in middlewares %}
-        - "{{ middleware }}"
+        - {{ middleware | tojson }}
 {% endfor %}
 {% endif %}
   services:
     {{ route.slug }}:
       loadBalancer:
         servers:
-          - url: "{{ route.target_url }}"
+          - url: {{ route.target_url | tojson }}
 {% elif route.state == "active" %}
 # BindPort route {{ route.key }} is active but has no hostname, so no router was rendered.
 {% else %}

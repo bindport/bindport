@@ -7,13 +7,13 @@ scope each service with a relative `path`.
 ## Root Config
 
 ```toml
-project = "orderful"
+project = "example"
 
 [[services]]
 name = "web"
 path = "apps/web"
 command = ["next", "dev"]
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
@@ -23,7 +23,7 @@ env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
 name = "api"
 path = "apps/api"
 command = ["cargo", "run"]
-hostname = "{branch}.orderful-api.localhost"
+hostname = "{branch}.example-api.localhost"
 health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.BINDPORT_ROUTE_URL = "{route_url}"
@@ -80,11 +80,11 @@ different worktree paths. Branch labels are also available to hostname templates
 [[services]]
 name = "web"
 path = "apps/web"
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 ```
 
 In a worktree on branch `feature/tree`, that renders a route hostname such as
-`feature-tree.orderful-website.localhost`. If two worktrees use the same branch
+`feature-tree.example-web.localhost`. If two worktrees use the same branch
 name, BindPort still keeps their registry identity separate through the
 worktree hash, but hostname templates should include enough information to stay
 unique for your local proxy setup.
@@ -93,6 +93,9 @@ unique for your local proxy setup.
 
 Machine-specific values belong in `.bindport.local.toml` or
 `bindport.local.toml` beside the root config. Keep those files untracked.
+Output roots still need to be project-relative; configure external tools to
+watch or mount that generated directory instead of rendering to an absolute
+path.
 
 ```toml
 [output_defaults]
@@ -138,9 +141,10 @@ The Traefik output is safe to auto-render because file-provider watchers reload
 after route state changes. `.env.local` is also an output, but many frameworks
 read it only during startup. Use configured service `command`, `args`, `env`, or
 `bindport run --env` for values that must exist before the process starts; use
-the env-file output for manual refreshes or tools that reread dotenv files. When shared
-`output_defaults.root` points at a generated config directory, set `root = "."`
-on env-file outputs that intentionally write back into package directories.
+the env-file output for manual refreshes or tools that reread dotenv files.
+When shared `output_defaults.root` points at a generated config directory, set
+`root = "."` on env-file outputs that intentionally write back into package
+directories.
 
 ## Checks
 

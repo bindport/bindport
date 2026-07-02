@@ -8,8 +8,11 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use bindport_core::{SERVICE_NAME, ServiceIdentity};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
 
 pub const DEFAULT_REGISTRY_FILE: &str = "registry.sqlite";
@@ -17,6 +20,7 @@ pub const REGISTRY_PATH_ENV: &str = "BINDPORT_REGISTRY_PATH";
 pub const STATUS_SCHEMA_VERSION: &str = "0.4";
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_millis(300);
 const HEALTH_PENDING_GRACE_MS: i64 = 2_000;
+const REGISTRY_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn default_registry_directory_name() -> &'static str {
     SERVICE_NAME
@@ -57,6 +61,13 @@ pub enum RegistryError {
         path: PathBuf,
         source: io::Error,
     },
+    UnsafePath {
+        path: PathBuf,
+        message: &'static str,
+    },
+    PortConflict {
+        port: u16,
+    },
     Open {
         path: PathBuf,
         source: rusqlite::Error,
@@ -80,6 +91,12 @@ impl fmt::Display for RegistryError {
                     path.display()
                 )
             }
+            Self::UnsafePath { path, message } => {
+                write!(f, "unsafe registry path `{}`: {message}", path.display())
+            }
+            Self::PortConflict { port } => {
+                write!(f, "port {port} is already active in the registry")
+            }
             Self::Open { path, source } => {
                 write!(f, "failed to open registry `{}`: {source}", path.display())
             }
@@ -93,7 +110,9 @@ impl std::error::Error for RegistryError {
         match self {
             Self::CreateDirectory { source, .. } => Some(source),
             Self::Open { source, .. } | Self::Sqlite(source) => Some(source),
-            Self::MissingStateDirectory => None,
+            Self::MissingStateDirectory | Self::UnsafePath { .. } | Self::PortConflict { .. } => {
+                None
+            }
         }
     }
 }
@@ -102,6 +121,36 @@ impl From<rusqlite::Error> for RegistryError {
     fn from(source: rusqlite::Error) -> Self {
         Self::Sqlite(source)
     }
+}
+
+fn reject_registry_symlink(path: &Path) -> Result<(), RegistryError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(RegistryError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "registry database must not be a symlink",
+        }),
+        Ok(_) | Err(_) => Ok(()),
+    }
+}
+
+#[cfg(unix)]
+fn harden_registry_directory(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn harden_registry_directory(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn harden_registry_file(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn harden_registry_file(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 pub struct Registry {
@@ -295,13 +344,33 @@ impl Registry {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
+            let should_harden_parent = !parent.exists()
+                || parent
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == default_registry_directory_name());
             fs::create_dir_all(parent).map_err(|source| RegistryError::CreateDirectory {
                 path: parent.to_path_buf(),
                 source,
             })?;
+            if should_harden_parent {
+                harden_registry_directory(parent).map_err(|source| {
+                    RegistryError::CreateDirectory {
+                        path: parent.to_path_buf(),
+                        source,
+                    }
+                })?;
+            }
         }
 
+        reject_registry_symlink(&path)?;
         let connection = Connection::open(&path).map_err(|source| RegistryError::Open {
+            path: path.clone(),
+            source,
+        })?;
+        connection.busy_timeout(REGISTRY_BUSY_TIMEOUT)?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        harden_registry_file(&path).map_err(|source| RegistryError::CreateDirectory {
             path: path.clone(),
             source,
         })?;
@@ -356,7 +425,7 @@ impl Registry {
         let active_runs = self.active_runs()?;
         let stale_runs = active_runs
             .into_iter()
-            .filter(|run| !process_is_running(run.pid))
+            .filter(|run| !active_run_process_matches(run))
             .collect::<Vec<_>>();
 
         if stale_runs.is_empty() {
@@ -364,7 +433,9 @@ impl Registry {
         }
 
         let now = utc_now(&self.connection)?;
-        let transaction = self.connection.transaction()?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         for stale_run in &stale_runs {
             transaction.execute(
@@ -398,7 +469,25 @@ impl Registry {
         let branch_label = git.map(|git| git.branch_label.as_str());
         let git_commit = git.map(|git| git.commit.as_str());
         let identity_key = identity.map(|identity| identity.identity_key.as_str());
-        let transaction = self.connection.transaction()?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let port_in_use = transaction
+            .query_row(
+                "SELECT 1
+                 FROM leases
+                 WHERE port = ?1
+                 AND state IN ('active', 'reserved')
+                 LIMIT 1",
+                params![run.port],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if port_in_use {
+            return Err(RegistryError::PortConflict { port: run.port });
+        }
+        let process_start_time = process_start_time(run.pid);
 
         transaction.execute(
             "INSERT INTO leases (
@@ -432,9 +521,9 @@ impl Registry {
 
         transaction.execute(
             "INSERT INTO runs (
-                lease_id, pid, command, cwd, started_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![lease_id, run.pid, run.command, cwd, now],
+                lease_id, pid, process_start_time, command, cwd, started_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![lease_id, run.pid, process_start_time, run.command, cwd, now],
         )?;
         let run_id = transaction.last_insert_rowid();
 
@@ -792,6 +881,7 @@ impl Registry {
                 id INTEGER PRIMARY KEY,
                 lease_id INTEGER NOT NULL REFERENCES leases(id),
                 pid INTEGER NOT NULL,
+                process_start_time INTEGER,
                 command TEXT NOT NULL,
                 cwd TEXT NOT NULL,
                 started_at TEXT NOT NULL,
@@ -805,6 +895,7 @@ impl Registry {
             ",
         )?;
         self.ensure_lease_identity_columns()?;
+        self.ensure_run_process_columns()?;
         self.connection.execute_batch(
             "
             CREATE INDEX IF NOT EXISTS leases_identity_key_idx
@@ -837,7 +928,7 @@ impl Registry {
                 last_render_at_ms INTEGER NOT NULL
             );
 
-            PRAGMA user_version = 7;
+            PRAGMA user_version = 8;
             ",
         )?;
 
@@ -877,9 +968,30 @@ impl Registry {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    fn ensure_run_process_columns(&self) -> Result<(), RegistryError> {
+        let existing = self.run_columns()?;
+
+        if !existing
+            .iter()
+            .any(|existing| existing == "process_start_time")
+        {
+            self.connection
+                .execute("ALTER TABLE runs ADD COLUMN process_start_time INTEGER", [])?;
+        }
+
+        Ok(())
+    }
+
+    fn run_columns(&self) -> Result<Vec<String>, RegistryError> {
+        let mut statement = self.connection.prepare("PRAGMA table_info(runs)")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     fn active_runs(&self) -> Result<Vec<ActiveRun>, RegistryError> {
         let mut statement = self.connection.prepare(
-            "SELECT leases.id, runs.id, runs.pid
+            "SELECT leases.id, runs.id, runs.pid, runs.process_start_time
              FROM leases
              JOIN runs ON runs.lease_id = leases.id
              WHERE leases.state = 'active'
@@ -890,6 +1002,7 @@ impl Registry {
                 lease_id: row.get(0)?,
                 run_id: row.get(1)?,
                 pid: row.get(2)?,
+                process_start_time: row.get(3)?,
             })
         })?;
 
@@ -1079,6 +1192,7 @@ struct ActiveRun {
     lease_id: i64,
     run_id: i64,
     pid: u32,
+    process_start_time: Option<i64>,
 }
 
 pub fn status_service_route_key(service: &StatusService) -> String {
@@ -1149,6 +1263,9 @@ struct HttpHealthTarget {
 }
 
 fn http_health_target(url: &str) -> Result<Option<HttpHealthTarget>, ()> {
+    if url.bytes().any(is_http_request_unsafe_byte) {
+        return Err(());
+    }
     let url = url.trim();
     let Some(rest) = url.strip_prefix("http://") else {
         return if url.starts_with("https://") {
@@ -1161,6 +1278,11 @@ fn http_health_target(url: &str) -> Result<Option<HttpHealthTarget>, ()> {
         .split_once('/')
         .map(|(authority, path)| (authority, format!("/{path}")))
         .unwrap_or((rest, String::from("/")));
+    if authority.bytes().any(is_http_request_unsafe_byte)
+        || path.bytes().any(is_http_request_unsafe_byte)
+    {
+        return Err(());
+    }
     let (host, port) = parse_http_authority(authority).ok_or(())?;
     let Some(address) = loopback_socket_addr(&host, port) else {
         return Ok(None);
@@ -1171,6 +1293,10 @@ fn http_health_target(url: &str) -> Result<Option<HttpHealthTarget>, ()> {
         path,
         authority: authority.to_string(),
     }))
+}
+
+fn is_http_request_unsafe_byte(byte: u8) -> bool {
+    byte <= 0x20 || byte == 0x7f
 }
 
 fn parse_http_authority(authority: &str) -> Option<(String, u16)> {
@@ -1288,6 +1414,25 @@ fn utc_now(connection: &Connection) -> Result<String, RegistryError> {
         .map_err(Into::into)
 }
 
+fn active_run_process_matches(run: &ActiveRun) -> bool {
+    match run.process_start_time {
+        Some(expected) => process_start_time(run.pid) == Some(expected),
+        None => process_is_running(run.pid),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_start_time(pid: u32) -> Option<i64> {
+    let stat = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
+    let (_, fields) = stat.rsplit_once(") ")?;
+    fields.split_whitespace().nth(19)?.parse::<i64>().ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_start_time(_pid: u32) -> Option<i64> {
+    None
+}
+
 #[cfg(unix)]
 fn process_is_running(pid: u32) -> bool {
     let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
@@ -1393,6 +1538,31 @@ mod tests {
         assert_eq!(DEFAULT_REGISTRY_FILE, "registry.sqlite");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn registry_creates_private_state_dir_and_database() {
+        let path = env::temp_dir()
+            .join(format!("bindport-private-registry-{}", std::process::id()))
+            .join(DEFAULT_REGISTRY_FILE);
+        let parent = path.parent().expect("registry parent");
+        let _ = fs::remove_dir_all(parent);
+
+        let _registry = Registry::open(&path).expect("registry");
+
+        let dir_mode = fs::metadata(parent)
+            .expect("parent metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = fs::metadata(&path)
+            .expect("registry metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
+    }
+
     #[test]
     fn registry_records_finished_runs_for_status() {
         let mut registry = Registry::open(temp_registry_path("finished")).expect("registry");
@@ -1455,6 +1625,17 @@ mod tests {
                 .expect("https URL parses as unsupported")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn health_targets_reject_request_line_injection_bytes() {
+        for url in [
+            "http://127.0.0.1:6379/\r\nFLUSHALL\r\n",
+            "http://127.0.0.1:6379/path with-space",
+            "http://local\nhost:6379/health",
+        ] {
+            assert!(http_health_target(url).is_err(), "{url:?}");
+        }
     }
 
     #[test]
@@ -2043,6 +2224,63 @@ mod tests {
             .expect("record start");
 
         assert_eq!(registry.active_ports().expect("ports"), vec![29_500]);
+    }
+
+    #[test]
+    fn record_run_started_rejects_duplicate_active_port() {
+        let mut registry =
+            Registry::open(temp_registry_path("duplicate-active-port")).expect("registry");
+        registry
+            .record_run_started(&test_run_start(
+                "bindport",
+                "web",
+                29_500,
+                std::process::id(),
+            ))
+            .expect("record first start");
+
+        let error = registry
+            .record_run_started(&test_run_start(
+                "bindport",
+                "api",
+                29_500,
+                std::process::id(),
+            ))
+            .expect_err("duplicate active port");
+
+        assert!(matches!(
+            error,
+            RegistryError::PortConflict { port: 29_500 }
+        ));
+        assert_eq!(registry.active_ports().expect("ports"), vec![29_500]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn active_ports_marks_reused_pid_stale_when_start_time_changes() {
+        let mut registry =
+            Registry::open(temp_registry_path("stale-reused-pid")).expect("registry");
+        let started = registry
+            .record_run_started(&test_run_start(
+                "bindport",
+                "web",
+                29_500,
+                std::process::id(),
+            ))
+            .expect("record start");
+        registry
+            .connection
+            .execute(
+                "UPDATE runs SET process_start_time = 0 WHERE id = ?1",
+                params![started.run_id],
+            )
+            .expect("force stale start time");
+
+        assert!(registry.active_ports().expect("ports").is_empty());
+
+        let snapshot = registry.status_snapshot().expect("snapshot");
+        assert_eq!(snapshot.services[0].state, "stale");
+        assert!(snapshot.services[0].exited_at.is_some());
     }
 
     #[cfg(unix)]

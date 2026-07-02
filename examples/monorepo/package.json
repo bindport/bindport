@@ -1,5 +1,5 @@
 {
-  "name": "orderful",
+  "name": "example",
   "private": true,
   "workspaces": [
     "apps/*"

@@ -48,6 +48,7 @@ jobs:
           set -euo pipefail
           version="${RELEASE_VERSION#v}"
           gh release download "v$version" --pattern "*.tgz" --dir dist/npm
+          gh release download "v$version" --pattern "*.tgz.sha256" --dir dist/npm
 
       - name: Dry-run npm publish
         env:
@@ -60,6 +61,9 @@ jobs:
     needs: dry-run
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -84,6 +88,7 @@ jobs:
           set -euo pipefail
           version="${RELEASE_VERSION#v}"
           gh release download "v$version" --pattern "*.tgz" --dir dist/npm
+          gh release download "v$version" --pattern "*.tgz.sha256" --dir dist/npm
 
       - name: Configure npm auth
         env:
@@ -102,4 +107,5 @@ jobs:
       - name: Publish npm packages
         env:
           RELEASE_VERSION: ${{ inputs.version }}
+          NPM_CONFIG_PROVENANCE: "true"
         run: scripts/npm-publish.sh --version "$RELEASE_VERSION" --dist dist/npm --execute --yes

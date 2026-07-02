@@ -72,6 +72,20 @@ for command in npm node; do
 done
 export npm_config_cache="${npm_config_cache:-${TMPDIR:-/tmp}/bindport-npm-cache}"
 
+verify_checksum() {
+  local checksum_file="$1"
+  local checksum_name
+  checksum_name="$(basename "$checksum_file")"
+  (
+    cd "$(dirname "$checksum_file")"
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum -c "$checksum_name"
+    else
+      shasum -a 256 -c "$checksum_name"
+    fi
+  )
+}
+
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
@@ -89,6 +103,9 @@ packages=(
 
 for package in "${packages[@]}"; do
   [[ -f "$dist_dir/$package" ]] || die "missing npm tarball: $dist_dir/$package"
+  [[ -f "$dist_dir/$package.sha256" ]] ||
+    die "missing npm tarball checksum: $dist_dir/$package.sha256"
+  verify_checksum "$dist_dir/$package.sha256"
 done
 
 mode="dry-run"
@@ -96,6 +113,9 @@ publish_args=(publish --access public --dry-run)
 if [[ "$execute" == "true" ]]; then
   mode="publish"
   publish_args=(publish --access public)
+  if [[ "${NPM_CONFIG_PROVENANCE:-${npm_config_provenance:-false}}" == "true" ]]; then
+    publish_args+=(--provenance)
+  fi
 fi
 
 if [[ "$yes" == "false" ]]; then

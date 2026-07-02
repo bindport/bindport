@@ -34,6 +34,6 @@ Examples:
 ```sh
 bindport status --json
 bindport open web
-bindport open web --project orderful
+bindport open web --project example
 bindport open web --browser
 ```

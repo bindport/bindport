@@ -187,7 +187,11 @@ binds require auth and a token. Set `dashboard.register_service = true` or pass
 appear in `bindport status`. Service entries currently apply `name`, `path`,
 `command`, `args`, `env`, `hostname`, `route_url`, and `health_url`. Active
 services with a loopback `http://` health URL report `pending`, `healthy`, or
-`failing`; non-loopback and unsupported destinations remain `unknown`.
+`failing`; non-loopback and unsupported destinations remain `unknown`. Config
+`env` entries are meant for application values; execution-sensitive names such
+as `PATH`, `LD_PRELOAD`, `DYLD_*`, `NODE_OPTIONS`, and `GIT_CONFIG_*` are
+ignored from config and should be passed explicitly with `--env` for one-off
+runs.
 
 Identity precedence is intentionally narrow during bootstrap: the optional
 service argument in `bindport run <service> -- ...` wins, then
@@ -200,17 +204,17 @@ When no CLI or environment service override is provided, BindPort selects the
 deepest `[[services]].path` that contains the current working directory:
 
 ```toml
-project = "orderful"
+project = "example"
 
 [[services]]
 name = "web"
 path = "apps/web"
-hostname = "{branch}.orderful-website.localhost"
+hostname = "{branch}.example-web.localhost"
 
 [[services]]
 name = "api"
 path = "apps/api"
-hostname = "{branch}.orderful-api.localhost"
+hostname = "{branch}.example-api.localhost"
 ```
 
 Wrapped commands always receive `PORT=<assigned>`. Service command, argument,

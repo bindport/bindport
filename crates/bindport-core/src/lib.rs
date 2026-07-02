@@ -24,6 +24,7 @@ pub const DEFAULT_OUTPUT_TARGET_SCHEME: &str = "http";
 pub const DEFAULT_OUTPUT_AUTO_RENDER: bool = true;
 pub const DEFAULT_OUTPUT_DEBOUNCE_MS: u64 = 250;
 pub const DEFAULT_HOOK_TIMEOUT_MS: u64 = 5_000;
+const MAX_YAML_CONFIG_BYTES: usize = 256 * 1024;
 pub const CONFIG_FILENAMES: &[&str] = &[".bindport.toml", ".bindport.json", ".bindport.yaml"];
 pub const LOCAL_CONFIG_FILENAMES: &[&str] = &[
     ".bindport.local.toml",
@@ -276,6 +277,7 @@ impl BindPortConfig {
     pub fn validate(&self) -> Vec<ConfigValidationIssue> {
         let mut issues = Vec::new();
 
+        validate_output_defaults(self.output_defaults.as_ref(), &mut issues);
         validate_services(self.services.as_deref(), &mut issues);
         validate_outputs(self.outputs.as_deref(), &mut issues);
         validate_hooks(self.hooks.as_ref(), &mut issues);
@@ -348,17 +350,132 @@ fn validate_services(services: Option<&[ServiceConfig]>, issues: &mut Vec<Config
             validate_service_path(index, path, issues);
         }
         validate_service_command(index, service, issues);
-        if service
-            .health_url
-            .as_deref()
-            .is_some_and(|url| url.trim().is_empty())
-        {
+        validate_service_env(index, service.env.as_ref(), issues);
+        if let Some(hostname) = service.hostname.as_deref() {
+            validate_no_control_chars(
+                &format!("services[{index}].hostname"),
+                hostname,
+                "service hostname must not contain control characters",
+                issues,
+            );
+            validate_no_backticks(
+                &format!("services[{index}].hostname"),
+                hostname,
+                "service hostname must not contain backticks",
+                issues,
+            );
+        }
+        if let Some(route_url) = service.route_url.as_deref() {
+            validate_no_control_chars(
+                &format!("services[{index}].route_url"),
+                route_url,
+                "service route URL must not contain control characters",
+                issues,
+            );
+        }
+        if let Some(health_url) = service.health_url.as_deref() {
+            if health_url.trim().is_empty() {
+                issues.push(ConfigValidationIssue::new(
+                    format!("services[{index}].health_url"),
+                    "service health URL must not be empty",
+                ));
+            } else {
+                validate_no_control_chars(
+                    &format!("services[{index}].health_url"),
+                    health_url,
+                    "service health URL must not contain control characters",
+                    issues,
+                );
+            }
+        }
+    }
+}
+
+fn validate_service_env(
+    index: usize,
+    env: Option<&BTreeMap<String, String>>,
+    issues: &mut Vec<ConfigValidationIssue>,
+) {
+    let Some(env) = env else {
+        return;
+    };
+
+    for name in env.keys() {
+        let field = format!("services[{index}].env.{name}");
+        if !is_valid_env_name(name) {
             issues.push(ConfigValidationIssue::new(
-                format!("services[{index}].health_url"),
-                "service health URL must not be empty",
+                field,
+                "service env name must contain only ASCII letters, digits, or `_`, and must not start with a digit",
+            ));
+        } else if is_restricted_service_env_name(name) {
+            issues.push(ConfigValidationIssue::new(
+                field,
+                "service env name can affect child process execution and must be passed explicitly on the CLI",
             ));
         }
     }
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first == '_' || first.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+
+    chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+pub fn is_restricted_service_env_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+
+    upper == "PATH"
+        || upper.starts_with("LD_")
+        || upper.starts_with("DYLD_")
+        || upper.starts_with("MALLOC_")
+        || upper == "NODE_OPTIONS"
+        || upper == "BASH_ENV"
+        || upper == "ENV"
+        || upper == "GCONV_PATH"
+        || upper == "LOCPATH"
+        || upper == "NLSPATH"
+        || upper == "PYTHONPATH"
+        || upper == "PYTHONHOME"
+        || upper == "PERL5OPT"
+        || upper == "PERL5LIB"
+        || upper == "RUBYOPT"
+        || upper == "GEM_HOME"
+        || upper == "GEM_PATH"
+        || upper == "IFS"
+        || upper == "SHELLOPTS"
+        || upper == "CDPATH"
+        || upper.starts_with("GIT_CONFIG_")
+}
+
+fn validate_no_control_chars(
+    field: &str,
+    value: &str,
+    message: &str,
+    issues: &mut Vec<ConfigValidationIssue>,
+) {
+    if value.bytes().any(is_control_byte) {
+        issues.push(ConfigValidationIssue::new(field, message));
+    }
+}
+
+fn validate_no_backticks(
+    field: &str,
+    value: &str,
+    message: &str,
+    issues: &mut Vec<ConfigValidationIssue>,
+) {
+    if value.contains('`') {
+        issues.push(ConfigValidationIssue::new(field, message));
+    }
+}
+
+fn is_control_byte(byte: u8) -> bool {
+    byte < 0x20 || byte == 0x7f
 }
 
 fn validate_service_path(index: usize, path: &str, issues: &mut Vec<ConfigValidationIssue>) {
@@ -410,6 +527,19 @@ fn validate_service_command(
     }
 }
 
+fn validate_output_defaults(
+    defaults: Option<&OutputDefaultsConfig>,
+    issues: &mut Vec<ConfigValidationIssue>,
+) {
+    let Some(defaults) = defaults else {
+        return;
+    };
+
+    if let Some(root) = defaults.root.as_deref() {
+        validate_output_root("output_defaults.root", root, issues);
+    }
+}
+
 fn validate_outputs(outputs: Option<&[OutputConfig]>, issues: &mut Vec<ConfigValidationIssue>) {
     let Some(outputs) = outputs else {
         return;
@@ -442,6 +572,10 @@ fn validate_outputs(outputs: Option<&[OutputConfig]>, issues: &mut Vec<ConfigVal
             continue;
         }
 
+        if let Some(root) = output.root.as_deref() {
+            validate_output_root(&format!("outputs[{index}].root"), root, issues);
+        }
+
         if output
             .template
             .as_deref()
@@ -467,6 +601,29 @@ fn validate_outputs(outputs: Option<&[OutputConfig]>, issues: &mut Vec<ConfigVal
                 format!("output `{name}` is missing required `target`"),
             ));
         }
+    }
+}
+
+fn validate_output_root(field: &str, root: &str, issues: &mut Vec<ConfigValidationIssue>) {
+    let trimmed = root.trim();
+    if trimmed.is_empty() {
+        issues.push(ConfigValidationIssue::new(
+            field,
+            "output root must not be empty",
+        ));
+        return;
+    }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        issues.push(ConfigValidationIssue::new(
+            field,
+            "output root must be relative to the config file and must not contain `..`",
+        ));
     }
 }
 
@@ -944,6 +1101,7 @@ pub struct LoadedConfig {
 pub struct LoadedLocalConfig {
     pub path: PathBuf,
     pub format: ConfigFormat,
+    pub git_tracked: bool,
     pub config: BindPortConfig,
     pub unknown_keys: Vec<String>,
 }
@@ -1112,6 +1270,7 @@ fn load_project_local_override(mut loaded: LoadedConfig) -> Result<LoadedConfig,
                 unknown_keys,
                 ..
             } = local;
+            let git_tracked = git_tracks_path(directory, &path);
             loaded.config.merge_local_override(config.clone());
             loaded.unknown_keys.extend(unknown_keys.clone());
             loaded.unknown_keys.sort();
@@ -1119,6 +1278,7 @@ fn load_project_local_override(mut loaded: LoadedConfig) -> Result<LoadedConfig,
             loaded.local_override = Some(LoadedLocalConfig {
                 path,
                 format,
+                git_tracked,
                 config,
                 unknown_keys,
             });
@@ -1127,6 +1287,24 @@ fn load_project_local_override(mut loaded: LoadedConfig) -> Result<LoadedConfig,
     }
 
     Ok(loaded)
+}
+
+fn git_tracks_path(config_dir: &Path, path: &Path) -> bool {
+    let tracked_path = path.strip_prefix(config_dir).unwrap_or(path);
+    Command::new("git")
+        .arg("-c")
+        .arg("core.fsmonitor=")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .arg("-C")
+        .arg(config_dir)
+        .arg("ls-files")
+        .arg("--error-unmatch")
+        .arg("--")
+        .arg(tracked_path)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 pub fn load_config(
@@ -1166,7 +1344,10 @@ pub fn parse_config(format: ConfigFormat, contents: &str) -> Result<BindPortConf
     match format {
         ConfigFormat::Toml => toml::from_str(contents).map_err(|error| error.to_string()),
         ConfigFormat::Json => serde_json::from_str(contents).map_err(|error| error.to_string()),
-        ConfigFormat::Yaml => serde_yaml_ng::from_str(contents).map_err(|error| error.to_string()),
+        ConfigFormat::Yaml => {
+            validate_yaml_config_source(contents)?;
+            serde_yaml_ng::from_str(contents).map_err(|error| error.to_string())
+        }
     }
 }
 
@@ -1568,6 +1749,7 @@ fn unknown_top_level_config_keys(
             Ok(unknown_config_keys(object.keys().map(String::as_str)))
         }
         ConfigFormat::Yaml => {
+            validate_yaml_config_source(contents)?;
             let value = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(contents)
                 .map_err(|error| error.to_string())?;
             let Some(mapping) = value.as_mapping() else {
@@ -1578,6 +1760,86 @@ fn unknown_top_level_config_keys(
             ))
         }
     }
+}
+
+fn validate_yaml_config_source(contents: &str) -> Result<(), String> {
+    if contents.len() > MAX_YAML_CONFIG_BYTES {
+        return Err(format!(
+            "YAML config exceeds {} byte limit",
+            MAX_YAML_CONFIG_BYTES
+        ));
+    }
+    if yaml_contains_anchor_or_alias(contents) {
+        return Err(String::from(
+            "YAML anchors and aliases are not supported in BindPort config",
+        ));
+    }
+
+    Ok(())
+}
+
+fn yaml_contains_anchor_or_alias(contents: &str) -> bool {
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+    let mut previous = '\n';
+    let mut chars = contents.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if in_double_quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_double_quote = false;
+            }
+            previous = character;
+            continue;
+        }
+        if in_single_quote {
+            if character == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    chars.next();
+                    previous = '\'';
+                    continue;
+                }
+                in_single_quote = false;
+            }
+            previous = character;
+            continue;
+        }
+
+        match character {
+            '#' => {
+                for next in chars.by_ref() {
+                    previous = next;
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            '"' => in_double_quote = true,
+            '\'' => in_single_quote = true,
+            '&' | '*'
+                if yaml_token_boundary(previous)
+                    && chars.peek().is_some_and(|next| {
+                        next.is_ascii_alphanumeric() || matches!(next, '_' | '-')
+                    }) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        previous = character;
+    }
+
+    false
+}
+
+fn yaml_token_boundary(character: char) -> bool {
+    character.is_whitespace() || matches!(character, ':' | '-' | ',' | '[' | '{')
 }
 
 fn unknown_config_keys<'a>(keys: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -1942,7 +2204,7 @@ mod tests {
         .expect("write base config");
         fs::write(
             root.join(".bindport.local.toml"),
-            "project = \"local-project\"\n[output_defaults]\nroot = \"/tmp/bindport-traefik\"\n[[outputs]]\nname = \"traefik\"\ntarget = \"{{ route.slug }}.yml\"\n[outputs.vars]\nentrypoints = [\"websecure\"]\n[[outputs]]\nname = \"extra\"\ntemplate = \"extra-template\"\ntarget = \"extra/{{ route.slug }}.txt\"\n",
+            "project = \"local-project\"\n[output_defaults]\nroot = \".bindport/local-traefik\"\n[[outputs]]\nname = \"traefik\"\ntarget = \"{{ route.slug }}.yml\"\n[outputs.vars]\nentrypoints = [\"websecure\"]\n[[outputs]]\nname = \"extra\"\ntemplate = \"extra-template\"\ntarget = \"extra/{{ route.slug }}.txt\"\n",
         )
         .expect("write local override");
 
@@ -1963,7 +2225,7 @@ mod tests {
             .output_defaults
             .as_ref()
             .expect("output defaults");
-        assert_eq!(defaults.root.as_deref(), Some("/tmp/bindport-traefik"));
+        assert_eq!(defaults.root.as_deref(), Some(".bindport/local-traefik"));
         assert_eq!(defaults.debounce_ms, Some(250));
 
         let traefik = loaded
@@ -1985,6 +2247,28 @@ mod tests {
         );
         assert!(loaded.config.output_config("debug").is_some());
         assert!(loaded.config.output_config("extra").is_some());
+    }
+
+    #[test]
+    fn local_override_reports_git_tracked_state() {
+        let root = temp_test_dir("local-override-tracked");
+        git(&root, ["init"]);
+        fs::write(root.join(".bindport.toml"), "project = \"base\"\n").expect("write base config");
+        fs::write(root.join(".bindport.local.toml"), "project = \"local\"\n")
+            .expect("write local config");
+        git(&root, ["add", "-f", ".bindport.local.toml"]);
+
+        let loaded = discover_config(&root, None)
+            .expect("discover config")
+            .expect("loaded config");
+
+        assert_eq!(loaded.config.project.as_deref(), Some("local"));
+        assert!(
+            loaded
+                .local_override
+                .as_ref()
+                .is_some_and(|local| local.git_tracked)
+        );
     }
 
     #[test]
@@ -2372,6 +2656,120 @@ mod tests {
     }
 
     #[test]
+    fn validate_reports_security_sensitive_values() {
+        let config = BindPortConfig {
+            output_defaults: Some(OutputDefaultsConfig {
+                root: Some(String::from("/tmp/bindport-out")),
+                ..OutputDefaultsConfig::default()
+            }),
+            services: Some(vec![
+                ServiceConfig {
+                    name: Some(String::from("web")),
+                    hostname: Some(String::from("web\nlocalhost")),
+                    route_url: Some(String::from("http://web.localhost\r\nX-Test: 1")),
+                    health_url: Some(String::from("http://127.0.0.1:6379/\r\nPING")),
+                    env: Some(BTreeMap::from([
+                        (
+                            String::from("NODE_OPTIONS"),
+                            String::from("--require ./x.js"),
+                        ),
+                        (String::from("LD_AUDIT"), String::from("./audit.so")),
+                        (String::from("GCONV_PATH"), String::from("./gconv")),
+                        (String::from("1INVALID"), String::from("value")),
+                        (String::from("SAFE_VALUE"), String::from("ok")),
+                    ])),
+                    ..ServiceConfig::default()
+                },
+                ServiceConfig {
+                    name: Some(String::from("api")),
+                    hostname: Some(String::from("api`localhost")),
+                    ..ServiceConfig::default()
+                },
+            ]),
+            outputs: Some(vec![OutputConfig {
+                name: Some(String::from("debug")),
+                template: Some(String::from("debug-route")),
+                root: Some(String::from("../outside")),
+                target: Some(String::from("debug/{{ route.slug }}.txt")),
+                ..OutputConfig::default()
+            }]),
+            ..BindPortConfig::default()
+        };
+
+        let issues = config.validate();
+
+        assert!(issues.iter().any(|issue| {
+            issue.field == "output_defaults.root"
+                && issue
+                    .message
+                    .contains("must be relative to the config file")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].hostname"
+                && issue
+                    .message
+                    .contains("must not contain control characters")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].route_url"
+                && issue
+                    .message
+                    .contains("must not contain control characters")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].health_url"
+                && issue
+                    .message
+                    .contains("must not contain control characters")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].env.NODE_OPTIONS"
+                && issue.message.contains("can affect child process execution")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].env.LD_AUDIT"
+                && issue.message.contains("can affect child process execution")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].env.GCONV_PATH"
+                && issue.message.contains("can affect child process execution")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[0].env.1INVALID"
+                && issue.message.contains("must contain only ASCII")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "services[1].hostname"
+                && issue.message.contains("must not contain backticks")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field == "outputs[0].root"
+                && issue
+                    .message
+                    .contains("must be relative to the config file")
+        }));
+    }
+
+    #[test]
+    fn yaml_config_rejects_anchors_aliases_and_oversized_documents() {
+        let alias_error = parse_config(
+            ConfigFormat::Yaml,
+            "project: &project demo\nservice: *project\n",
+        )
+        .expect_err("yaml aliases are rejected");
+        assert!(alias_error.contains("anchors and aliases"));
+
+        let quoted_star = parse_config(ConfigFormat::Yaml, "project: \"demo*\"\n")
+            .expect("quoted star is not an alias");
+        assert_eq!(quoted_star.project.as_deref(), Some("demo*"));
+
+        let oversized = format!("project: demo\n#{}\n", "x".repeat(MAX_YAML_CONFIG_BYTES));
+        let size_error =
+            parse_config(ConfigFormat::Yaml, &oversized).expect_err("oversized yaml rejected");
+        assert!(size_error.contains("byte limit"));
+    }
+
+    #[test]
     fn local_override_filenames_preserve_format_precedence() {
         assert_eq!(
             LOCAL_CONFIG_FILENAMES,
@@ -2460,7 +2858,7 @@ mod tests {
     #[test]
     fn package_metadata_infers_standalone_identity() {
         let root = temp_test_dir("package-standalone");
-        fs::write(root.join("package.json"), r#"{"name":"@stutz/hoststamp"}"#)
+        fs::write(root.join("package.json"), r#"{"name":"@example/portal"}"#)
             .expect("write package json");
         let command = [String::from("next")];
 
@@ -2475,8 +2873,8 @@ mod tests {
             config_service: None,
         });
 
-        assert_eq!(identity.project, "hoststamp");
-        assert_eq!(identity.service, "hoststamp");
+        assert_eq!(identity.project, "portal");
+        assert_eq!(identity.service, "portal");
     }
 
     #[test]
@@ -2484,13 +2882,13 @@ mod tests {
         let root = temp_test_dir("package-workspaces-root");
         fs::write(
             root.join("package.json"),
-            r#"{"name":"orderful","workspaces":["apps/*"]}"#,
+            r#"{"name":"example","workspaces":["apps/*"]}"#,
         )
         .expect("write root package json");
         let api = root.join("apps").join("api");
         let api_src = api.join("src");
         fs::create_dir_all(&api_src).expect("api src");
-        fs::write(api.join("package.json"), r#"{"name":"@orderful/api"}"#)
+        fs::write(api.join("package.json"), r#"{"name":"@example/api"}"#)
             .expect("write api package json");
         let command = [String::from("next")];
 
@@ -2505,7 +2903,7 @@ mod tests {
             config_service: None,
         });
 
-        assert_eq!(identity.project, "orderful");
+        assert_eq!(identity.project, "example");
         assert_eq!(identity.service, "api");
     }
 
@@ -2514,12 +2912,12 @@ mod tests {
         let root = temp_test_dir("package-workspace-object");
         fs::write(
             root.join("package.json"),
-            r#"{"name":"hoststamp","workspaces":{"packages":["packages/*"]}}"#,
+            r#"{"name":"example-suite","workspaces":{"packages":["packages/*"]}}"#,
         )
         .expect("write root package json");
         let web = root.join("packages").join("web");
         fs::create_dir_all(&web).expect("web dir");
-        fs::write(web.join("package.json"), r#"{"name":"@hoststamp/web"}"#)
+        fs::write(web.join("package.json"), r#"{"name":"@example/web"}"#)
             .expect("write web package json");
         let command = [String::from("next")];
 
@@ -2534,20 +2932,20 @@ mod tests {
             config_service: None,
         });
 
-        assert_eq!(identity.project, "hoststamp");
+        assert_eq!(identity.project, "example-suite");
         assert_eq!(identity.service, "web");
     }
 
     #[test]
     fn pnpm_workspace_yaml_infers_root_project_without_git() {
         let root = temp_test_dir("pnpm-workspace-root");
-        fs::write(root.join("package.json"), r#"{"name":"orderful"}"#)
+        fs::write(root.join("package.json"), r#"{"name":"example"}"#)
             .expect("write root package json");
         fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - apps/*\n")
             .expect("write pnpm workspace");
         let web = root.join("apps").join("web");
         fs::create_dir_all(&web).expect("web dir");
-        fs::write(web.join("package.json"), r#"{"name":"@orderful/web"}"#)
+        fs::write(web.join("package.json"), r#"{"name":"@example/web"}"#)
             .expect("write web package json");
         let command = [String::from("next")];
 
@@ -2562,7 +2960,7 @@ mod tests {
             config_service: None,
         });
 
-        assert_eq!(identity.project, "orderful");
+        assert_eq!(identity.project, "example");
         assert_eq!(identity.service, "web");
     }
 
@@ -2579,12 +2977,12 @@ mod tests {
         fs::create_dir_all(&workspace).expect("workspace dir");
         fs::write(
             workspace.join("package.json"),
-            r#"{"name":"orderful","workspaces":["apps/*"]}"#,
+            r#"{"name":"example","workspaces":["apps/*"]}"#,
         )
         .expect("write workspace package json");
         let web = workspace.join("apps").join("web");
         fs::create_dir_all(&web).expect("web dir");
-        fs::write(web.join("package.json"), r#"{"name":"@orderful/web"}"#)
+        fs::write(web.join("package.json"), r#"{"name":"@example/web"}"#)
             .expect("write web package json");
         fs::write(root.join("README.md"), "test\n").expect("write fixture");
         git(
@@ -2611,7 +3009,7 @@ mod tests {
             config_service: None,
         });
 
-        assert_eq!(identity.project, "orderful");
+        assert_eq!(identity.project, "example");
         assert_eq!(identity.service, "web");
         assert!(identity.git.is_some());
     }
@@ -2623,11 +3021,11 @@ mod tests {
         git(&root, ["config", "user.email", "bindport@example.invalid"]);
         git(&root, ["config", "user.name", "BindPort Test"]);
         git(&root, ["config", "commit.gpgsign", "false"]);
-        fs::write(root.join("package.json"), r#"{"name":"hoststamp"}"#)
+        fs::write(root.join("package.json"), r#"{"name":"example"}"#)
             .expect("write root package json");
         let service = root.join("apps").join("web");
         fs::create_dir_all(&service).expect("service dir");
-        fs::write(service.join("package.json"), r#"{"name":"@hoststamp/web"}"#)
+        fs::write(service.join("package.json"), r#"{"name":"@example/web"}"#)
             .expect("write service package json");
         fs::write(root.join("README.md"), "test\n").expect("write fixture");
         git(
@@ -2648,7 +3046,7 @@ mod tests {
             config_service: None,
         });
 
-        assert_eq!(identity.project, "hoststamp");
+        assert_eq!(identity.project, "example");
         assert_eq!(identity.service, "web");
         assert!(identity.git.is_some());
     }

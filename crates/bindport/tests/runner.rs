@@ -1128,7 +1128,7 @@ fn service_config_injects_env_templates_and_route_metadata() {
     fs::write(
         root.join(".bindport.toml"),
         format!(
-            "project = \"hoststamp\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"{{branch}}.{{project}}.localhost\"\nhealth_url = \"{{route_url}}/health\"\nenv.BINDPORT_ASSIGNED_PORT = \"{{port}}\"\nenv.BINDPORT_ROUTE = \"{{route_url}}\"\nenv.BINDPORT_HEALTH = \"{{health_url}}\"\nenv.BINDPORT_DIRECT_URL = \"{{url}}\"\nenv.HOSTNAME = \"0.0.0.0\"\n"
+            "project = \"example-app\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"{{branch}}.{{project}}.localhost\"\nhealth_url = \"{{route_url}}/health\"\nenv.BINDPORT_ASSIGNED_PORT = \"{{port}}\"\nenv.BINDPORT_ROUTE = \"{{route_url}}\"\nenv.BINDPORT_HEALTH = \"{{health_url}}\"\nenv.BINDPORT_DIRECT_URL = \"{{url}}\"\nenv.HOSTNAME = \"0.0.0.0\"\n"
         ),
     )
     .expect("write service config");
@@ -1152,7 +1152,7 @@ fn service_config_injects_env_templates_and_route_metadata() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout"),
         format!(
-            "{port}|http://feature-tree.hoststamp.localhost|http://feature-tree.hoststamp.localhost/health|http://127.0.0.1:{port}|0.0.0.0"
+            "{port}|http://feature-tree.example-app.localhost|http://feature-tree.example-app.localhost/health|http://127.0.0.1:{port}|0.0.0.0"
         )
     );
 
@@ -1163,18 +1163,68 @@ fn service_config_injects_env_templates_and_route_metadata() {
     let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
     let service = &status["services"][0];
 
-    assert_eq!(service["project"], "hoststamp");
+    assert_eq!(service["project"], "example-app");
     assert_eq!(service["service"], "web");
-    assert_eq!(service["hostname"], "feature-tree.hoststamp.localhost");
+    assert_eq!(service["hostname"], "feature-tree.example-app.localhost");
     assert_eq!(
         service["route_url"],
-        "http://feature-tree.hoststamp.localhost"
+        "http://feature-tree.example-app.localhost"
     );
     assert_eq!(
         service["health_url"],
-        "http://feature-tree.hoststamp.localhost/health"
+        "http://feature-tree.example-app.localhost/health"
     );
     assert_eq!(service["port"], port);
+}
+
+#[test]
+fn service_config_rejects_execution_sensitive_env_names() {
+    let registry_path = temp_registry_path("service-env-deny-registry");
+    let root = temp_test_dir("service-env-deny-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"env-deny\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nenv.NODE_OPTIONS = \"--require ./evil.js\"\nenv.LD_AUDIT = \"./audit.so\"\nenv.GCONV_PATH = \"./gconv\"\nenv.SAFE_VALUE = \"allowed\"\n"
+        ),
+    )
+    .expect("write service config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args([
+            "--",
+            "sh",
+            "-c",
+            "printf '%s|%s|%s|%s' \"${NODE_OPTIONS-unset}\" \"${LD_AUDIT-unset}\" \"${GCONV_PATH-unset}\" \"$SAFE_VALUE\"",
+        ])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"unset|unset|unset|allowed");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("ignoring restricted service env `NODE_OPTIONS`"),
+        "stderr did not warn about restricted env: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("ignoring restricted service env `LD_AUDIT`"),
+        "stderr did not warn about restricted env: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("ignoring restricted service env `GCONV_PATH`"),
+        "stderr did not warn about restricted env: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -2046,7 +2096,7 @@ fn checked_in_monorepo_example_resolves_services() {
             String::from_utf8_lossy(&explain.stderr)
         );
         let stdout = String::from_utf8(explain.stdout).expect("explain stdout");
-        assert!(stdout.contains("project: orderful (project config `project`)"));
+        assert!(stdout.contains("project: example (project config `project`)"));
         assert!(stdout.contains(&format!(
             "service: {service} (project config `[[services]].path`)"
         )));
@@ -2225,7 +2275,7 @@ fn same_service_in_distinct_worktrees_keeps_distinct_identities() {
 fn status_json_reports_package_metadata_identity() {
     let registry_path = temp_registry_path("package-identity-registry");
     let root = temp_test_dir("package-identity-root");
-    fs::write(root.join("package.json"), r#"{"name":"@stutz/hoststamp"}"#)
+    fs::write(root.join("package.json"), r#"{"name":"@example/portal"}"#)
         .expect("write package json");
 
     let output = bindport_with_registry(&registry_path)
@@ -2243,8 +2293,8 @@ fn status_json_reports_package_metadata_identity() {
     let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
     let service = &status["services"][0];
 
-    assert_eq!(service["project"], "hoststamp");
-    assert_eq!(service["service"], "hoststamp");
+    assert_eq!(service["project"], "portal");
+    assert_eq!(service["service"], "portal");
 }
 
 #[test]
@@ -2305,7 +2355,7 @@ fn templates_export_builtin_traefik_template() {
     let stdout = String::from_utf8(output.stdout).expect("stdout");
 
     assert!(stdout.contains("Generated by BindPort"));
-    assert!(stdout.contains("Host(`{{ route.hostname }}`)"));
+    assert!(stdout.contains(r#"("Host(`" ~ route.hostname ~ "`)") | tojson"#));
 }
 
 #[test]
@@ -2583,14 +2633,14 @@ fn render_env_local_output_writes_opt_in_dotenv_file() {
         .parse::<u16>()
         .expect("rendered port is numeric");
     assert!((29430..=29439).contains(&rendered_port));
-    assert!(contents.contains("BINDPORT_PROJECT=env-local-project"));
-    assert!(contents.contains("BINDPORT_SERVICE=web"));
-    assert!(contents.contains("BINDPORT_STATE=stopped"));
+    assert!(contents.contains(r#"BINDPORT_PROJECT="env-local-project""#));
+    assert!(contents.contains(r#"BINDPORT_SERVICE="web""#));
+    assert!(contents.contains(r#"BINDPORT_STATE="stopped""#));
     assert!(contents.contains(&format!(
-        "BINDPORT_TARGET_URL=http://127.0.0.1:{rendered_port}"
+        r#"BINDPORT_TARGET_URL="http://127.0.0.1:{rendered_port}""#
     )));
-    assert!(contents.contains("BINDPORT_HOSTNAME=env-local.localhost"));
-    assert!(contents.contains("BINDPORT_ROUTE_URL=http://env-local.localhost"));
+    assert!(contents.contains(r#"BINDPORT_HOSTNAME="env-local.localhost""#));
+    assert!(contents.contains(r#"BINDPORT_ROUTE_URL="http://env-local.localhost""#));
 }
 
 #[test]
