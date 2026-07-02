@@ -10,7 +10,7 @@ reviewed artifacts to crates.io and npm.
 
 ## Current Status
 
-BindPort v0.5.0 is the release described by this document. Cargo and npm are
+BindPort v0.5.1 is the release described by this document. Cargo and npm are
 alternate supported install paths after the release workflow and manual publish
 steps complete.
 
@@ -115,8 +115,8 @@ mise run release-prep
 mise run release-prep patch
 mise run release-prep minor
 mise run release-prep major
-mise run release-prep v0.5.0
-mise run release-prep 0.5.0
+mise run release-prep v0.5.1
+mise run release-prep 0.5.1
 ```
 
 When no argument is provided, `release-prep` defaults to `patch`.
@@ -162,13 +162,13 @@ Run it locally after a release-prep branch updates versions and package
 artifacts:
 
 ```sh
-mise run release-check 0.5.0
+mise run release-check 0.5.1
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/release-check.sh --version 0.5.0
+scripts/release-check.sh --version 0.5.1
 ```
 
 The same validation gate is available as the manual `Release Check` GitHub
@@ -186,7 +186,7 @@ After the release prep PR is merged, finish the release from clean, synced
 `main` with:
 
 ```sh
-mise run release-finish v0.5.0
+mise run release-finish v0.5.1
 ```
 
 `release-finish` is the normal post-merge path. It verifies the checkout, asks
@@ -200,9 +200,9 @@ skipped and the remaining crates continue in order.
 Use these options for recovery or non-interactive runs:
 
 ```sh
-mise run release-finish --yes v0.5.0
-mise run release-finish --skip-github-release v0.5.0
-mise run release-finish --skip-cargo-publish v0.5.0
+mise run release-finish --yes v0.5.1
+mise run release-finish --skip-github-release v0.5.1
+mise run release-finish --skip-cargo-publish v0.5.1
 ```
 
 `release-finish` waits for the manual `Release` workflow. If the
@@ -212,8 +212,8 @@ the local command continues polling until the workflow completes or times out.
 The lower-level release dispatch command remains available:
 
 ```sh
-mise run release-publish --dry-run v0.5.0
-mise run release-publish v0.5.0
+mise run release-publish --dry-run v0.5.1
+mise run release-publish v0.5.1
 ```
 
 When no version is provided, `release-publish` and `release-finish` use the
@@ -281,13 +281,13 @@ publishes or dry-runs those crates in dependency order:
 exists. To exercise the Cargo publish helper directly, run the local dry-run:
 
 ```sh
-mise run cargo-publish 0.5.0
+mise run cargo-publish 0.5.1
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/cargo-publish.sh --version 0.5.0 --dry-run
+scripts/cargo-publish.sh --version 0.5.1 --dry-run
 ```
 
 The dry-run requires the Cargo workspace version and `npm/bindport/package.json`
@@ -302,7 +302,7 @@ After the GitHub Release has been created from `main`, publish to crates.io
 directly with:
 
 ```sh
-mise run cargo-publish --execute 0.5.0
+mise run cargo-publish --execute 0.5.1
 ```
 
 Real publishing additionally requires:
@@ -413,9 +413,9 @@ from a fresh checkout or clean worktree:
     worktrees, and confirm `bindport status --json` reports distinct identities
     without port collisions.
 
-## v0.5.0 Manual Acceptance
+## v0.5.1 Manual Acceptance
 
-Before merging the v0.5.0 release prep PR, smoke test service commands, hooks,
+Before merging the v0.5.1 release prep PR, smoke test service commands, hooks,
 health, cleanup, and agent-facing status/open behavior from a fresh checkout or
 clean worktree:
 
@@ -466,6 +466,8 @@ clean worktree:
 - `0.4.0`: monorepo config depth, validation, local overrides, and env outputs.
 - `0.5.0`: service command config, hooks, health checks, cleanup hardening, and
   agent-facing status/open workflows.
+- `0.5.1`: clone-and-run trust-boundary hardening, release artifact checksum
+  verification, and generic public examples.
 - Pre-1.0 minor releases may contain breaking changes.
 - A stable release prep commit should update all package versions together.
 
@@ -524,15 +526,15 @@ Before a real npm publish:
 Local npm publish dry-run from downloaded release tarballs:
 
 ```sh
-gh release download v0.5.0 --pattern "*.tgz" --dir dist/npm
-gh release download v0.5.0 --pattern "*.tgz.sha256" --dir dist/npm
-mise run npm-publish v0.5.0 --dist dist/npm
+gh release download v0.5.1 --pattern "*.tgz" --dir dist/npm
+gh release download v0.5.1 --pattern "*.tgz.sha256" --dir dist/npm
+mise run npm-publish v0.5.1 --dist dist/npm
 ```
 
 Real local npm publish, when intentionally bypassing the workflow:
 
 ```sh
-mise run npm-publish v0.5.0 --dist dist/npm --execute
+mise run npm-publish v0.5.1 --dist dist/npm --execute
 ```
 
 Publish order matters: native platform packages are published first, then the
@@ -583,7 +585,7 @@ run:
     "dev": "bindport -- next dev"
   },
   "devDependencies": {
-    "bindport": "^0.5.0"
+    "bindport": "^0.5.1"
   }
 }
 ```

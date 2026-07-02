@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "bindport"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bindport-adapters",
  "bindport-core",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-adapters"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bindport-core",
  "minijinja",
@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-dashboard"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bindport-core",
  "bindport-registry",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-registry"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bindport-core",
  "libc",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "bindport-runner"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "bindport-core",
  "libc",
