@@ -135,12 +135,13 @@ fn run_subcommand_accepts_dash_dash_separator() {
 fn configured_service_command_expands_port_arguments() {
     let registry_path = temp_registry_path("configured-command-registry");
     let root = temp_test_dir("configured-command-root");
-    let port = free_loopback_port();
+    let range_start = free_loopback_port();
+    let range_end = range_start.saturating_add(10);
     fs::write(
         root.join(".bindport.toml"),
         format!(
             r#"project = "storybook-project"
-default_range = "{port}-{port}"
+default_range = "{range_start}-{range_end}"
 skip_ports = []
 
 [[services]]
@@ -163,9 +164,15 @@ args = ["--port", "{{port}}"]
         "bindport failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("stdout"),
-        format!("{port}|--port|{port}")
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let parts = stdout.split('|').collect::<Vec<_>>();
+    assert_eq!(parts.len(), 3);
+    assert_eq!(parts[1], "--port");
+    assert_eq!(parts[0], parts[2]);
+    let assigned_port = parts[0].parse::<u16>().expect("assigned port");
+    assert!(
+        (range_start..=range_end).contains(&assigned_port),
+        "assigned port {assigned_port} outside configured range {range_start}-{range_end}"
     );
 
     let status_output = bindport_with_registry(&registry_path)
@@ -179,7 +186,7 @@ args = ["--port", "{{port}}"]
         status["services"][0]["command"]
             .as_str()
             .expect("command")
-            .ends_with(&format!("--port {port}"))
+            .ends_with(&format!("--port {assigned_port}"))
     );
 }
 #[test]
