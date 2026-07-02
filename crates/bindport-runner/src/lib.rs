@@ -583,7 +583,7 @@ mod tests {
                 range,
                 &[29_002, 29_003, 29_000],
                 hints,
-                |_| true
+                |_| { true }
             )
             .expect("port"),
             29_001
