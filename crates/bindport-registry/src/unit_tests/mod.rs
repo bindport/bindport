@@ -3,6 +3,7 @@
 use super::*;
 use std::{
     net::{Shutdown, TcpListener},
+    sync::Mutex,
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -13,6 +14,41 @@ mod leases;
 mod outputs;
 mod registry;
 mod status;
+
+static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn with_env_overrides<T>(updates: &[(&str, Option<&Path>)], callback: impl FnOnce() -> T) -> T {
+    let _guard = TEST_ENV_LOCK.lock().expect("test env lock");
+    let previous = updates
+        .iter()
+        .map(|(name, _)| (*name, env::var_os(name)))
+        .collect::<Vec<_>>();
+
+    // SAFETY: these unit tests serialize process environment mutation with
+    // TEST_ENV_LOCK and restore previous values before returning.
+    unsafe {
+        for (name, value) in updates {
+            match value {
+                Some(value) => env::set_var(*name, *value),
+                None => env::remove_var(*name),
+            }
+        }
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
+    unsafe {
+        for (name, value) in previous {
+            match value {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
+    }
+
+    match result {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
 
 fn test_run_start(project: &str, service: &str, port: u16, pid: u32) -> RunStart {
     RunStart {
@@ -81,6 +117,43 @@ fn start_health_server(status: &'static str) -> u16 {
             &mut stream,
             "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         );
+        let _ = stream.flush();
+        let _ = stream.shutdown(Shutdown::Write);
+    });
+
+    port
+}
+
+fn start_raw_health_server(response: Vec<u8>) -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind raw health server");
+    let port = listener
+        .local_addr()
+        .expect("raw health server addr")
+        .port();
+
+    thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        let mut buffer = [0_u8; 128];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(_) if buffer.windows(4).any(|window| window == b"\r\n\r\n") => break,
+                Ok(_) => continue,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break;
+                }
+                Err(_) => return,
+            }
+        }
+        let _ = stream.write_all(&response);
         let _ = stream.flush();
         let _ = stream.shutdown(Shutdown::Write);
     });

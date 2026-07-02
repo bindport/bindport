@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use std::io::{Cursor, Read};
+use std::{
+    io::{Cursor, Read},
+    sync::Mutex,
+};
 
 mod assets;
 mod auth;
@@ -10,6 +13,8 @@ mod request;
 mod response;
 mod routing;
 mod server;
+
+static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn dashboard_round_trip(raw_request: &[u8], options: DashboardOptions) -> String {
     let listener =
@@ -58,6 +63,35 @@ fn temp_test_dir(name: &str) -> PathBuf {
     ));
     fs::create_dir_all(&path).expect("temp test dir");
     path
+}
+
+fn temp_registry_path(name: &str) -> PathBuf {
+    temp_test_dir(name).join("registry.sqlite")
+}
+
+fn with_default_registry_path<T>(path: &Path, callback: impl FnOnce() -> T) -> T {
+    let _guard = TEST_ENV_LOCK.lock().expect("test env lock");
+    let previous = std::env::var_os(bindport_registry::REGISTRY_PATH_ENV);
+
+    // SAFETY: these unit tests serialize process environment mutation with
+    // TEST_ENV_LOCK and restore the previous value before returning.
+    unsafe {
+        std::env::set_var(bindport_registry::REGISTRY_PATH_ENV, path);
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
+    match previous {
+        Some(previous) => unsafe {
+            std::env::set_var(bindport_registry::REGISTRY_PATH_ENV, previous);
+        },
+        None => unsafe {
+            std::env::remove_var(bindport_registry::REGISTRY_PATH_ENV);
+        },
+    }
+
+    match result {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
 }
 
 fn test_request(path: &str) -> HttpRequest {

@@ -185,6 +185,59 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn run_child_executes_command_with_allocated_port() {
+        let _lock = signal_forwarding_test_lock();
+        let range = test_port_range_around(free_test_port());
+        let command = vec![
+            String::from("sh"),
+            String::from("-c"),
+            String::from("test \"$PORT\" -ge \"$1\" && test \"$PORT\" -le \"$2\""),
+            String::from("bindport-runner-env-test"),
+            range.start.to_string(),
+            range.end.to_string(),
+        ];
+
+        let status = run_child(&command, range, &[]).expect("run child");
+
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_child_with_hints_uses_preferred_port_and_reports_spawn_errors() {
+        let _lock = signal_forwarding_test_lock();
+        let preferred_port = free_test_port();
+        let range = test_port_range_around(preferred_port);
+        let command = vec![
+            String::from("sh"),
+            String::from("-c"),
+            String::from("exit 0"),
+        ];
+        let hints = AllocationHints {
+            preferred_port: Some(preferred_port),
+            scan_start: None,
+        };
+        let mut child =
+            spawn_child_with_hints(&command, range, &[], hints).expect("spawn hinted child");
+
+        assert!((range.start..=range.end).contains(&child.port()));
+        assert!(child.wait().expect("wait hinted child").success());
+
+        let missing = vec![String::from("bindport-runner-missing-command")];
+        let error = match spawn_child_on_port(&missing, preferred_port, &[]) {
+            Ok(mut child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("missing command unexpectedly spawned")
+            }
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, RunnerError::Spawn { command, .. } if command == missing[0]));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn signal_forwarding_rejects_concurrent_children_and_restores_handlers() {
         let _lock = signal_forwarding_test_lock();
         let before_int = current_signal_action(libc::SIGINT);
@@ -267,6 +320,21 @@ mod tests {
     fn test_process_is_running(pid: u32) -> bool {
         let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
         result == 0 || matches!(io::Error::last_os_error().raw_os_error(), Some(libc::EPERM))
+    }
+
+    #[cfg(unix)]
+    fn free_test_port() -> u16 {
+        let listener =
+            TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).expect("listener");
+        listener.local_addr().expect("listener address").port()
+    }
+
+    #[cfg(unix)]
+    fn test_port_range_around(anchor: u16) -> PortRange {
+        PortRange {
+            start: anchor.saturating_sub(16).max(1),
+            end: anchor.saturating_add(16),
+        }
     }
 
     #[cfg(unix)]

@@ -75,7 +75,11 @@ pub(crate) fn register_dashboard_service(
 }
 
 pub(crate) fn redacted_dashboard_command() -> String {
-    let mut args = env::args();
+    redacted_dashboard_command_from(env::args())
+}
+
+pub(crate) fn redacted_dashboard_command_from(args: impl IntoIterator<Item = String>) -> String {
+    let mut args = args.into_iter();
     let mut redacted = Vec::new();
 
     while let Some(arg) = args.next() {

@@ -2,7 +2,7 @@
 
 use super::*;
 use bindport_core::HooksConfig;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Mutex};
 
 mod clean_open;
 mod dashboard;
@@ -13,6 +13,8 @@ mod render;
 mod route_events;
 mod run;
 mod templates;
+
+static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn hook_command(name: &str) -> HookCommandConfig {
     HookCommandConfig {
@@ -79,6 +81,93 @@ fn temp_test_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("bindport-cli-{name}-{}-{now}", std::process::id()));
     fs::create_dir_all(&path).expect("temp test dir");
     path
+}
+
+fn temp_registry_path(name: &str) -> PathBuf {
+    temp_test_dir(name).join("registry.sqlite")
+}
+
+fn with_default_registry_path<T>(path: &Path, callback: impl FnOnce() -> T) -> T {
+    let _guard = TEST_ENV_LOCK.lock().expect("test env lock");
+    let previous = env::var_os(REGISTRY_PATH_ENV);
+
+    // SAFETY: these unit tests serialize process environment mutation with
+    // TEST_ENV_LOCK and restore the previous value before returning.
+    unsafe {
+        env::set_var(REGISTRY_PATH_ENV, path);
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
+    match previous {
+        Some(previous) => unsafe {
+            env::set_var(REGISTRY_PATH_ENV, previous);
+        },
+        None => unsafe {
+            env::remove_var(REGISTRY_PATH_ENV);
+        },
+    }
+
+    match result {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+fn with_state_home<T>(path: &Path, callback: impl FnOnce() -> T) -> T {
+    let _guard = TEST_ENV_LOCK.lock().expect("test env lock");
+    let previous = env::var_os("XDG_STATE_HOME");
+
+    // SAFETY: these unit tests serialize process environment mutation with
+    // TEST_ENV_LOCK and restore the previous value before returning.
+    unsafe {
+        env::set_var("XDG_STATE_HOME", path);
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
+    match previous {
+        Some(previous) => unsafe {
+            env::set_var("XDG_STATE_HOME", previous);
+        },
+        None => unsafe {
+            env::remove_var("XDG_STATE_HOME");
+        },
+    }
+
+    match result {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+fn with_env_values<T>(updates: &[(&str, Option<&str>)], callback: impl FnOnce() -> T) -> T {
+    let _guard = TEST_ENV_LOCK.lock().expect("test env lock");
+    let previous = updates
+        .iter()
+        .map(|(name, _)| (*name, env::var_os(name)))
+        .collect::<Vec<_>>();
+
+    // SAFETY: these unit tests serialize process environment mutation with
+    // TEST_ENV_LOCK and restore previous values before returning.
+    unsafe {
+        for (name, value) in updates {
+            match value {
+                Some(value) => env::set_var(*name, *value),
+                None => env::remove_var(*name),
+            }
+        }
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
+    unsafe {
+        for (name, value) in previous {
+            match value {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
+    }
+
+    match result {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
 }
 
 fn test_output_config(name: &str) -> EffectiveOutputConfig {
