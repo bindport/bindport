@@ -1,6 +1,6 @@
 {
   "name": "bindport",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Proxy-neutral local development port registry and runner.",
   "license": "MIT",
   "homepage": "https://github.com/bindport/bindport#readme",
@@ -23,9 +23,9 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@bindport/darwin-arm64": "0.5.0",
-    "@bindport/darwin-x64": "0.5.0",
-    "@bindport/linux-arm64": "0.5.0",
-    "@bindport/linux-x64": "0.5.0"
+    "@bindport/darwin-arm64": "0.5.1",
+    "@bindport/darwin-x64": "0.5.1",
+    "@bindport/linux-arm64": "0.5.1",
+    "@bindport/linux-x64": "0.5.1"
   }
 }
