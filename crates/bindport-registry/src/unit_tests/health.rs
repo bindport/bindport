@@ -52,6 +52,69 @@ fn health_targets_reject_request_line_injection_bytes() {
 }
 
 #[test]
+fn health_targets_parse_authority_edges_without_dns() {
+    assert!(http_health_target("ftp://127.0.0.1/health").is_err());
+    assert!(http_health_target("http:///health").is_err());
+    assert!(http_health_target("http://127.0.0.1:29100/bad\rpath").is_err());
+
+    assert_eq!(
+        parse_http_authority("[::1]"),
+        Some((String::from("::1"), 80))
+    );
+    assert_eq!(
+        parse_http_authority("[::1]:29100"),
+        Some((String::from("::1"), 29_100))
+    );
+
+    for authority in [
+        "",
+        "user@localhost",
+        "[]:29100",
+        "[::1]:",
+        "[::1]extra",
+        "localhost:",
+        ":29100",
+        "a:b:c",
+    ] {
+        assert!(parse_http_authority(authority).is_none(), "{authority:?}");
+    }
+
+    assert_eq!(
+        loopback_socket_addr("localhost.", 29_100),
+        Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 29_100))
+    );
+    assert_eq!(
+        loopback_socket_addr("api.localhost", 29_101),
+        Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 29_101))
+    );
+}
+
+#[test]
+fn probe_http_target_reports_empty_invalid_and_malformed_responses() {
+    let empty = start_raw_health_server(Vec::new());
+    let target = http_health_target(&format!("http://127.0.0.1:{empty}/health"))
+        .expect("empty target")
+        .expect("loopback");
+    let error = probe_http_target(&target).expect_err("empty response");
+    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+
+    let invalid_utf8 = start_raw_health_server(vec![0xff, b'\n']);
+    let target = http_health_target(&format!("http://127.0.0.1:{invalid_utf8}/health"))
+        .expect("invalid target")
+        .expect("loopback");
+    let error = probe_http_target(&target).expect_err("invalid utf8");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+    let malformed = start_raw_health_server(b"HTTP/1.1 OK\r\n\r\n".to_vec());
+    let target = http_health_target(&format!("http://127.0.0.1:{malformed}/health"))
+        .expect("malformed target")
+        .expect("loopback");
+    let error = probe_http_target(&target).expect_err("malformed status");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("missing HTTP status"));
+}
+
+#[test]
 fn status_health_is_pending_during_startup_grace() {
     let mut registry = Registry::open(temp_registry_path("health-pending")).expect("registry");
     let mut run = test_run_start("bindport", "web", 29_123, std::process::id());
