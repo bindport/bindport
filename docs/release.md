@@ -490,11 +490,12 @@ the native packages can be published.
 
 ## npm Package Shape
 
-The npm package lives in `npm/bindport`. Keep Node code limited to release and
-install glue:
+The npm package lives in `npm/bindport`. Keep JavaScript limited to release
+tooling; the published runtime wrapper should stay small and platform-native:
 
 - `package.json` declares the `bindport` bin entry.
-- `bin/bindport.js` finds and executes the platform native binary.
+- `bin/bindport` finds and executes the platform native binary without
+  requiring Node at runtime.
 - Future platform packages should provide native binaries without moving Rust
   code into Node.
 
@@ -511,7 +512,7 @@ The npm shape is a small wrapper package plus platform packages:
 - `@bindport/darwin-arm64`: macOS Apple Silicon native binary.
 
 The wrapper declares platform packages as optional dependencies and resolves the
-installed package for `process.platform` and `process.arch`. There is no
+installed package for the current `uname` OS and architecture. There is no
 postinstall download script; release-built platform package tarballs contain the
 native binaries.
 
@@ -548,7 +549,7 @@ Because this package declares:
 ```json
 {
   "bin": {
-    "bindport": "bin/bindport.js"
+    "bindport": "bin/bindport"
   }
 }
 ```
@@ -564,16 +565,9 @@ bunx bindport -- next dev
 Arguments after the executable name are passed through to BindPort. Bun flags
 must appear before the package or executable name.
 
-By default, Bun respects the shim's `#!/usr/bin/env node` shebang and runs it
-with Node. Bun-only users can force Bun to run the JavaScript shim instead:
-
-```sh
-bunx --bun bindport --help
-bunx --bun bindport -- next dev
-```
-
-Keep the Node shebang unless we deliberately drop npm/npx compatibility. The
-shim is small CommonJS glue and works under both Node and Bun.
+The npm bin is a POSIX shell wrapper on Linux and macOS. It exists only to find
+the matching native package and `exec` the Rust binary, so package-manager Node
+shims are not part of normal command execution.
 
 For committed project scripts, prefer installing BindPort as a development
 dependency and calling the local executable instead of auto-installing on every

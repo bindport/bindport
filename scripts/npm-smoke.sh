@@ -70,6 +70,14 @@ chmod 755 "$platform_tmp/bin/bindport"
   npm pack --pack-destination "$pack_dir" >/dev/null
 )
 
+forwarding_expected="bindport npm smoke -- /bin/sh -c printf \"PORT=%s\\n\" \"\$PORT\""
+
+assert_output() {
+  expected="$1"
+  shift
+  "$@" | grep -F "$expected" >/dev/null
+}
+
 project="$tmp/project"
 mkdir -p "$project"
 (
@@ -78,11 +86,50 @@ mkdir -p "$project"
   npm install --silent --offline --ignore-scripts --no-audit --no-fund --omit=optional \
     "$pack_dir/bindport-$version.tgz" \
     "$pack_dir/bindport-$platform-$version.tgz"
-  npx --no-install bindport --version | grep -F "bindport npm smoke --version" >/dev/null
-  npm exec -- bindport --help | grep -F "bindport npm smoke --help" >/dev/null
+  assert_output "bindport npm smoke --version" npx --no-install bindport --version
+  assert_output "$forwarding_expected" npx --no-install bindport -- /bin/sh -c "printf \"PORT=%s\\n\" \"\$PORT\""
+  assert_output "bindport npm smoke --help" npm exec -- bindport --help
+  assert_output "$forwarding_expected" npm exec -- bindport -- /bin/sh -c "printf \"PORT=%s\\n\" \"\$PORT\""
   if command -v bun >/dev/null 2>&1; then
-    bunx --no-install bindport doctor | grep -F "bindport npm smoke doctor" >/dev/null
+    assert_output "bindport npm smoke doctor" bunx --no-install bindport doctor
+    assert_output "$forwarding_expected" bunx --no-install bindport -- /bin/sh -c "printf \"PORT=%s\\n\" \"\$PORT\""
   fi
 )
+
+nested_project="$tmp/nested-project"
+mkdir -p "$nested_project"
+(
+  cd "$nested_project"
+  npm init -y >/dev/null
+  npm install --silent --offline --ignore-scripts --no-audit --no-fund --omit=optional \
+    "$pack_dir/bindport-$version.tgz" \
+    "$pack_dir/bindport-$platform-$version.tgz"
+  mkdir -p node_modules/bindport/node_modules/@bindport
+  mv "node_modules/@bindport/$platform" "node_modules/bindport/node_modules/@bindport/$platform"
+  rmdir node_modules/@bindport 2>/dev/null || true
+  assert_output "bindport npm smoke --version" npx --no-install bindport --version
+  assert_output "$forwarding_expected" npx --no-install bindport -- /bin/sh -c "printf \"PORT=%s\\n\" \"\$PORT\""
+  assert_output "$forwarding_expected" npm exec -- bindport -- /bin/sh -c "printf \"PORT=%s\\n\" \"\$PORT\""
+)
+
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm_project="$tmp/pnpm-project"
+  mkdir -p "$pnpm_project"
+  (
+    cd "$pnpm_project"
+    cat > package.json <<EOF
+{
+  "private": true,
+  "devDependencies": {
+    "bindport": "file:$pack_dir/bindport-$version.tgz",
+    "@bindport/$platform": "file:$pack_dir/bindport-$platform-$version.tgz"
+  }
+}
+EOF
+    pnpm install --offline --ignore-scripts --config.store-dir="$tmp/pnpm-store" >/dev/null
+    assert_output "bindport npm smoke --version" pnpm exec -- bindport --version
+    assert_output "$forwarding_expected" pnpm exec -- bindport -- /bin/sh -c "printf \"PORT=%s\\n\" \"\$PORT\""
+  )
+fi
 
 echo "npm wrapper smoke passed for $platform."
