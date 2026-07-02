@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT
+
+mod support;
+
+#[path = "run/allocation.rs"]
+mod allocation;
+#[path = "run/basic.rs"]
+mod basic;
+#[path = "run/configured.rs"]
+mod configured;
+#[path = "run/package.rs"]
+mod package;
+#[path = "run/signals.rs"]
+mod signals;
+#[path = "run/templates.rs"]
+mod templates;

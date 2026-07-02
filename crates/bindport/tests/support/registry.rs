@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: MIT
+
+use super::*;
+
+pub fn doctor_candidate_port(stdout: &str) -> u16 {
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("next candidate port: "))
+        .and_then(|value| value.split_whitespace().next())
+        .expect("next candidate port line")
+        .parse::<u16>()
+        .expect("candidate is a port")
+}
+
+pub fn reserve_registry_port(registry_path: &Path, port: u16) {
+    let mut registry = Registry::open(registry_path).expect("registry");
+    let identity = ServiceIdentity {
+        project: String::from("busy-project"),
+        service: String::from("busy-service"),
+        git: None,
+        identity_key: String::from("v1:busy"),
+    };
+
+    registry
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+            pid: std::process::id(),
+            command: String::from("busy fixture"),
+            cwd: PathBuf::from("/tmp/bindport-busy-fixture"),
+        })
+        .expect("reserve registry port");
+}
+
+pub fn record_registry_service(registry_path: &Path, service: &str, port: u16) {
+    let mut registry = Registry::open(registry_path).expect("registry");
+    let identity = ServiceIdentity {
+        project: String::from("doctor-output-project"),
+        service: service.to_string(),
+        git: None,
+        identity_key: format!("v1:doctor-output-project:{service}"),
+    };
+
+    registry
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port,
+            hostname: Some(format!("{service}.localhost")),
+            route_url: None,
+            health_url: None,
+            pid: std::process::id(),
+            command: String::from("doctor output fixture"),
+            cwd: std::env::temp_dir().join("bindport-doctor-output-fixture"),
+        })
+        .expect("record registry service");
+}
+
+pub fn free_loopback_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral port");
+    listener.local_addr().expect("local addr").port()
+}

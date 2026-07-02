@@ -69,33 +69,24 @@ Don't mutate state outside the working tree without being told to.
 - Type check: `cargo check --all-targets`
 - Full local CI: `mise run ci`
 - Dashboard dev: `mise run dev-dashboard` (static reload plus Rust server restart)
-- Static-only dashboard dev: `mise run dev-dashboard-static`
 - Remote dashboard dev: set `BINDPORT_DASHBOARD_TOKEN`, then `mise run dev-dashboard-remote`
 
 ## Test Watch Outs
-- macOS CI has exposed path and port assumptions: canonicalize temp paths before comparing recorded filesystem paths, and use test-owned ports/listener guards instead of relying on shared default port state.
+- macOS CI has exposed path and port assumptions: canonicalize temp paths, and use test-owned ports/listener guards instead of shared default port state.
+- Split mixed-responsibility source or test files before adding behavior. Keep moved crate unit tests under `src/unit_tests`; `cargo llvm-cov` excluded `src/tests` from coverage accounting.
 
-`bindport -- <command>` currently performs probe-based port selection, child
-process wrapping, optional config discovery, basic project/service and git
-identity resolution, Unix SIGINT/SIGTERM forwarding, and basic SQLite lease/run
-recording. Service config and `bindport run` options can inject templated child
-env vars and route hostname metadata. It reuses the previous free port for the
-same resolved identity and otherwise scans from a stable identity-based offset.
-It retries once with a new port when the wrapped child fails immediately and the
-assigned port is then occupied. `bindport doctor` reports obvious registry and
-OS-listener conflicts, but not full process ownership diagnostics. Do not claim
-full process conflict diagnostics work until that slice is implemented and
-verified.
-`bindport clean` removes stopped and stale registry entries, supports
-`--dry-run`, `--stopped`, `--stale`, and `--json`, and never removes active
-entries.
+## Project Context
+`bindport -- <command>` wraps a child process, assigns or reuses a stable port,
+records SQLite lease/run state, forwards Unix signals, and retries once if an
+immediate child failure leaves the assigned port occupied. Service config and
+`bindport run` options can inject templated env vars and route metadata.
 
-`bindport dashboard` provides a registry dashboard with foreground `serve` and
-background `start` / `status` / `stop` controls. It binds `127.0.0.1:27080` by
-default, supports configurable host/port/static assets, requires token auth for
-non-loopback binds, and exposes dashboard write actions only for stopped/stale
-registry cleanup. Do not describe the dashboard as able to run, reserve, release,
-start, or stop wrapped services.
+`bindport doctor` reports obvious registry and OS-listener conflicts, not full
+process ownership diagnostics. `bindport clean` removes stopped/stale registry
+entries only. `bindport dashboard` is a registry dashboard with `serve` and
+background `start` / `status` / `stop`; dashboard write actions are limited to
+stopped/stale cleanup and do not run, reserve, release, start, or stop wrapped
+services.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.
