@@ -23,13 +23,13 @@ use bindport_adapters::{
     write_render_plan,
 };
 use bindport_core::{
-    APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, BindPortConfig, ConfigError,
-    ConfigSource, ConfiguredServiceSource, DEFAULT_HOOK_TIMEOUT_MS, DEFAULT_PORT_RANGE,
-    DEFAULT_SKIP_PORTS, EffectiveOutputConfig, FALLBACK_CONFIG_FILE, HookCommandConfig, HookEvent,
-    IdentitySources, LoadedConfig, OutputConfigError, OutputDeleteState, OutputFailurePolicy,
-    PortRange, SERVICE_NAME, ServiceConfig, ServiceIdentity, default_fallback_config,
-    detect_git_identity, discover_config, is_restricted_service_env_name, normalize_branch_label,
-    resolve_identity,
+    APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, BindPortConfig,
+    CONFIG_FILENAMES, ConfigError, ConfigSource, ConfiguredServiceSource, DEFAULT_HOOK_TIMEOUT_MS,
+    DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS, EffectiveOutputConfig, FALLBACK_CONFIG_FILE,
+    HookCommandConfig, HookEvent, IdentitySources, LoadedConfig, OutputConfigError,
+    OutputDeleteState, OutputFailurePolicy, PortRange, SERVICE_NAME, ServiceConfig,
+    ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
+    is_restricted_service_env_name, normalize_branch_label, resolve_identity,
 };
 use bindport_dashboard::{
     DashboardCleanCallback, DashboardOptions, DashboardServer, DashboardStatusCallback,
@@ -129,7 +129,7 @@ fn dispatch(args: impl IntoIterator<Item = String>) -> ExitCode {
         Some("hooks") => run_hooks_command(&args[1..]),
         Some("render") => run_render_command(&args[1..]),
         Some("templates") => run_template_command(&args[1..]),
-        Some("init") => init_fallback_config(),
+        Some("init") => run_init_command(&args[1..]),
         Some("--") => run_wrapped_command(&args[1..], RunOptions::default()),
         Some("run") => run_subcommand(&args[1..]),
         Some(command) => {
