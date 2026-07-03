@@ -103,3 +103,6 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --locked
+
+      - name: Smoke test npm wrapper
+        run: scripts/npm-smoke.sh
