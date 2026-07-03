@@ -54,6 +54,31 @@ run = "node scripts/check-binstall-metadata.js"
 description = "Validate shell completion and manpage release assets"
 run = "scripts/check-cli-assets.sh"
 
+[tasks.homebrew-formula]
+description = "Generate the Homebrew tap formula from release checksum assets"
+usage = '''
+arg "<version>" help="Release version, for example 0.6.0 or v0.6.0"
+flag "--dist <dir>" help="Directory containing release .sha256 assets" default="dist"
+flag "--output <path>" help="Formula output path"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=(
+  --version "${usage_version?}"
+  --dist "${usage_dist?}"
+)
+if [[ -n "${usage_output:-}" ]]; then
+  args+=(--output "${usage_output}")
+fi
+scripts/homebrew-formula.sh "${args[@]}"
+'''
+
+[tasks.homebrew-formula-check]
+description = "Validate Homebrew formula generation"
+run = "scripts/check-homebrew-formula.sh"
+
 [tasks.changelog]
 description = "Generate CHANGELOG.md with git-cliff"
 usage = '''
@@ -350,5 +375,6 @@ mise run coverage
 mise run build
 mise run binstall-metadata
 mise run cli-assets
+mise run homebrew-formula-check
 mise run npm-smoke
 '''

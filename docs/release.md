@@ -261,6 +261,10 @@ Release artifacts are uploaded to the GitHub Release:
 - `bindport-darwin-arm64-X.Y.Z.tgz.sha256`
 - `bindport-X.Y.Z.tgz`
 - `bindport-X.Y.Z.tgz.sha256`
+- `bindport-completions.tar.gz`
+- `bindport-completions.tar.gz.sha256`
+- `bindport-manpage.tar.gz`
+- `bindport-manpage.tar.gz.sha256`
 
 Dry runs run the release checks and release Git credential preflight. They do
 not create Git tags or GitHub Releases. They still build release binaries so the
@@ -350,6 +354,44 @@ The manual `Cargo Publish` GitHub Actions workflow exposes the same flow:
   `CARGO_REGISTRY_TOKEN` secret.
 
 Keep `execute=false` until the local command has been exercised for the release.
+
+## Homebrew Tap
+
+The Homebrew tap formula is generated after the GitHub Release exists because
+the formula must point at the reviewed release assets and their `.sha256`
+checksums. The tap repository is external to this source tree; do not create or
+mutate it from the BindPort release workflow.
+
+After `release-finish` creates the GitHub Release, download the checksum assets
+and generate the formula:
+
+```sh
+mkdir -p dist/homebrew
+gh release download v0.6.0 --repo bindport/bindport --pattern '*.sha256' --dir dist/homebrew
+mise run homebrew-formula v0.6.0 --dist dist/homebrew --output ../homebrew-tap/Formula/bindport.rb
+```
+
+Review the generated formula in the tap checkout. It should install the
+matching Linux/macOS x64/arm64 binary, bash/zsh/fish completions from
+`bindport-completions.tar.gz`, and the `bindport.1` man page from
+`bindport-manpage.tar.gz`.
+
+Before opening the tap PR, run the formula check from this repository and the
+tap's Homebrew checks:
+
+```sh
+mise run homebrew-formula-check
+brew update
+brew install --build-from-source ../homebrew-tap/Formula/bindport.rb
+bindport --version
+bindport doctor
+```
+
+Once the tap PR merges, verify the public install path:
+
+```sh
+brew install bindport/tap/bindport
+```
 
 ## v0.2.0 Manual Acceptance
 

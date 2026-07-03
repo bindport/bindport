@@ -111,6 +111,9 @@ jobs:
       - name: Validate CLI release assets
         run: scripts/check-cli-assets.sh
 
+      - name: Validate Homebrew formula generation
+        run: scripts/check-homebrew-formula.sh
+
       - name: Smoke test npm wrapper
         run: scripts/npm-smoke.sh
 
