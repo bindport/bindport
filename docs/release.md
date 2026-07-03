@@ -26,10 +26,11 @@ JavaScript project dependency:
 npm install --save-dev bindport
 ```
 
-The current release targets Linux and macOS-style local development. Windows
-support remains future/beta until the cross-platform hardening milestone. npm
-publishing uses the unscoped `bindport` wrapper package plus scoped native
-binary packages for Linux and macOS on x64/arm64.
+The current release targets Linux and macOS-style local development. Windows is
+post-1.0 and is not a supported install target yet. npm publishing uses the
+unscoped `bindport` wrapper package plus scoped native binary packages for Linux
+and macOS on x64/arm64. See [Platform Support](platform-support.md) for the
+supported OS, package, path, and process behavior.
 
 The minimum release gate is:
 
