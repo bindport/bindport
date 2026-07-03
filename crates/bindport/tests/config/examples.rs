@@ -3,6 +3,42 @@
 use crate::support::*;
 
 #[test]
+fn checked_in_starter_examples_validate_by_format() {
+    let examples_dir = workspace_root().join("examples").join("config");
+
+    for (format, filename) in [
+        ("toml", ".bindport.toml"),
+        ("json", ".bindport.json"),
+        ("yaml", ".bindport.yaml"),
+    ] {
+        let registry_path = temp_registry_path(&format!("starter-example-{format}-registry"));
+        let root = temp_test_dir(&format!("starter-example-{format}-root"));
+        fs::copy(examples_dir.join(filename), root.join(filename)).expect("copy example config");
+
+        let validate = bindport_with_registry(&registry_path)
+            .current_dir(&root)
+            .args(["config", "validate"])
+            .output()
+            .expect("validate starter example");
+        assert!(
+            validate.status.success(),
+            "config validate failed for {filename}: stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&validate.stdout),
+            String::from_utf8_lossy(&validate.stderr)
+        );
+        let stdout = String::from_utf8(validate.stdout).expect("validate stdout");
+        assert!(
+            stdout.contains("validation: ok"),
+            "config validate did not report success for {filename}: {stdout}"
+        );
+        assert!(
+            !stdout.contains("ignored unknown top-level keys"),
+            "starter example contains unknown config keys for {filename}: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn checked_in_monorepo_example_resolves_services() {
     let registry_path = temp_registry_path("monorepo-example-registry");
     let root = workspace_root().join("examples").join("monorepo");
