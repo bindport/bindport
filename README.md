@@ -103,6 +103,7 @@ From a source checkout, use Cargo directly:
 cargo run -p bindport -- --help
 cargo run -p bindport -- doctor
 cargo run -p bindport -- init
+cargo run -p bindport -- init --user
 cargo run -p bindport -- status --json
 cargo run -p bindport -- open web --print
 cargo run -p bindport -- clean --dry-run
@@ -157,8 +158,10 @@ optional user config at
 when `XDG_CONFIG_HOME` is unset. The registry database remains state at
 `$XDG_STATE_HOME/bindport/registry.sqlite`, or
 `~/.local/state/bindport/registry.sqlite` when `XDG_STATE_HOME` is unset.
-`bindport init` creates the optional user config with default values. Config is
-never required; missing config means built-in defaults are used.
+`bindport init` creates a minimal `.bindport.toml` project config in the current
+directory. `bindport init --user` creates the optional user config with default
+values. Config is never required; missing config means built-in defaults are
+used.
 Use `bindport config explain` to inspect the discovered config file, local
 override file, effective config-field sources, and the project/service identity
 source for the current directory. Use `bindport config validate` to check

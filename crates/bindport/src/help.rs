@@ -21,7 +21,7 @@ pub(crate) fn print_help() {
     println!("  bindport templates list      List resolved output templates");
     println!("  bindport templates show      Show a resolved output template");
     println!("  bindport templates export    Export a resolved output template");
-    println!("  bindport init                Create optional fallback config");
+    println!("  bindport init                Create project config in the current directory");
     println!("  bindport --version           Print version");
     println!();
     println!("Run options:");
@@ -29,6 +29,17 @@ pub(crate) fn print_help() {
     println!("  --hostname <template>        Set route hostname metadata");
     println!("  --route-url <template>       Set route URL metadata");
     println!("  --health-url <template>      Set service health check URL metadata");
+}
+
+pub(crate) fn print_init_help() {
+    println!("BindPort config initialization");
+    println!();
+    println!("Usage:");
+    println!("  bindport init [--project|--user]");
+    println!();
+    println!("Options:");
+    println!("  --project    Create .bindport.toml in the current directory (default)");
+    println!("  --user       Create optional user fallback config");
 }
 
 pub(crate) fn print_open_help() {

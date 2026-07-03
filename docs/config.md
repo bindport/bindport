@@ -33,7 +33,9 @@ bindport.local.yml
 
 If no project config exists, BindPort falls back to the optional user config at
 `$XDG_CONFIG_HOME/bindport/config.toml`, or `~/.config/bindport/config.toml`
-when `XDG_CONFIG_HOME` is unset. `bindport init` creates that fallback config.
+when `XDG_CONFIG_HOME` is unset. `bindport init` creates a minimal project
+`.bindport.toml` in the current directory. `bindport init --user` creates the
+optional user fallback config.
 YAML config is supported for simple documents only: anchors and aliases are
 rejected, and YAML config files have a 256 KiB size limit. TOML remains the
 reference format.
@@ -48,6 +50,28 @@ Runtime identity precedence is:
 
 `bindport config explain` shows the discovered files, field sources, and the
 resolved project/service identity for the current directory.
+
+## Initialize Config
+
+For a project repo:
+
+```sh
+bindport init
+```
+
+This writes `.bindport.toml` in the current directory and avoids absolute paths,
+secrets, and machine-local values. Commit this file when it describes the shared
+project setup. Put developer-specific values in `.bindport.local.toml` or another
+local override file.
+
+For a user fallback config:
+
+```sh
+bindport init --user
+```
+
+The fallback config is optional and only applies when no project config is
+discovered.
 
 ## Supported Fields
 
