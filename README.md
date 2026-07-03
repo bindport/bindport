@@ -72,7 +72,9 @@ The current source tree includes:
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
 The current support target is Linux and macOS-style local development. Windows
-is not claimed as supported until the cross-platform hardening milestone.
+is post-1.0 and is not claimed as supported yet. See
+[Platform Support](docs/platform-support.md) for the supported OS, package,
+path, and process behavior.
 
 The runner and dashboard are available from Cargo, npm project scripts, or a
 source checkout:
@@ -294,6 +296,8 @@ machine-readable counts. Active services are not removed.
   file-provider setup, custom templates, render lifecycle, and troubleshooting.
 - [Monorepos](docs/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
+- [Platform Support](docs/platform-support.md): supported operating systems,
+  package targets, filesystem paths, process behavior, and verification gates.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging.
 

@@ -45,6 +45,9 @@ jobs:
       - name: Clippy
         run: mise run clippy
 
+      - name: Check platform cfg guards
+        run: mise run platform-guard
+
       - name: Lint workflows
         run: mise run workflow-lint
 
