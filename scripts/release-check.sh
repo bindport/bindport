@@ -125,6 +125,7 @@ if [[ "$npm_private" == "true" ]]; then
 fi
 node scripts/npm-package-utils.js validate "$version"
 node scripts/check-binstall-metadata.js
+scripts/check-cli-assets.sh
 changelog_tmp="$(mktemp)"
 trap 'rm -f "$changelog_tmp"' EXIT
 changelog_args=(--output "$changelog_tmp")

@@ -219,6 +219,9 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Stage CLI completion and manpage artifacts
+        run: scripts/stage-cli-assets.sh dist
+
       - name: Verify release artifact checksums
         shell: bash
         run: |

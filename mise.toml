@@ -50,6 +50,10 @@ run = "cargo build --release --locked"
 description = "Validate cargo-binstall release asset metadata"
 run = "node scripts/check-binstall-metadata.js"
 
+[tasks.cli-assets]
+description = "Validate shell completion and manpage release assets"
+run = "scripts/check-cli-assets.sh"
+
 [tasks.changelog]
 description = "Generate CHANGELOG.md with git-cliff"
 usage = '''
@@ -345,5 +349,6 @@ mise run test
 mise run coverage
 mise run build
 mise run binstall-metadata
+mise run cli-assets
 mise run npm-smoke
 '''
