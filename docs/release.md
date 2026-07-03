@@ -139,9 +139,10 @@ After confirmation, it:
 - updates the Cargo workspace version with `cargo set-version --workspace`;
 - updates internal workspace dependency versions to the same version;
 - updates npm wrapper and platform package metadata to the same version;
+- regenerates `CHANGELOG.md` for the target version with `git-cliff`;
 - refreshes and validates Cargo metadata;
 - runs `scripts/release-check.sh --version X.Y.Z --allow-dirty`;
-- stages `Cargo.toml`, `Cargo.lock`, and npm package metadata;
+- stages `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`, and npm package metadata;
 - commits `build: prepare vX.Y.Z release`;
 - pushes the branch to `origin`;
 - opens a pull request with `gh pr create`.
@@ -153,9 +154,10 @@ merged.
 ## Release Check Gate
 
 Release checks are intentionally non-publishing by default. They validate the
-version, run the local CI gate, dry-run Cargo package contents, validate all npm
-package versions and optional dependencies, and dry-run wrapper/platform npm
-package tarballs. Full crates.io publish dry-runs are reserved for the
+version, verify that `CHANGELOG.md` is current, run the local CI gate, dry-run
+Cargo package contents, validate all npm package versions and optional
+dependencies, and dry-run wrapper/platform npm package tarballs. Full crates.io
+publish dry-runs are reserved for the
 `--publish-ready` gate because Cargo publishing remains a separate manual
 action.
 

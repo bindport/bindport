@@ -1,0 +1,44 @@
+[changelog]
+header = """
+# Changelog
+
+All notable changes are generated from git tags and Conventional Commit subjects.
+
+"""
+body = """
+{% if version %}## {{ version }} - {{ timestamp | date(format="%Y-%m-%d") }}{% else %}## Unreleased{% endif %}
+
+{% if previous.version %}[Compare changes](https://github.com/bindport/bindport/compare/{{ previous.version }}...{% if version %}{{ version }}{% else %}HEAD{% endif %}){% elif version %}[Compare changes](https://github.com/bindport/bindport/releases/tag/{{ version }}){% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits -%}
+- {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+output = "CHANGELOG.md"
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+require_conventional = false
+split_commits = false
+filter_commits = true
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"
+commit_parsers = [
+  { message = "^build: prepare v[0-9]+\\.[0-9]+\\.[0-9]+ release", skip = true },
+  { message = "^feat", group = "<!-- 0 --> Features" },
+  { message = "^fix", group = "<!-- 1 --> Fixes" },
+  { message = "^perf", group = "<!-- 2 --> Performance" },
+  { message = "^refactor", group = "<!-- 3 --> Refactoring" },
+  { message = "^docs", group = "<!-- 4 --> Documentation" },
+  { message = "^test", group = "<!-- 5 --> Tests" },
+  { message = "^ci", group = "<!-- 6 --> CI" },
+  { message = "^build", group = "<!-- 7 --> Build" },
+  { message = "^deps", group = "<!-- 8 --> Dependencies" },
+  { message = "^chore", group = "<!-- 9 --> Maintenance" },
+]

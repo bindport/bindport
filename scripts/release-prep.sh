@@ -160,7 +160,7 @@ case "$request" in
     ;;
 esac
 
-for command in cargo git gh node npm mise; do
+for command in cargo git gh git-cliff node npm mise; do
   command -v "$command" >/dev/null 2>&1 || die "$command is required"
 done
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated; run 'gh auth login'"
@@ -209,12 +209,13 @@ git switch -c "$release_branch"
 cargo set-version --workspace "$new_version"
 update_workspace_dependency_versions "$new_version"
 update_npm_version "$new_version"
+RUST_LOG=error git-cliff --tag "v$new_version" --output CHANGELOG.md
 
 cargo metadata --format-version 1 --no-deps >/dev/null
 cargo metadata --locked --format-version 1 --no-deps >/dev/null
 MISE_TRUSTED_CONFIG_PATHS="$root" scripts/release-check.sh --version "$new_version" --allow-dirty
 
-git add Cargo.toml Cargo.lock npm
+git add Cargo.toml Cargo.lock CHANGELOG.md npm
 git diff --staged --quiet && die "version update produced no staged changes"
 git commit -m "build: prepare v$new_version release"
 git push -u origin "$release_branch"
@@ -225,6 +226,7 @@ gh pr create \
   --title "build: prepare v$new_version release" \
   --body "## Summary
 - bump Cargo workspace and npm package versions to $new_version for release prep
+- update CHANGELOG.md for v$new_version
 
 ## Verification
 - cargo metadata --locked --format-version 1 --no-deps
