@@ -6,6 +6,8 @@ and the checks to run before relying on the config.
 
 ## Install
 
+For all supported install channels, see [Install BindPort](install.md).
+
 For Rust-first projects or local global use:
 
 ```sh

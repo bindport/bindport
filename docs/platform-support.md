@@ -12,6 +12,8 @@ post-1.0 and is not a supported install target yet.
 | Cargo install | Linux/macOS through `cargo install bindport` |
 | cargo-binstall | Linux/macOS x64/arm64 from GitHub Release binaries |
 | npm install | `bindport` wrapper plus Linux/macOS native packages |
+| Homebrew | `bindport/tap/bindport` formula from GitHub Release binaries |
+| mise / ubi | `ubi:bindport/bindport` from GitHub Release binaries |
 | GitHub Release assets | Linux/macOS raw binaries and npm tarballs |
 | CI compatibility | Linux full CI, macOS compatibility build/test/npm smoke |
 | Windows | Post-1.0; not supported yet |

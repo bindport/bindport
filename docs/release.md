@@ -13,6 +13,10 @@ GitHub Releases also include `bindport-completions.tar.gz` and
 `packaging/`, validated by `scripts/check-cli-assets.sh`, and intended for
 package-manager formulas such as the Homebrew tap.
 
+Install-channel user guidance lives in [Install BindPort](install.md). Keep it
+in sync when changing release assets, package names, the Homebrew tap formula,
+or npm/Cargo publish behavior.
+
 ## Current Status
 
 BindPort v0.5.1 is the release described by this document. Cargo and npm are
@@ -559,6 +563,26 @@ mise run npm-publish v0.5.1 --dist dist/npm --execute
 
 Publish order matters: native platform packages are published first, then the
 `bindport` wrapper. The `npm-publish` script enforces that order.
+
+## Homebrew Tap
+
+The Homebrew tap formula should source only reviewed GitHub Release artifacts.
+After the `Release` workflow has created the GitHub Release for a stable tag:
+
+1. Update `bindport/homebrew-tap` with the new version and checksums.
+2. Point the formula at the matching platform binary artifact.
+3. Install shell completions from `bindport-completions.tar.gz`.
+4. Install the man page from `bindport-manpage.tar.gz`.
+5. Run the tap smoke test:
+
+```sh
+brew update
+brew install bindport/tap/bindport
+bindport --version
+bindport doctor
+```
+
+Homebrew core submission is deferred until after v1.0.
 
 ## Bun / bunx Workflow
 

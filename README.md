@@ -12,7 +12,9 @@ root-owned daemon.
 ## Current Status
 
 BindPort v0.5.1 is the current release candidate. Once published, it installs
-the same Rust CLI through Cargo or JavaScript package managers.
+the same Rust CLI through Cargo, npm, GitHub Release binaries, `cargo binstall`,
+Homebrew, or mise/ubi. See [Install BindPort](docs/install.md) for channel
+details.
 
 Install globally with Cargo:
 
@@ -38,7 +40,7 @@ Then run the CLI directly or from project scripts:
 bindport --help
 bindport -- doctor
 bindport dashboard serve
-bindport -- -- sh -c 'echo "$PORT"'
+bindport -- sh -c 'echo "$PORT"'
 ```
 
 The current source tree includes:
@@ -313,6 +315,8 @@ machine-readable counts. Active services are not removed.
 
 - [Adoption Setup](docs/adoption.md): what to commit, what to ignore,
   no-proxy setup, framework examples, and agent guidance for project adoption.
+- [Install BindPort](docs/install.md): npm, Cargo, cargo-binstall, Homebrew,
+  mise/ubi, and direct GitHub Release install paths.
 - [Config](docs/config.md): config discovery, precedence, service entries,
   local overrides, validation, and supported placeholders.
 - [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
