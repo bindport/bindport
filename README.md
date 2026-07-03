@@ -288,6 +288,8 @@ machine-readable counts. Active services are not removed.
 
 ## Documentation
 
+- [Adoption Setup](docs/adoption.md): what to commit, what to ignore,
+  no-proxy setup, framework examples, and agent guidance for project adoption.
 - [Config](docs/config.md): config discovery, precedence, service entries,
   local overrides, validation, and supported placeholders.
 - [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
