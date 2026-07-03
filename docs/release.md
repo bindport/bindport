@@ -268,6 +268,17 @@ Cargo users can install BindPort directly:
 cargo install bindport
 ```
 
+Users with `cargo-binstall` can install the matching GitHub Release binary:
+
+```sh
+cargo binstall bindport
+```
+
+The `bindport` crate publishes `[package.metadata.binstall]` with exact
+Linux/macOS x64/arm64 release asset URLs. Release checks validate that metadata
+so `cargo binstall bindport` resolves the same raw binaries uploaded by the
+GitHub Release workflow.
+
 BindPort publishes one CLI crate plus internal support crates. The helper
 publishes or dry-runs those crates in dependency order:
 

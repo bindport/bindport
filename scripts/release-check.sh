@@ -124,6 +124,7 @@ if [[ "$npm_private" == "true" ]]; then
   exit 1
 fi
 node scripts/npm-package-utils.js validate "$version"
+node scripts/check-binstall-metadata.js
 
 git diff --check
 

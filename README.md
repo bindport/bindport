@@ -20,6 +20,12 @@ Install globally with Cargo:
 cargo install bindport
 ```
 
+Or install the matching GitHub Release binary with `cargo binstall`:
+
+```sh
+cargo binstall bindport
+```
+
 Or install it as a JavaScript project dependency:
 
 ```sh
