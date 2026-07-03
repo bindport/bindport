@@ -5,6 +5,7 @@
   --muted: color-mix(in srgb, CanvasText 62%, Canvas);
   --soft: color-mix(in srgb, CanvasText 5%, Canvas);
   --active: #138a4b;
+  --reserved: #2563eb;
   --stopped: #64748b;
   --stale: #a15c00;
   --conflict: #9f1d20;
@@ -341,6 +342,7 @@ code {
   white-space: nowrap;
 }
 .state-active { color: var(--active); }
+.state-reserved { color: var(--reserved); }
 .state-stopped { color: var(--stopped); }
 .state-stale { color: var(--stale); }
 .state-conflict { color: var(--conflict); }

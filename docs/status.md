@@ -17,12 +17,17 @@ Top-level fields:
 Service fields most useful to agents:
 
 - `project`, `service`, `identity_key`: stable service identity.
-- `state`: `active`, `stopped`, or `stale`.
+- `state`: `active`, `reserved`, `stopped`, or `stale`.
 - `host`, `port`, `url`: direct loopback URL for the wrapped process.
 - `hostname`, `route_url`, `health_url`: configured route metadata when present.
 - `health`: `unknown`, `pending`, `healthy`, or `failing`.
 - `branch`, `branch_label`, `worktree_path`, `commit`: git context when known.
 - `outputs`, `proxy`: generated output files and proxy-oriented summary.
+
+Reserved services come from `bindport reserve [service]`. They hold a port for
+an externally managed process and appear in `services`, but they do not create a
+`runs` entry until a wrapped command is started. Use `bindport release
+[service|port]` to release a reserved lease.
 
 `bindport open [service]` resolves the best active service URL from the same
 snapshot. It prints `route_url` when configured, otherwise the direct loopback

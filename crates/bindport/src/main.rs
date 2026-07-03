@@ -36,8 +36,8 @@ use bindport_dashboard::{
 };
 use bindport_registry::{
     CleanState, CleanSummary, OutputFileRecord, OutputFileStatus, REGISTRY_PATH_ENV, Registry,
-    RegistryError, RunStart, StartedRun, StatusService, default_registry_path,
-    status_service_route_key,
+    RegistryError, ReserveLease, ReservedLease, RunStart, StartedRun, StatusService,
+    default_registry_path, status_service_route_key,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
@@ -73,6 +73,7 @@ mod open;
 mod paths;
 mod ports;
 mod render;
+mod reserve;
 mod route_events;
 mod run;
 mod status;
@@ -89,6 +90,7 @@ pub(crate) use open::*;
 pub(crate) use paths::*;
 pub(crate) use ports::*;
 pub(crate) use render::*;
+pub(crate) use reserve::*;
 pub(crate) use route_events::*;
 pub(crate) use run::*;
 pub(crate) use status::*;
@@ -122,6 +124,8 @@ fn dispatch(args: impl IntoIterator<Item = String>) -> ExitCode {
             }
         }
         Some("open") => run_open_command(&args[1..]),
+        Some("reserve") => run_reserve_command(&args[1..]),
+        Some("release") => run_release_command(&args[1..]),
         Some("clean") => clean_registry(&args[1..]),
         Some("config") => run_config_command(&args[1..]),
         Some("doctor") => run_doctor_command(&args[1..]),

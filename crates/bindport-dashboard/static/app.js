@@ -30,6 +30,7 @@ const expandedServiceKeys = new Set();
 const expandedHookKeys = new Set();
 const groups = [
   { key: "active", label: "Active" },
+  { key: "reserved", label: "Reserved" },
   { key: "stopped", label: "Stopped" },
   { key: "stale", label: "Stale" },
   { key: "conflict", label: "Conflict" },
@@ -71,7 +72,7 @@ function safeLink(value) {
 
 function stateKey(service) {
   const state = text(service.state).toLowerCase();
-  return ["active", "stopped", "stale", "conflict"].includes(state) ? state : "other";
+  return ["active", "reserved", "stopped", "stale", "conflict"].includes(state) ? state : "other";
 }
 
 function stateLabel(state) {

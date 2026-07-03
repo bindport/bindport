@@ -1,8 +1,8 @@
 # Dashboard
 
-BindPort includes a local dashboard for inspecting the same registry state
-exposed by `bindport status --json` and cleaning stopped or stale registry
-entries.
+BindPort includes a local dashboard for inspecting the same active, reserved,
+stopped, and stale registry state exposed by `bindport status --json` and
+cleaning stopped or stale registry entries.
 
 Serve it in the foreground from a source checkout with:
 

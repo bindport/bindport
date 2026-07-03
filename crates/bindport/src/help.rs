@@ -5,6 +5,9 @@ pub(crate) fn print_help() {
     println!("  bindport -- <command>        Run a command with an assigned PORT");
     println!("  bindport run [service] [options] [-- <command>]");
     println!("                                  Run a command or configured service command");
+    println!("  bindport reserve [service]     Hold a port without running a child process");
+    println!("  bindport release [service|port]");
+    println!("                                  Release a reserved port");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport open [service]      Print or open the best service URL");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
@@ -29,6 +32,19 @@ pub(crate) fn print_help() {
     println!("  --hostname <template>        Set route hostname metadata");
     println!("  --route-url <template>       Set route URL metadata");
     println!("  --health-url <template>      Set service health check URL metadata");
+}
+
+pub(crate) fn print_reserve_help() {
+    println!("BindPort lease reservation");
+    println!();
+    println!("Usage:");
+    println!("  bindport reserve [service] [options]");
+    println!("  bindport release [service|port]");
+    println!();
+    println!("Reserve options:");
+    println!("  --hostname <template>     Set route hostname metadata");
+    println!("  --route-url <template>    Set route URL metadata");
+    println!("  --health-url <template>   Set service health check URL metadata");
 }
 
 pub(crate) fn print_init_help() {
