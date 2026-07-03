@@ -311,6 +311,7 @@ machine-readable counts. Active services are not removed.
   package targets, filesystem paths, process behavior, and verification gates.
 - [Release](docs/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging.
+- [Changelog](CHANGELOG.md): generated release notes from Conventional Commits.
 
 ## License
 

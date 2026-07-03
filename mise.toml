@@ -9,6 +9,7 @@ node = "26.3.0"
 "cargo:cargo-audit" = "0.22.2"
 "cargo:cargo-edit" = "0.13.11"
 "cargo:cargo-llvm-cov" = "0.8.7"
+"cargo:git-cliff" = "2.13.0"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
 trivy = "0.71.0"
@@ -48,6 +49,40 @@ run = "cargo build --release --locked"
 [tasks.binstall-metadata]
 description = "Validate cargo-binstall release asset metadata"
 run = "node scripts/check-binstall-metadata.js"
+
+[tasks.changelog]
+description = "Generate CHANGELOG.md with git-cliff"
+usage = '''
+arg "[version]" help="Release version to include, for example 0.6.0 or v0.6.0"
+flag "--check" help="Verify CHANGELOG.md is already up to date"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="${usage_version:-}"
+if [[ -n "$version" ]]; then
+  version="v${version#v}"
+fi
+
+args=()
+if [[ -n "$version" ]] && ! git rev-parse --verify --quiet "refs/tags/$version" >/dev/null; then
+  args+=(--tag "$version")
+fi
+
+if [[ "${usage_check:-false}" == "true" ]]; then
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' EXIT
+  RUST_LOG=error git-cliff "${args[@]}" --output "$tmp"
+  cmp -s "$tmp" CHANGELOG.md || {
+    echo "CHANGELOG.md is not up to date; run mise run changelog ${usage_version:-}" >&2
+    exit 1
+  }
+  echo "CHANGELOG.md is up to date"
+else
+  RUST_LOG=error git-cliff "${args[@]}" --output CHANGELOG.md
+fi
+'''
 
 [tasks.dev-dashboard]
 description = "Run the dashboard with local assets and restart on Rust changes"

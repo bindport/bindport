@@ -89,7 +89,7 @@ if [[ "$version" =~ ^0\.0\. ]]; then
   exit 1
 fi
 
-for command in cargo git npm node; do
+for command in cargo git git-cliff npm node; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "required command not found: $command" >&2
     exit 1
@@ -125,6 +125,18 @@ if [[ "$npm_private" == "true" ]]; then
 fi
 node scripts/npm-package-utils.js validate "$version"
 node scripts/check-binstall-metadata.js
+changelog_tmp="$(mktemp)"
+trap 'rm -f "$changelog_tmp"' EXIT
+changelog_args=(--output "$changelog_tmp")
+if ! git rev-parse --verify --quiet "refs/tags/v$version" >/dev/null; then
+  changelog_args=(--tag "v$version" "${changelog_args[@]}")
+fi
+RUST_LOG=error git-cliff "${changelog_args[@]}"
+if ! cmp -s "$changelog_tmp" CHANGELOG.md; then
+  echo "CHANGELOG.md is not up to date; run mise run changelog $version" >&2
+  exit 1
+fi
+echo "CHANGELOG.md is up to date"
 
 git diff --check
 
