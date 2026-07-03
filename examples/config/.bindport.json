@@ -13,9 +13,6 @@
       "token_env": "BINDPORT_DASHBOARD_TOKEN"
     }
   },
-  "identity": {
-    "strategy": "git-worktree"
-  },
   "output_defaults": {
     "root": ".bindport/generated",
     "target_host": "127.0.0.1",
