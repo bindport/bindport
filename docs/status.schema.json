@@ -191,6 +191,7 @@
           "type": "string",
           "enum": [
             "active",
+            "reserved",
             "stopped",
             "stale"
           ]

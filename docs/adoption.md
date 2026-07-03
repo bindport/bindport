@@ -104,6 +104,15 @@ bindport open web --print
 Add outputs later only when an external tool, such as Traefik, needs generated
 route files.
 
+For services started by another tool, such as Docker Compose, reserve the port
+first and pass the assigned value to that tool's own config or command:
+
+```sh
+bindport reserve web
+bindport status --json
+bindport release web
+```
+
 ## Framework Examples
 
 Next.js:

@@ -46,8 +46,8 @@ The current source tree includes:
 - Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
   crates.
 - CLI support for `--help`, `--version`, `status`, `open`, `config explain`,
-  `config validate`, `doctor`, `clean`, `dashboard`, and one-shot
-  `bindport -- <command>` command wrapping.
+  `config validate`, `doctor`, `clean`, `dashboard`, `reserve`, `release`, and
+  one-shot `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
   `.bindport.yaml`, with a fallback user config in the XDG config directory.
 - Basic project/service identity resolution from environment, config,
@@ -57,7 +57,8 @@ The current source tree includes:
 - Service command, argument, and env templates through `[[services]].command`,
   `[[services]].args`, `[[services]].env`, and `bindport run --env`, including
   route hostname metadata when configured.
-- Basic SQLite-backed lease/run/output recording with `bindport status --json`.
+- Basic SQLite-backed lease/run/output recording with `bindport status --json`,
+  including reserved leases for processes BindPort does not wrap.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, known registry listener conflicts, unknown OS listener
   conflicts, and the next candidate port.
@@ -113,6 +114,8 @@ cargo run -p bindport -- init --user
 cargo run -p bindport -- status --json
 cargo run -p bindport -- open web --print
 cargo run -p bindport -- clean --dry-run
+cargo run -p bindport -- reserve web
+cargo run -p bindport -- release web
 cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- doctor outputs
 cargo run -p bindport -- templates list
@@ -191,6 +194,10 @@ but checked-in project config cannot enable hook execution by itself. Approve
 or deny configured hooks per machine with `bindport hooks trust|deny|reset`.
 `bindport render --repair` reconciles DB-owned files without adopting unknown
 files.
+`bindport reserve [service]` allocates and holds a port without running a child
+process, which is useful for compose-managed or otherwise external services.
+`bindport release [service|port]` releases a reserved lease and marks it
+stopped so normal cleanup can remove it.
 Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
@@ -277,6 +284,14 @@ and `--health-url TEMPLATE` override service config for a single run.
 `BINDPORT_HOSTNAME`, `BINDPORT_ROUTE_URL`, and
 `BINDPORT_HEALTH_URL` can also override the matching service config values for
 wrapper scripts.
+
+For services started by another tool, reserve a BindPort port without wrapping a
+process:
+
+```sh
+bindport reserve web
+bindport release web
+```
 
 ## Registry Cleanup
 

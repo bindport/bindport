@@ -137,18 +137,23 @@ impl Registry {
                     leases.route_url,
                     leases.health_url,
                     runs.pid,
-                    runs.command,
-                    runs.cwd,
-                    runs.started_at,
+                    COALESCE(runs.command, 'reserved'),
+                    COALESCE(runs.cwd, ''),
+                    COALESCE(runs.started_at, leases.allocated_at),
                     runs.exited_at,
                     runs.exit_code,
                     CAST((julianday('now') - julianday(runs.started_at)) * 86400000 AS INTEGER)
                  FROM leases
-                 JOIN runs ON runs.lease_id = leases.id
+                 LEFT JOIN runs ON runs.id = (
+                    SELECT latest_runs.id
+                    FROM runs latest_runs
+                    WHERE latest_runs.lease_id = leases.id
+                    ORDER BY latest_runs.started_at DESC, latest_runs.id DESC
+                    LIMIT 1
+                 )
                  JOIN (
-                    SELECT MAX(runs.id) AS latest_run_id
+                    SELECT MAX(leases.id) AS latest_lease_id
                     FROM leases
-                    JOIN runs ON runs.lease_id = leases.id
                     GROUP BY COALESCE(
                         leases.identity_key,
                         leases.project
@@ -161,8 +166,8 @@ impl Registry {
                             || char(31)
                             || leases.host
                     )
-                 ) latest_services ON latest_services.latest_run_id = runs.id
-                 ORDER BY runs.started_at DESC, runs.id DESC",
+                 ) latest_services ON latest_services.latest_lease_id = leases.id
+                 ORDER BY COALESCE(runs.started_at, leases.allocated_at) DESC, leases.id DESC",
             )?;
             let rows = statement.query_map([], |row| {
                 let host = row.get::<_, String>(4)?;

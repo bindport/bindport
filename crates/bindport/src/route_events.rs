@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RouteEventSource {
     CliRunner,
+    CliReserve,
     CliClean,
     DashboardClean,
     ManualRender,
@@ -13,6 +14,7 @@ impl RouteEventSource {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::CliRunner => "cli_runner",
+            Self::CliReserve => "cli_reserve",
             Self::CliClean => "cli_clean",
             Self::DashboardClean => "dashboard_clean",
             Self::ManualRender => "manual_render",
