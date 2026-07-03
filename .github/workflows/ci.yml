@@ -40,47 +40,76 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Install Cargo-based CI tools
-        run: mise install --locked --jobs=1 cargo:cargo-audit cargo:cargo-llvm-cov
+        run: |
+          set -euo pipefail
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          curl -fsSLo "$tmp/cargo-audit.tgz" https://github.com/rustsec/rustsec/releases/download/cargo-audit/v0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz
+          echo "ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39  $tmp/cargo-audit.tgz" | sha256sum -c -
+          tar -xzf "$tmp/cargo-audit.tgz" -C "$tmp"
+          install -m 0755 "$tmp/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit" "$HOME/.cargo/bin/cargo-audit"
+
+          curl -fsSLo "$tmp/cargo-llvm-cov.tar.gz" https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.8.7/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz
+          echo "9a75fe29538d3800b3da57f6f6efb64cba5c720a257bf0cb8b51f39d495a9168  $tmp/cargo-llvm-cov.tar.gz" | sha256sum -c -
+          tar -xzf "$tmp/cargo-llvm-cov.tar.gz" -C "$tmp"
+          install -m 0755 "$tmp/cargo-llvm-cov" "$HOME/.cargo/bin/cargo-llvm-cov"
 
       - name: Format
-        run: mise run fmt
+        run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: mise run clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Check platform cfg guards
-        run: mise run platform-guard
+        run: python3 scripts/check-platform-cfg-guards.py
 
       - name: Lint workflows
-        run: mise run workflow-lint
+        run: actionlint
 
       - name: Audit Rust dependencies
         if: ${{ !cancelled() }}
-        run: mise run audit
+        run: cargo audit
 
       - name: Check dependency substitutions
         if: ${{ !cancelled() }}
-        run: mise run dependency-guard
+        run: |
+          set -euo pipefail
+
+          for package in zmij yaml_serde libyaml-rs; do
+            if cargo tree --locked -p "$package" >/dev/null 2>&1; then
+              echo "banned dependency present: $package" >&2
+              exit 1
+            fi
+          done
+
+          for package in ryu serde_yaml_ng unsafe-libyaml; do
+            if ! cargo tree --locked -p "$package" >/dev/null 2>&1; then
+              echo "required dependency missing: $package" >&2
+              exit 1
+            fi
+          done
 
       - name: Scan for leaked secrets
         if: ${{ !cancelled() }}
-        run: mise run secret-scan
+        run: gitleaks detect --source . --redact --no-banner
 
       - name: Scan filesystem security posture
         if: ${{ !cancelled() }}
-        run: mise run security-scan
+        run: trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --exit-code 1 --skip-dirs target --skip-dirs .git --no-progress .
 
       - name: Coverage
-        run: mise run coverage
+        run: cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90 --locked
 
       - name: Build release binary
-        run: mise run build
+        run: cargo build --release --locked
 
       - name: Validate cargo-binstall metadata
-        run: mise run binstall-metadata
+        run: node scripts/check-binstall-metadata.js
 
       - name: Smoke test npm wrapper
-        run: mise run npm-smoke
+        run: scripts/npm-smoke.sh
 
   macos:
     name: macos compatibility

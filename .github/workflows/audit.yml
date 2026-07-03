@@ -17,14 +17,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install mise
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-        with:
-          version: 2026.6.6
-          sha256: b8c25ad5e1c178bb7ba1e0fca9066153f8ef1b28bf5a8456c20a8acd2522e556
-          install: true
-          install_args: --locked --jobs=1 cargo:cargo-audit
-          cache: true
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Install cargo-audit
+        run: |
+          set -euo pipefail
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          curl -fsSLo "$tmp/cargo-audit.tgz" https://github.com/rustsec/rustsec/releases/download/cargo-audit/v0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz
+          echo "ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39  $tmp/cargo-audit.tgz" | sha256sum -c -
+          tar -xzf "$tmp/cargo-audit.tgz" -C "$tmp"
+          install -m 0755 "$tmp/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit" "$HOME/.cargo/bin/cargo-audit"
 
       - name: Audit Rust dependencies
-        run: mise run audit
+        run: cargo audit
