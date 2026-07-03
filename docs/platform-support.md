@@ -12,7 +12,7 @@ post-1.0 and is not a supported install target yet.
 | Cargo install | Linux/macOS through `cargo install bindport` |
 | npm install | `bindport` wrapper plus Linux/macOS native packages |
 | GitHub Release assets | Linux/macOS raw binaries and npm tarballs |
-| CI compatibility | Linux full CI, macOS compatibility build/test |
+| CI compatibility | Linux full CI, macOS compatibility build/test/npm smoke |
 | Windows | Post-1.0; not supported yet |
 
 ## Paths
@@ -71,7 +71,8 @@ GitHub Actions:
 
 - Linux runs the full CI gate, including the platform cfg guard and npm wrapper
   smoke test.
-- macOS runs clippy, tests, and release build as a compatibility gate.
+- macOS runs clippy, tests, release build, and npm wrapper smoke as a
+  compatibility gate.
 - Release builds Linux/macOS x64/arm64 binaries and matching npm tarballs.
 
 The platform cfg guard catches Linux-only `#[cfg(target_os = "linux")]` patterns
