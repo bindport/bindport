@@ -8,6 +8,11 @@ Cargo and npm package publishing are manual. The GitHub Release workflow builds
 native binaries and npm tarballs; separate publish workflows/scripts push those
 reviewed artifacts to crates.io and npm.
 
+GitHub Releases also include `bindport-completions.tar.gz` and
+`bindport-manpage.tar.gz`. These are static release assets sourced from
+`packaging/`, validated by `scripts/check-cli-assets.sh`, and intended for
+package-manager formulas such as the Homebrew tap.
+
 ## Current Status
 
 BindPort v0.5.1 is the release described by this document. Cargo and npm are
@@ -608,6 +613,8 @@ run:
   `dry_run=false`.
 - The `Release` workflow uploads native binaries and checksums to GitHub
   Releases.
+- The `Release` workflow uploads shell completion and manpage tarballs plus
+  checksums to GitHub Releases.
 - The `Cargo Publish` workflow may publish crates.io packages only when manually
   dispatched with `execute=true` and approved through the `crates-io`
   environment.

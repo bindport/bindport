@@ -76,6 +76,8 @@ The current source tree includes:
   workflows, and local `mise` tasks.
 - npm wrapper plus Linux/macOS x64/arm64 platform packages for installing
   native binaries through JavaScript package managers.
+- Release artifacts for bash, zsh, and fish shell completions plus a
+  `bindport.1` man page.
 - Example `.bindport.toml`, `.bindport.json`, and `.bindport.yaml` files.
 
 The current support target is Linux and macOS-style local development. Windows

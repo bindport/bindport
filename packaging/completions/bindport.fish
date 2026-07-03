@@ -1,0 +1,78 @@
+# fish completion for bindport
+
+complete -c bindport -f
+
+complete -c bindport -l help -s h -d 'Show help'
+complete -c bindport -l version -d 'Print version'
+
+complete -c bindport -n '__fish_use_subcommand' -a run -d 'Run a command or configured service command'
+complete -c bindport -n '__fish_use_subcommand' -a reserve -d 'Hold a port without running a child process'
+complete -c bindport -n '__fish_use_subcommand' -a release -d 'Release a reserved port'
+complete -c bindport -n '__fish_use_subcommand' -a status -d 'Show registry status'
+complete -c bindport -n '__fish_use_subcommand' -a open -d 'Print or open the best service URL'
+complete -c bindport -n '__fish_use_subcommand' -a clean -d 'Remove stopped and stale registry entries'
+complete -c bindport -n '__fish_use_subcommand' -a config -d 'Explain or validate config'
+complete -c bindport -n '__fish_use_subcommand' -a hooks -d 'Inspect or manage hook trust'
+complete -c bindport -n '__fish_use_subcommand' -a doctor -d 'Show bootstrap diagnostics'
+complete -c bindport -n '__fish_use_subcommand' -a dashboard -d 'Serve or control the local dashboard'
+complete -c bindport -n '__fish_use_subcommand' -a render -d 'Render configured output files'
+complete -c bindport -n '__fish_use_subcommand' -a templates -d 'List, show, or export output templates'
+complete -c bindport -n '__fish_use_subcommand' -a init -d 'Create project or user config'
+
+complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l env -r -d 'Add a templated child environment variable'
+complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l hostname -r -d 'Set route hostname metadata'
+complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l route-url -r -d 'Set route URL metadata'
+complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l health-url -r -d 'Set service health check URL metadata'
+
+complete -c bindport -n '__fish_seen_subcommand_from status' -l json -d 'Print machine-readable status'
+
+complete -c bindport -n '__fish_seen_subcommand_from open' -l project -r -d 'Disambiguate services with the same name'
+complete -c bindport -n '__fish_seen_subcommand_from open' -l browser -d 'Open the URL with the system browser'
+complete -c bindport -n '__fish_seen_subcommand_from open' -l print -d 'Print without launching a browser'
+
+complete -c bindport -n '__fish_seen_subcommand_from clean' -l dry-run -d 'Show what would be removed without deleting entries'
+complete -c bindport -n '__fish_seen_subcommand_from clean' -l stopped -d 'Remove stopped entries only'
+complete -c bindport -n '__fish_seen_subcommand_from clean' -l stale -d 'Remove stale entries only'
+complete -c bindport -n '__fish_seen_subcommand_from clean' -l all -d 'Remove stopped and stale entries'
+complete -c bindport -n '__fish_seen_subcommand_from clean' -l json -d 'Print machine-readable cleanup counts'
+complete -c bindport -n '__fish_seen_subcommand_from clean' -l yes -s y -d 'Confirm stale entry deletion without prompting'
+
+complete -c bindport -n '__fish_seen_subcommand_from config' -a explain -d 'Show resolved config fields and identity sources'
+complete -c bindport -n '__fish_seen_subcommand_from config' -a validate -d 'Validate config structure'
+
+complete -c bindport -n '__fish_seen_subcommand_from hooks' -a status -d 'Inspect configured hook trust'
+complete -c bindport -n '__fish_seen_subcommand_from hooks' -a trust -d 'Trust configured hooks'
+complete -c bindport -n '__fish_seen_subcommand_from hooks' -a deny -d 'Deny configured hooks'
+complete -c bindport -n '__fish_seen_subcommand_from hooks' -a reset -d 'Reset hook trust decisions'
+complete -c bindport -n '__fish_seen_subcommand_from hooks' -l scope -xa 'worktree repo' -d 'Trust scope'
+complete -c bindport -n '__fish_seen_subcommand_from hooks' -l all -d 'Select every configured hook'
+
+complete -c bindport -n '__fish_seen_subcommand_from doctor' -a outputs -d 'Validate output rendering setup'
+
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -a serve -d 'Serve the local dashboard'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -a start -d 'Start the dashboard in the background'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -a status -d 'Show background dashboard status'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -a stop -d 'Stop the background dashboard'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l host -r -d 'Bind IP address'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l port -r -d 'Preferred dashboard port'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l auth -xa 'required disabled' -d 'Authentication mode'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l auth-required -d 'Require bearer token access'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l no-auth -d 'Disable bearer token checks'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l register-service -d 'Record the dashboard in BindPort status'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l no-register-service -d 'Do not record the dashboard in BindPort status'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l token -r -d 'Bearer token value'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l token-env -r -d 'Environment variable containing the token'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l allowed-host -r -d 'Additional accepted HTTP Host header'
+complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l static-dir -r -d 'Read dashboard assets from a local directory'
+
+complete -c bindport -n '__fish_seen_subcommand_from render' -l all -d 'Render every enabled output'
+complete -c bindport -n '__fish_seen_subcommand_from render' -l dry-run -d 'Render templates and print targets without writing files'
+complete -c bindport -n '__fish_seen_subcommand_from render' -l repair -d 'Re-render current routes and reconcile DB-owned files'
+
+complete -c bindport -n '__fish_seen_subcommand_from templates' -a list -d 'List resolved output templates'
+complete -c bindport -n '__fish_seen_subcommand_from templates' -a show -d 'Show a resolved output template'
+complete -c bindport -n '__fish_seen_subcommand_from templates' -a export -d 'Export a resolved output template'
+complete -c bindport -n '__fish_seen_subcommand_from templates' -l source -xa 'project global built-in' -d 'Resolve only one template source'
+
+complete -c bindport -n '__fish_seen_subcommand_from init' -l project -d 'Create .bindport.toml in the current directory'
+complete -c bindport -n '__fish_seen_subcommand_from init' -l user -d 'Create optional user fallback config'

@@ -1,0 +1,190 @@
+.TH BINDPORT 1 "2026-07-03" "BindPort" "User Commands"
+.SH NAME
+bindport \- proxy-neutral local development port registry and runner
+.SH SYNOPSIS
+.B bindport
+.B --
+.I command
+.br
+.B bindport
+.B run
+.RI [ service ]
+.RI [ options ]
+.B --
+.I command
+.br
+.B bindport
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+BindPort wraps local development commands, assigns a stable loopback port,
+records project and service identity in a local SQLite registry, and can render
+configuration files for existing local proxy stacks. It does not bind ports 80
+or 443, install certificates, mutate DNS, edit
+.IR /etc/hosts ,
+or run a privileged local edge proxy by default.
+.SH COMMANDS
+.TP
+.B run [service] [options] [-- command]
+Run a command or configured service command with an assigned
+.B PORT
+environment variable.
+.TP
+.B -- command
+Shortcut for wrapping a command with an assigned
+.BR PORT .
+.TP
+.B reserve [service]
+Hold a BindPort lease without running a child process.
+.TP
+.B release [service|port]
+Release a reserved lease by service identity or port.
+.TP
+.B status [--json]
+Show registry status. Use
+.B --json
+for machine-readable output.
+.TP
+.B open [service]
+Print or open the best URL for a service.
+.TP
+.B clean [options]
+Remove stopped and stale registry entries. Stale cleanup requires confirmation
+unless
+.B --yes
+is supplied.
+.TP
+.B config explain
+Show resolved config fields and identity sources.
+.TP
+.B config validate
+Validate config structure and report actionable errors.
+.TP
+.B hooks status
+Inspect configured hook trust and execution state.
+.TP
+.B hooks trust|deny|reset [--scope worktree|repo] <hook|--all>
+Manage local hook trust decisions. Hooks do not execute until explicitly
+trusted.
+.TP
+.B doctor
+Show bootstrap diagnostics for config, registry, listeners, and allocation.
+.TP
+.B doctor outputs
+Validate output rendering setup without writing files.
+.TP
+.B dashboard [serve]
+Serve the local dashboard.
+.TP
+.B dashboard start|status|stop
+Control the background dashboard service.
+.TP
+.B render [output]
+Render configured output files.
+.TP
+.B templates list|show|export
+Inspect or export output templates.
+.TP
+.B init [--project|--user]
+Create project config in the current directory or optional user fallback
+config.
+.SH RUN OPTIONS
+.TP
+.BI --env " NAME=VALUE"
+Add a templated child environment variable.
+.TP
+.BI --hostname " template"
+Set route hostname metadata.
+.TP
+.BI --route-url " template"
+Set route URL metadata.
+.TP
+.BI --health-url " template"
+Set service health check URL metadata.
+.SH CLEAN OPTIONS
+.TP
+.B --dry-run
+Show what would be removed without deleting entries.
+.TP
+.B --stopped
+Remove stopped entries only.
+.TP
+.B --stale
+Remove stale entries only.
+.TP
+.B --all
+Remove stopped and stale entries. This is the default.
+.TP
+.B --json
+Print machine-readable cleanup counts.
+.TP
+.B -y, --yes
+Confirm stale entry deletion without prompting.
+.SH DASHBOARD OPTIONS
+.TP
+.BI --host " ip"
+Bind IP address. The default is
+.BR 127.0.0.1 .
+.TP
+.BI --port " port"
+Preferred dashboard port. The default is
+.BR 27080 .
+.TP
+.BI --auth " required|disabled"
+Set dashboard authentication mode.
+.TP
+.B --auth-required
+Require bearer token access to dashboard data.
+.TP
+.B --no-auth
+Disable dashboard bearer token checks.
+.TP
+.B --register-service
+Record the dashboard in BindPort status.
+.TP
+.B --no-register-service
+Do not record the dashboard in BindPort status.
+.TP
+.BI --token " token"
+Bearer token value. Prefer
+.B --token-env
+to avoid exposing token values in process lists.
+.TP
+.BI --token-env " name"
+Environment variable containing the bearer token.
+.TP
+.BI --allowed-host " host"
+Additional accepted HTTP Host header.
+.TP
+.BI --static-dir " path"
+Read dashboard assets from a local directory.
+.SH FILES
+.TP
+.I .bindport.toml
+Project config in the current repository or workspace.
+.TP
+.I .bindport.local.toml
+Private machine-local override config. This file should not be committed.
+.TP
+.I $XDG_CONFIG_HOME/bindport/config.toml
+Optional user fallback config.
+.TP
+.I $XDG_STATE_HOME/bindport/registry.sqlite3
+Default SQLite registry path on Linux-style systems.
+.SH ENVIRONMENT
+.TP
+.B PORT
+Assigned port injected into wrapped child processes.
+.TP
+.B BINDPORT_PROJECT
+Project identity override.
+.TP
+.B BINDPORT_SERVICE
+Service identity override.
+.SH EXIT STATUS
+When wrapping a child process, BindPort exits with the child process exit code.
+Command parsing, config, registry, or render errors exit non-zero.
+.SH SEE ALSO
+Project documentation:
+.UR https://github.com/bindport/bindport
+.UE

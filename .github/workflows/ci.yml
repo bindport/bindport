@@ -108,6 +108,9 @@ jobs:
       - name: Validate cargo-binstall metadata
         run: node scripts/check-binstall-metadata.js
 
+      - name: Validate CLI release assets
+        run: scripts/check-cli-assets.sh
+
       - name: Smoke test npm wrapper
         run: scripts/npm-smoke.sh
 
