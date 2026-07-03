@@ -45,6 +45,10 @@ run = "cargo check --all-targets"
 description = "Build the release binary"
 run = "cargo build --release --locked"
 
+[tasks.binstall-metadata]
+description = "Validate cargo-binstall release asset metadata"
+run = "node scripts/check-binstall-metadata.js"
+
 [tasks.dev-dashboard]
 description = "Run the dashboard with local assets and restart on Rust changes"
 run = "BINDPORT_DASHBOARD_STATIC_DIR=crates/bindport-dashboard/static watchexec --restart --clear --watch Cargo.toml --watch Cargo.lock --watch crates/bindport/Cargo.toml --watch crates/bindport/src --watch crates/bindport-adapters/Cargo.toml --watch crates/bindport-adapters/src --watch crates/bindport-core/Cargo.toml --watch crates/bindport-core/src --watch crates/bindport-dashboard/Cargo.toml --watch crates/bindport-dashboard/src --watch crates/bindport-registry/Cargo.toml --watch crates/bindport-registry/src --watch crates/bindport-runner/Cargo.toml --watch crates/bindport-runner/src -- cargo run -p bindport -- dashboard serve --static-dir crates/bindport-dashboard/static"
@@ -305,5 +309,6 @@ mise run security-scan
 mise run test
 mise run coverage
 mise run build
+mise run binstall-metadata
 mise run npm-smoke
 '''
