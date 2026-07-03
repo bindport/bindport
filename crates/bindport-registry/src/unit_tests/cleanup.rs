@@ -110,3 +110,66 @@ fn prune_oldest_stale_leases_removes_only_pressure_excess() {
     assert_eq!(snapshot.services.len(), 2);
     assert_eq!(snapshot.runs.len(), 2);
 }
+
+#[cfg(unix)]
+#[test]
+fn prune_oldest_stale_leases_preserves_active_reserved_and_stopped() {
+    let mut registry = Registry::open(temp_registry_path("prune-preserve")).expect("registry");
+
+    registry
+        .record_run_started(&test_run_start(
+            "bindport",
+            "active",
+            29_510,
+            std::process::id(),
+        ))
+        .expect("record active");
+    registry
+        .record_reserved_lease(&ReserveLease {
+            project: String::from("bindport"),
+            service: String::from("reserved"),
+            identity: None,
+            host: String::from("127.0.0.1"),
+            port: 29_511,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        })
+        .expect("record reserved");
+    let stopped = registry
+        .record_run_started(&test_run_start("bindport", "stopped", 29_512, 12_345))
+        .expect("record stopped");
+    registry
+        .record_run_finished(stopped, Some(0))
+        .expect("record stopped finish");
+
+    for index in 0..2 {
+        registry
+            .record_run_started(&test_run_start(
+                "bindport",
+                &format!("stale-{index}"),
+                29_513 + index,
+                2_000_000_000 + index as u32,
+            ))
+            .expect("record stale candidate");
+    }
+
+    let summary = registry
+        .prune_oldest_stale_leases(29_510, 29_514, 2, false)
+        .expect("prune stale");
+
+    assert_eq!(summary.stale_leases, 2);
+    assert_eq!(summary.runs, 2);
+
+    let snapshot = registry.status_snapshot().expect("snapshot");
+    let states = snapshot
+        .services
+        .iter()
+        .map(|service| (service.service.as_str(), service.state.as_str()))
+        .collect::<Vec<_>>();
+
+    assert!(states.contains(&("active", "active")));
+    assert!(states.contains(&("reserved", "reserved")));
+    assert!(states.contains(&("stopped", "stopped")));
+    assert!(!states.iter().any(|(_, state)| *state == "stale"));
+}

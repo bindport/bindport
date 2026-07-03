@@ -38,6 +38,33 @@ pub fn reserve_registry_port(registry_path: &Path, port: u16) {
         .expect("reserve registry port");
 }
 
+#[cfg(unix)]
+pub fn record_stale_registry_service(registry_path: &Path, service: &str, port: u16) {
+    let mut registry = Registry::open(registry_path).expect("registry");
+    let identity = ServiceIdentity {
+        project: String::from("pressure-project"),
+        service: service.to_string(),
+        git: None,
+        identity_key: format!("v1:pressure-project:{service}"),
+    };
+
+    registry
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+            pid: 2_000_000_000,
+            command: String::from("stale fixture"),
+            cwd: PathBuf::from("/tmp/bindport-stale-fixture"),
+        })
+        .expect("record stale registry service");
+}
+
 pub fn record_registry_service(registry_path: &Path, service: &str, port: u16) {
     let mut registry = Registry::open(registry_path).expect("registry");
     let identity = ServiceIdentity {
