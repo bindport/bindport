@@ -74,6 +74,60 @@ fn reserve_records_reserved_service_and_reuses_identity_port() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn reserve_prunes_oldest_stale_leases_under_range_pressure() {
+    let registry_path = temp_registry_path("reserve-pressure-cleanup");
+    let root = temp_test_dir("reserve-pressure-cleanup-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"pressure-project\"\nservice = \"web\"\ndefault_range = \"29364-29367\"\nskip_ports = []\n",
+    )
+    .expect("write project config");
+
+    for index in 0..3 {
+        record_stale_registry_service(
+            &registry_path,
+            &format!("reserve-stale-{index}"),
+            29_364 + index,
+        );
+    }
+
+    let reserve = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve"])
+        .output()
+        .expect("reserve port");
+    assert!(
+        reserve.status.success(),
+        "reserve failed: {}",
+        String::from_utf8_lossy(&reserve.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&reserve.stderr)
+            .contains("bindport: pruned 1 stale registry entries under configured range pressure")
+    );
+
+    let status_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status");
+    let services = status["services"].as_array().expect("services");
+    let stale_count = services
+        .iter()
+        .filter(|service| service["state"] == "stale")
+        .count();
+
+    assert_eq!(stale_count, 2);
+    assert!(
+        services
+            .iter()
+            .any(|service| { service["service"] == "web" && service["state"] == "reserved" })
+    );
+}
+
 #[test]
 fn release_frees_reserved_service_for_future_runs() {
     let registry_path = temp_registry_path("release-service");
