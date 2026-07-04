@@ -18,7 +18,7 @@ fn previous_identity_port_returns_latest_matching_lease() {
             route_url: None,
             health_url: None,
             pid: std::process::id(),
-            command: String::from("next dev"),
+            command: current_process_command(),
             cwd: PathBuf::from("/tmp/bindport"),
         })
         .expect("record first start");
@@ -36,7 +36,7 @@ fn previous_identity_port_returns_latest_matching_lease() {
             route_url: None,
             health_url: None,
             pid: std::process::id(),
-            command: String::from("next dev"),
+            command: current_process_command(),
             cwd: PathBuf::from("/tmp/bindport"),
         })
         .expect("record second start");
@@ -54,7 +54,7 @@ fn previous_identity_port_returns_latest_matching_lease() {
             route_url: None,
             health_url: None,
             pid: std::process::id(),
-            command: String::from("next dev"),
+            command: current_process_command(),
             cwd: PathBuf::from("/tmp/bindport"),
         })
         .expect("record other start");

@@ -140,7 +140,7 @@ fn open_command_result_handles_help_registry_errors_and_success() {
             route_url: Some(String::from("https://feature.demo.localhost")),
             health_url: None,
             pid: std::process::id(),
-            command: String::from("next dev"),
+            command: current_process_command(),
             cwd: PathBuf::from("/workspace/demo"),
         })
         .expect("record service");

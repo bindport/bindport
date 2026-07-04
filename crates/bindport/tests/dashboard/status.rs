@@ -124,7 +124,7 @@ fn dashboard_status_api_handles_100_services() {
                 route_url: None,
                 health_url: None,
                 pid: std::process::id(),
-                command: String::from("bulk fixture"),
+                command: current_process_command(),
                 cwd: PathBuf::from("/tmp/bindport-bulk-fixture"),
             })
             .expect("record bulk service");

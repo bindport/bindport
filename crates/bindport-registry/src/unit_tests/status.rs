@@ -76,7 +76,7 @@ fn status_snapshot_reports_service_outputs_and_traefik_proxy_alias() {
             route_url: Some(String::from("http://status.localhost")),
             health_url: None,
             pid: std::process::id(),
-            command: String::from("next dev"),
+            command: current_process_command(),
             cwd: PathBuf::from("/tmp/bindport"),
         })
         .expect("record start");
