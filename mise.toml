@@ -10,6 +10,7 @@ node = "26.3.0"
 "cargo:cargo-edit" = "0.13.11"
 "cargo:cargo-llvm-cov" = "0.8.7"
 "cargo:git-cliff" = "2.13.0"
+"cargo:mdbook" = "0.5.3"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
 trivy = "0.71.0"
@@ -78,6 +79,14 @@ scripts/homebrew-formula.sh "${args[@]}"
 [tasks.homebrew-formula-check]
 description = "Validate Homebrew formula generation"
 run = "scripts/check-homebrew-formula.sh"
+
+[tasks.docs-build]
+description = "Build the mdBook docs site and publish static discovery files"
+run = "scripts/docs-build.sh"
+
+[tasks.docs-serve]
+description = "Serve the mdBook docs site on 127.0.0.1:4321"
+run = "scripts/docs-serve.sh"
 
 [tasks.changelog]
 description = "Generate CHANGELOG.md with git-cliff"
@@ -377,4 +386,5 @@ mise run binstall-metadata
 mise run cli-assets
 mise run homebrew-formula-check
 mise run npm-smoke
+mise run docs-build
 '''

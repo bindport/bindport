@@ -255,6 +255,6 @@ writing files.
 
 ## Examples
 
-- [Starter TOML/JSON/YAML examples](../examples/config)
+- [Starter TOML/JSON/YAML examples](https://github.com/bindport/bindport/tree/main/examples/config)
 - [Monorepo config guide](monorepos.md)
-- [Two-service monorepo fixture](../examples/monorepo)
+- [Two-service monorepo fixture](https://github.com/bindport/bindport/tree/main/examples/monorepo)

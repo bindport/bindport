@@ -4,6 +4,11 @@ Use this guide when adding BindPort to an existing project. It focuses on the
 files a team should commit, the local files each developer should keep private,
 and the checks to run before relying on the config.
 
+The safest adoption path is incremental. Start by replacing hardcoded ports in
+project scripts. Then add explicit service config. Then add route metadata,
+dashboard usage, outputs, and hooks only when those pieces solve an actual
+workflow problem.
+
 ## Install
 
 For all supported install channels, see [Install BindPort](install.md).
@@ -33,6 +38,10 @@ Project scripts can then call the local executable:
 }
 ```
 
+This is the first value point for a team: every developer and CI job invokes the
+same BindPort version through the project dependency instead of depending on a
+global tool.
+
 ## Initialize
 
 Create the shared project config from the repository root:
@@ -45,6 +54,17 @@ bindport config explain
 
 Commit `.bindport.toml` when it describes shared project behavior. The generated
 config avoids absolute paths and machine-local values by default.
+
+Shared config should answer questions that are true for the project:
+
+- What is the project called?
+- What services exist?
+- Where does each service live?
+- Which command and args start each service?
+- Which route metadata should other tools see?
+- Which generated files should the project own?
+
+It should not answer questions that are true only for one developer's machine.
 
 Use `bindport init --user` only for the optional user fallback config. That file
 lives in the user config directory and is not a project adoption step.
@@ -192,11 +212,11 @@ For `CLAUDE.md`, keep the file as a pointer when the project already has
 ```markdown
 # CLAUDE.md
 
-See [AGENTS.md](./AGENTS.md) for project instructions.
+See AGENTS.md for project instructions.
 ```
 
-A copyable Codex skill is available at
-[docs/agent-skill/bindport-project](agent-skill/bindport-project/SKILL.md).
+A copyable Codex skill is available in the repository at
+[docs/agent-skill/bindport-project](https://github.com/bindport/bindport/blob/main/docs/agent-skill/bindport-project/SKILL.md).
 Install it by copying the `bindport-project` folder into
 `$CODEX_HOME/skills/`, or the equivalent skill directory for the agent runtime.
 Install it only in projects where agents routinely configure or operate
@@ -205,13 +225,13 @@ BindPort.
 Point agents at the detailed docs when they need more than the short project
 rules:
 
-- [Config](config.md): config discovery, supported fields, validation, hooks,
+- [Config](../daily-use/configuration.md): config discovery, supported fields, validation, hooks,
   and placeholders.
-- [Status](status.md): `status --json` schema and service URL lookup.
-- [Templates](templates.md): output templates, render lifecycle, ownership, and
+- [Status](../operations/status.md): `status --json` schema and service URL lookup.
+- [Templates](../integrations/templates.md): output templates, render lifecycle, ownership, and
   Traefik file-provider setup.
-- [Dashboard](dashboard.md): local dashboard service controls and API behavior.
-- [Monorepos](monorepos.md): root config, service paths, local overrides, and
+- [Dashboard](../integrations/dashboard.md): local dashboard service controls and API behavior.
+- [Monorepos](../daily-use/monorepos.md): root config, service paths, local overrides, and
   workspace inference.
 
 ## Adoption Checks
