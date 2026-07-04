@@ -61,9 +61,19 @@ fn test_run_start(project: &str, service: &str, port: u16, pid: u32) -> RunStart
         route_url: None,
         health_url: None,
         pid,
-        command: String::from("next dev"),
+        command: current_process_command(),
         cwd: PathBuf::from("/tmp/bindport"),
     }
+}
+
+fn current_process_command() -> String {
+    env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| String::from("bindport test"))
 }
 
 fn mark_latest_run_started_before_grace(registry: &Registry) {

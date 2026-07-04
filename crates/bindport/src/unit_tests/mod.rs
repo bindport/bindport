@@ -87,6 +87,16 @@ fn temp_registry_path(name: &str) -> PathBuf {
     temp_test_dir(name).join("registry.sqlite")
 }
 
+fn current_process_command() -> String {
+    env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| String::from("bindport test"))
+}
+
 fn with_default_registry_path<T>(path: &Path, callback: impl FnOnce() -> T) -> T {
     let _guard = TEST_ENV_LOCK.lock().expect("test env lock");
     let previous = env::var_os(REGISTRY_PATH_ENV);

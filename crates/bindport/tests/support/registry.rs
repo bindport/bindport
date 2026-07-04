@@ -12,6 +12,16 @@ pub fn doctor_candidate_port(stdout: &str) -> u16 {
         .expect("candidate is a port")
 }
 
+pub fn current_process_command() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| String::from("bindport test"))
+}
+
 pub fn reserve_registry_port(registry_path: &Path, port: u16) {
     let mut registry = Registry::open(registry_path).expect("registry");
     let identity = ServiceIdentity {
@@ -32,7 +42,7 @@ pub fn reserve_registry_port(registry_path: &Path, port: u16) {
             route_url: None,
             health_url: None,
             pid: std::process::id(),
-            command: String::from("busy fixture"),
+            command: current_process_command(),
             cwd: PathBuf::from("/tmp/bindport-busy-fixture"),
         })
         .expect("reserve registry port");
@@ -85,7 +95,7 @@ pub fn record_registry_service(registry_path: &Path, service: &str, port: u16) {
             route_url: None,
             health_url: None,
             pid: std::process::id(),
-            command: String::from("doctor output fixture"),
+            command: current_process_command(),
             cwd: std::env::temp_dir().join("bindport-doctor-output-fixture"),
         })
         .expect("record registry service");

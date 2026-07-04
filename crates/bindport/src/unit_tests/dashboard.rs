@@ -436,7 +436,32 @@ fn dashboard_process_helpers_match_current_process_shape() {
             process_start_time: None,
         };
 
-        assert!(dashboard_process_matches_state(&state));
         assert!(process_start_time(pid).is_none());
+        assert_eq!(
+            dashboard_process_matches_state(&state),
+            process_cmdline_is_dashboard(pid).unwrap_or(true)
+        );
+        assert_eq!(process_cmdline_is_dashboard(pid), Some(false));
     }
+}
+
+#[test]
+fn dashboard_command_line_detection_requires_dashboard_serve() {
+    assert!(dashboard_args_contain_serve([
+        "bindport",
+        "dashboard",
+        "serve",
+        "--port",
+        "27080"
+    ]));
+    assert!(!dashboard_args_contain_serve([
+        "bindport",
+        "dashboard",
+        "status"
+    ]));
+    assert!(!dashboard_args_contain_serve([
+        "bindport",
+        "serve",
+        "dashboard"
+    ]));
 }
