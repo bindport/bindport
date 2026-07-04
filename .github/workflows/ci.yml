@@ -63,7 +63,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Check platform cfg guards
-        run: python3 scripts/check-platform-cfg-guards.py
+        run: cargo run -p xtask -- platform-guard
 
       - name: Lint workflows
         run: actionlint

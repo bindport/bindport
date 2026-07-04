@@ -8,6 +8,7 @@ members = [
     "crates/bindport-dashboard",
     "crates/bindport-registry",
     "crates/bindport-runner",
+    "xtask",
 ]
 resolver = "3"
 
