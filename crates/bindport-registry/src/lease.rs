@@ -49,6 +49,7 @@ pub(crate) struct ActiveRun {
     pub(crate) run_id: i64,
     pub(crate) pid: u32,
     pub(crate) process_start_time: Option<i64>,
+    pub(crate) command: String,
 }
 
 impl Registry {
@@ -408,7 +409,7 @@ impl Registry {
 
     fn active_runs(&self) -> Result<Vec<ActiveRun>, RegistryError> {
         let mut statement = self.connection.prepare(
-            "SELECT leases.id, runs.id, runs.pid, runs.process_start_time
+            "SELECT leases.id, runs.id, runs.pid, runs.process_start_time, runs.command
              FROM leases
              JOIN runs ON runs.lease_id = leases.id
              WHERE leases.state = 'active'
@@ -420,6 +421,7 @@ impl Registry {
                 run_id: row.get(1)?,
                 pid: row.get(2)?,
                 process_start_time: row.get(3)?,
+                command: row.get(4)?,
             })
         })?;
 

@@ -123,6 +123,26 @@ fn registry_open_reports_parent_and_database_open_errors() {
 }
 
 #[test]
+fn process_command_line_matching_normalizes_recorded_commands() {
+    assert!(command_line_contains_recorded_command(
+        "node   ./node_modules/.bin/vite --host 0.0.0.0",
+        "node ./node_modules/.bin/vite"
+    ));
+    assert!(command_line_contains_recorded_command(
+        "/usr/bin/python3 -m uvicorn example.main:app --port 29123",
+        "python3 -m uvicorn"
+    ));
+    assert!(!command_line_contains_recorded_command(
+        "node other dev",
+        "next dev"
+    ));
+    assert!(!command_line_contains_recorded_command(
+        "node other dev",
+        ""
+    ));
+}
+
+#[test]
 fn registry_records_finished_runs_for_status() {
     let mut registry = Registry::open(temp_registry_path("finished")).expect("registry");
     let started = registry

@@ -72,10 +72,8 @@ pub(crate) fn dashboard_process_matches_state(state: &DashboardServiceState) -> 
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn dashboard_process_matches_state(_state: &DashboardServiceState) -> bool {
-    // Non-Linux targets do not have the /proc fields used above. Dashboard stop
-    // falls back to PID liveness there, which can be fooled by PID reuse.
-    true
+pub(crate) fn dashboard_process_matches_state(state: &DashboardServiceState) -> bool {
+    process_cmdline_is_dashboard(state.pid).unwrap_or(true)
 }
 
 #[cfg(target_os = "linux")]
@@ -98,10 +96,36 @@ pub(crate) fn process_cmdline_is_dashboard(pid: u32) -> bool {
     let args = cmdline
         .split(|byte| *byte == 0)
         .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
         .collect::<Vec<_>>();
 
+    dashboard_args_contain_serve(args.iter().map(String::as_str))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+pub(crate) fn process_cmdline_is_dashboard(pid: u32) -> Option<bool> {
+    let pid = pid.to_string();
+    let output = Command::new("ps")
+        .args(["-p", pid.as_str(), "-o", "command="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout);
+    let args = command.split_whitespace();
+    Some(dashboard_args_contain_serve(args))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn process_cmdline_is_dashboard(_pid: u32) -> Option<bool> {
+    None
+}
+
+pub(crate) fn dashboard_args_contain_serve<'a>(args: impl IntoIterator<Item = &'a str>) -> bool {
+    let args = args.into_iter().collect::<Vec<_>>();
     args.windows(2)
-        .any(|window| window[0] == b"dashboard" && window[1] == b"serve")
+        .any(|window| window[0] == "dashboard" && window[1] == "serve")
 }
 
 #[cfg(unix)]

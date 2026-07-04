@@ -50,9 +50,10 @@ and exits with the child's status code. Dashboard service controls use SIGTERM
 for `bindport dashboard stop`.
 
 Linux has the strongest PID-reuse protection today because BindPort can compare
-recorded process start time and command line through `/proc`. macOS support uses
-PID liveness checks without `/proc` command-line verification, so stale
-dashboard state after PID reuse may require manual cleanup.
+recorded process start time and command line through `/proc`. macOS does not
+expose the same `/proc` start-time fields, so BindPort falls back to PID
+liveness plus command-line inspection through `ps` where command verification is
+needed.
 
 Output files are written with sibling temp files and `rename`, so generated
 template output is atomic on the same filesystem. On Unix platforms, registry
