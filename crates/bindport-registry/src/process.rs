@@ -67,11 +67,33 @@ pub(crate) fn command_line_contains_recorded_command(
 ) -> bool {
     let command_line = normalize_command_text(command_line);
     let expected_command = normalize_command_text(expected_command);
-    !expected_command.is_empty() && command_line.contains(expected_command.as_str())
+    if expected_command.is_empty() {
+        return false;
+    }
+    if command_line.contains(expected_command.as_str()) {
+        return true;
+    }
+    shell_command_payload(expected_command.as_str())
+        .is_some_and(|payload| command_line.contains(payload.as_str()))
 }
 
 fn normalize_command_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn shell_command_payload(command: &str) -> Option<String> {
+    let parts = command.split_whitespace().collect::<Vec<_>>();
+    let program = parts.first()?;
+    if !matches!(
+        *program,
+        "sh" | "/bin/sh" | "bash" | "/bin/bash" | "zsh" | "/bin/zsh"
+    ) {
+        return None;
+    }
+
+    let command_index = parts.iter().position(|part| *part == "-c")?;
+    let payload = parts.get(command_index + 1..)?.join(" ");
+    (!payload.is_empty()).then_some(payload)
 }
 
 #[cfg(unix)]

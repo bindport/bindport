@@ -132,9 +132,21 @@ fn process_command_line_matching_normalizes_recorded_commands() {
         "/usr/bin/python3 -m uvicorn example.main:app --port 29123",
         "python3 -m uvicorn"
     ));
+    assert!(command_line_contains_recorded_command(
+        "sleep 2",
+        "sh -c sleep 2"
+    ));
+    assert!(command_line_contains_recorded_command(
+        "/bin/sleep 2",
+        "/bin/sh -c sleep 2"
+    ));
     assert!(!command_line_contains_recorded_command(
         "node other dev",
         "next dev"
+    ));
+    assert!(!command_line_contains_recorded_command(
+        "sleep 2",
+        "sh -c next dev"
     ));
     assert!(!command_line_contains_recorded_command(
         "node other dev",
