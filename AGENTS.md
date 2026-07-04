@@ -68,25 +68,22 @@ Don't mutate state outside the working tree without being told to.
 - Format check: `cargo fmt --all -- --check`
 - Type check: `cargo check --all-targets`
 - Full local CI: `mise run ci`
+- Docs build: `mise run docs-build`
 - Dashboard dev: `mise run dev-dashboard` (static reload plus Rust server restart)
 - Remote dashboard dev: set `BINDPORT_DASHBOARD_TOKEN`, then `mise run dev-dashboard-remote`
 
 ## Test Watch Outs
 - macOS CI has exposed path and port assumptions: canonicalize temp paths, and use test-owned ports/listener guards instead of shared default port state.
 - Split mixed-responsibility source or test files before adding behavior. Keep moved crate unit tests under `src/unit_tests`; `cargo llvm-cov` excluded `src/tests` from coverage accounting.
+- Prefer `xtask` for repo-maintenance helpers. Do not add Python or ad hoc JS scripts when a small dependency-free Rust helper will work.
 
 ## Project Context
-`bindport -- <command>` wraps a child process, assigns or reuses a stable port,
-records SQLite lease/run state, forwards Unix signals, and retries once if an
-immediate child failure leaves the assigned port occupied. Service config and
-`bindport run` options can inject templated env vars and route metadata.
-
-`bindport doctor` reports obvious registry and OS-listener conflicts, not full
-process ownership diagnostics. `bindport clean` removes stopped/stale registry
-entries only. `bindport dashboard` is a registry dashboard with `serve` and
-background `start` / `status` / `stop`; dashboard write actions are limited to
-stopped/stale cleanup and do not run, reserve, release, start, or stop wrapped
-services.
+`bindport run` wraps a child process, assigns or reuses a stable port, records
+SQLite lease/run state, forwards Unix signals, and can inject templated env vars
+and route metadata. `doctor` reports registry and OS-listener conflicts, not
+full process ownership diagnostics. `dashboard` exposes registry status and
+stopped/stale cleanup only; it does not run, reserve, release, start, or stop
+wrapped services.
 
 ## AI Artifacts
 Do not commit scratch notes, plans, drafts, or transcripts to the repository. Do not reference local scratch workspaces in any committed file, including source code, comments, docstrings, or documentation. Follow local artifact conventions if the developer's environment provides them; otherwise keep these out of the tree entirely.

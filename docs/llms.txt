@@ -1,0 +1,49 @@
+# BindPort
+
+> BindPort is a proxy-neutral local development port registry, allocator,
+> runner, dashboard, integration-file renderer, and trusted hook runner for
+> Linux and macOS development environments.
+
+BindPort wraps local development commands, assigns stable ports, records
+project/service/worktree ownership, exposes route metadata, renders text files
+for tools such as Traefik, and runs locally trusted lifecycle hooks. It is not a
+reverse proxy and does not bind privileged ports, install certificates, mutate
+DNS, edit hosts files, install a root daemon, or kill active processes by
+default.
+
+## Start Here
+
+- [Why BindPort](https://github.com/bindport/bindport/blob/main/docs/getting-started/why-bindport.md): Product value, use cases, boundaries, and tradeoffs.
+- [Concepts](https://github.com/bindport/bindport/blob/main/docs/getting-started/concepts.md): Mental model and scope boundaries.
+- [Install BindPort](https://github.com/bindport/bindport/blob/main/docs/getting-started/install.md): npm, Cargo, Homebrew, binstall, mise/ubi, and GitHub Release installs.
+- [Quick Start](https://github.com/bindport/bindport/blob/main/docs/getting-started/quick-start.md): Run a command, inspect status, open a URL, and clean old state.
+- [Adoption Setup](https://github.com/bindport/bindport/blob/main/docs/getting-started/adoption.md): Add BindPort to a project safely.
+
+## User Documentation
+
+- [CLI Commands](https://github.com/bindport/bindport/blob/main/docs/daily-use/cli.md): Command reference for running, status, cleanup, outputs, dashboard, and hooks.
+- [Running Services](https://github.com/bindport/bindport/blob/main/docs/daily-use/running-services.md): Service commands, args, environment bridging, route metadata, and framework examples.
+- [Configuration](https://github.com/bindport/bindport/blob/main/docs/daily-use/configuration.md): Config discovery, precedence, fields, placeholders, validation, outputs, hooks, and dashboard settings.
+- [Monorepos and Worktrees](https://github.com/bindport/bindport/blob/main/docs/daily-use/monorepos.md): Multi-service repositories, local overrides, and branch/worktree identity.
+- [Dashboard](https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md): Local UI, API, service controls, auth, and cleanup actions.
+- [Templates](https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md): Output templates, MiniJinja, built-ins, Traefik setup, and ownership rules.
+- [Hooks and Trust](https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md): Lifecycle hooks, trust workflow, changed-hook handling, and dashboard visibility.
+- [Status and Cleanup](https://github.com/bindport/bindport/blob/main/docs/operations/status.md): Registry states, JSON status, URL lookup, reservations, and cleanup.
+
+## Reference
+
+- [Security Model](https://github.com/bindport/bindport/blob/main/docs/operations/security.md): Local-first defaults, config safety, output ownership, dashboard auth, and hook trust.
+- [Health and Troubleshooting](https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md): Diagnostics, common failures, and recovery commands.
+- [Platform Support](https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md): Supported OS/package targets, paths, process behavior, and CI gates.
+- [Status JSON Schema](https://github.com/bindport/bindport/blob/main/docs/status.schema.json): Machine-readable `bindport status --json` schema.
+- [Agent and LLM Setup](https://github.com/bindport/bindport/blob/main/docs/reference/agents.md): Agent instructions, Codex skill, and LLM discovery files.
+
+## Project
+
+- [Release Process](https://github.com/bindport/bindport/blob/main/docs/project/release.md): Maintainer release workflow.
+- [Docs Site and AI Discovery](https://github.com/bindport/bindport/blob/main/docs/project/docs-site.md): mdBook site workflow and discovery file notes.
+
+## Optional
+
+- [Repository README](https://github.com/bindport/bindport): High-level project overview and development commands.
+- [Examples](https://github.com/bindport/bindport/tree/main/examples): Config and monorepo fixtures.

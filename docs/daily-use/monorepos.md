@@ -163,5 +163,6 @@ service paths, and output configuration errors.
 
 ## Example
 
-A complete sample monorepo config lives in
-[examples/monorepo](../examples/monorepo).
+A complete sample monorepo config lives in the
+[examples/monorepo](https://github.com/bindport/bindport/tree/main/examples/monorepo)
+fixture.

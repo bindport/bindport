@@ -1,0 +1,117 @@
+# BindPort Full LLM Context
+
+> BindPort coordinates local development ports, route metadata, generated
+> integration files, dashboard visibility, and trusted lifecycle hooks without
+> becoming the user's proxy, process manager, DNS layer, or secret manager.
+
+BindPort is for local development on Linux and macOS. It wraps commands,
+assigns stable ports from a configured range, records project/service/worktree
+ownership in a local SQLite registry, exposes status through CLI JSON and a
+dashboard, renders text files for existing tools such as Traefik, and runs
+locally trusted hooks when lifecycle events happen.
+
+BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
+`/etc/hosts`, install a root daemon, or kill active processes by default.
+
+## Core Commands
+
+- `bindport -- <command>` runs a one-off command with an assigned `PORT`.
+- `bindport run [service] [-- <command>]` runs a configured service or one-off
+  override.
+- `bindport reserve [service]` holds a port for an external process.
+- `bindport release [service|port]` releases a reserved port.
+- `bindport status [--json]` reads registry state.
+- `bindport open [service]` prints or opens the best URL.
+- `bindport clean` removes stopped and stale registry entries.
+- `bindport init` creates project or user fallback config.
+- `bindport config explain` explains config discovery and identity sources.
+- `bindport config validate` validates config.
+- `bindport doctor` checks local diagnostics.
+- `bindport doctor outputs` validates output setup without writing files.
+- `bindport dashboard serve|start|status|stop` operates the dashboard.
+- `bindport render [output]` renders configured output files.
+- `bindport templates list|show|export` inspects output templates.
+- `bindport hooks status|trust|deny|reset` manages hook trust.
+
+## Configuration
+
+Project config files are `.bindport.toml`, `.bindport.json`, or
+`.bindport.yaml`. Machine-local overrides live beside the project config as
+`.bindport.local.*` or `bindport.local.*` and should stay untracked. User
+fallback config is optional and lives under `$XDG_CONFIG_HOME/bindport/` or
+`~/.config/bindport/`.
+
+Runtime identity precedence is CLI service argument, environment variables,
+project config plus local overrides, then inference from package metadata,
+workspace roots, git worktree, and command name.
+
+Service config supports `name`, `path`, `command`, `args`, `env`, `hostname`,
+`route_url`, and `health_url`. Template placeholders include `{port}`, `{host}`,
+`{url}`, `{project}`, `{service}`, `{hostname}`, `{route_url}`, `{health_url}`,
+`{branch}`, `{branch_label}`, `{git_branch}`, `{worktree}`,
+`{worktree_label}`, and `{worktree_hash}`.
+
+## Registry State
+
+Registry states are `active`, `reserved`, `stopped`, and `stale`. The registry
+is local state stored under `$XDG_STATE_HOME/bindport/registry.sqlite` or
+`~/.local/state/bindport/registry.sqlite`.
+
+Agents and scripts should inspect `bindport status --json` instead of parsing
+human output or hardcoding ports. The JSON schema is in
+`docs/status.schema.json`.
+
+## Outputs And Templates
+
+Outputs render one text file per route from the latest registry snapshot.
+Template lookup checks project templates, global templates, and built-ins. The
+built-in templates are `bindport-traefik` and `bindport-env-local`.
+
+Output roots must be relative to the config file and must not contain `..`.
+BindPort tracks output ownership in the registry and refuses to overwrite
+unowned or externally modified files. `bindport render --repair` reconciles
+DB-owned files without adopting unknown files.
+
+## Hooks
+
+Hooks are declared in config but disabled until locally trusted with
+`bindport hooks trust`. Hook trust is invalidated when a command definition or
+local command target file changes. Dashboard hook actions are visibility-only;
+trust decisions are CLI-only.
+
+Supported hook events include `route_started`, `route_finished`,
+`routes_removed`, `routes_marked_stale`, `render_requested`, and
+`output_rendered`.
+
+## Dashboard
+
+The dashboard defaults to `127.0.0.1:27080`. Non-loopback binds require auth.
+The dashboard shows active, reserved, stopped, and stale registry state; route
+URLs; output status; health status; and hook trust visibility. It can clean
+stopped and stale entries but cannot approve hooks.
+
+## Agent Safety Rules
+
+Agents should use existing project scripts or `bindport run <service>`, run
+`bindport config validate` after config changes, discover URLs through
+`bindport status --json` or `bindport open <service> --print`, and avoid editing
+machine-local overrides or generated files unless explicitly asked. Agents
+should not run hook trust, deny, reset, or hook commands without user approval.
+
+## Important Docs
+
+- Why BindPort: https://github.com/bindport/bindport/blob/main/docs/getting-started/why-bindport.md
+- Concepts: https://github.com/bindport/bindport/blob/main/docs/getting-started/concepts.md
+- Install: https://github.com/bindport/bindport/blob/main/docs/getting-started/install.md
+- Quick Start: https://github.com/bindport/bindport/blob/main/docs/getting-started/quick-start.md
+- CLI Commands: https://github.com/bindport/bindport/blob/main/docs/daily-use/cli.md
+- Running Services: https://github.com/bindport/bindport/blob/main/docs/daily-use/running-services.md
+- Configuration: https://github.com/bindport/bindport/blob/main/docs/daily-use/configuration.md
+- Monorepos: https://github.com/bindport/bindport/blob/main/docs/daily-use/monorepos.md
+- Dashboard: https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md
+- Templates: https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md
+- Hooks: https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md
+- Status: https://github.com/bindport/bindport/blob/main/docs/operations/status.md
+- Troubleshooting: https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md
+- Security: https://github.com/bindport/bindport/blob/main/docs/operations/security.md
+- Platform Support: https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md

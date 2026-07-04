@@ -1,0 +1,24 @@
+[book]
+title = "BindPort"
+description = "Proxy-neutral local development port registry, allocator, runner, dashboard, integration file renderer, and trusted hook runner."
+authors = ["BindPort contributors"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "dist/docs"
+create-missing = false
+
+[output.html]
+site-url = "/docs/"
+git-repository-url = "https://github.com/bindport/bindport"
+git-repository-icon = "fab-github"
+no-section-label = false
+default-theme = "light"
+preferred-dark-theme = "navy"
+input-404 = "404.md"
+sidebar-header-nav = true
+
+[output.html.fold]
+enable = true
+level = 1

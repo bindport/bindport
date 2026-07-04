@@ -35,6 +35,10 @@ backend = "cargo:cargo-llvm-cov"
 version = "2.13.0"
 backend = "cargo:git-cliff"
 
+[[tools."cargo:mdbook"]]
+version = "0.5.3"
+backend = "cargo:mdbook"
+
 [[tools.gitleaks]]
 version = "8.30.1"
 backend = "aqua:gitleaks/gitleaks"

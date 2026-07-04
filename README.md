@@ -13,7 +13,7 @@ root-owned daemon.
 
 BindPort v0.5.1 is the current release candidate. Once published, it installs
 the same Rust CLI through Cargo, npm, GitHub Release binaries, `cargo binstall`,
-Homebrew, or mise/ubi. See [Install BindPort](docs/install.md) for channel
+Homebrew, or mise/ubi. See [Install BindPort](docs/getting-started/install.md) for channel
 details.
 
 Install globally with Cargo:
@@ -84,7 +84,7 @@ The current source tree includes:
 
 The current support target is Linux and macOS-style local development. Windows
 is post-1.0 and is not claimed as supported yet. See
-[Platform Support](docs/platform-support.md) for the supported OS, package,
+[Platform Support](docs/reference/platform-support.md) for the supported OS, package,
 path, and process behavior.
 
 The runner and dashboard are available from Cargo, npm project scripts, or a
@@ -313,24 +313,24 @@ machine-readable counts. Active services are not removed.
 
 ## Documentation
 
-- [Adoption Setup](docs/adoption.md): what to commit, what to ignore,
+- [Adoption Setup](docs/getting-started/adoption.md): what to commit, what to ignore,
   no-proxy setup, framework examples, and agent guidance for project adoption.
-- [Install BindPort](docs/install.md): npm, Cargo, cargo-binstall, Homebrew,
+- [Install BindPort](docs/getting-started/install.md): npm, Cargo, cargo-binstall, Homebrew,
   mise/ubi, and direct GitHub Release install paths.
-- [Config](docs/config.md): config discovery, precedence, service entries,
+- [Config](docs/daily-use/configuration.md): config discovery, precedence, service entries,
   local overrides, validation, and supported placeholders.
-- [Dashboard](docs/dashboard.md): local service dashboard, status API, scoped
+- [Dashboard](docs/integrations/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
-- [Status](docs/status.md): `status --json` schema, service URL selection, and
+- [Status](docs/operations/status.md): `status --json` schema, service URL selection, and
   agent-oriented lookup guidance.
-- [Templates](docs/templates.md): output template lookup, built-in Traefik
+- [Templates](docs/integrations/templates.md): output template lookup, built-in Traefik
   file-provider setup, custom templates, render lifecycle, and troubleshooting.
-- [Monorepos](docs/monorepos.md): root config, path-scoped services, workspace
+- [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
-- [Platform Support](docs/platform-support.md): supported operating systems,
+- [Platform Support](docs/reference/platform-support.md): supported operating systems,
   package targets, filesystem paths, process behavior, and verification gates.
-- [Release](docs/release.md): release prep automation, GitHub release binaries,
+- [Release](docs/project/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging.
 - [Changelog](CHANGELOG.md): generated release notes from Conventional Commits.
 

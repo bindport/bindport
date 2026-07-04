@@ -13,7 +13,7 @@ GitHub Releases also include `bindport-completions.tar.gz` and
 `packaging/`, validated by `scripts/check-cli-assets.sh`, and intended for
 package-manager formulas such as the Homebrew tap.
 
-Install-channel user guidance lives in [Install BindPort](install.md). Keep it
+Install-channel user guidance lives in [Install BindPort](../getting-started/install.md). Keep it
 in sync when changing release assets, package names, the Homebrew tap formula,
 or npm/Cargo publish behavior.
 
@@ -38,7 +38,7 @@ npm install --save-dev bindport
 The current release targets Linux and macOS-style local development. Windows is
 post-1.0 and is not a supported install target yet. npm publishing uses the
 unscoped `bindport` wrapper package plus scoped native binary packages for Linux
-and macOS on x64/arm64. See [Platform Support](platform-support.md) for the
+and macOS on x64/arm64. See [Platform Support](../reference/platform-support.md) for the
 supported OS, package, path, and process behavior.
 
 The minimum release gate is:
@@ -491,7 +491,7 @@ clean worktree:
 3. Run the configured service with `bindport run <service>` and confirm the
    child process receives both the assigned port argument and rendered env.
 4. Run `bindport status --json` and confirm the payload matches
-   [status.schema.json](status.schema.json), including `services`, `runs`,
+   [status.schema.json](../status.schema.json), including `services`, `runs`,
    `hooks`, route metadata, health, outputs, and proxy fields.
 5. Run `bindport open <service> --print` and confirm it prints `route_url` when
    configured, otherwise the direct loopback URL.
