@@ -2,20 +2,24 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
-## Unreleased
+## v0.6.0 - 2026-07-05
 
-[Compare changes](https://github.com/bindport/bindport/compare/v0.5.1...HEAD)
+[Compare changes](https://github.com/bindport/bindport/compare/v0.5.1...v0.6.0)
 
 ### Features
 
 - Initialize project config by default (3e3439d)
 - Add cargo-binstall release metadata (c489e09)
+- Add CLI reserve and release commands (94f735c)
+- Add CLI completion and manpage artifacts (b36ac82)
 
 
 ### Fixes
 
 - Resolve npm wrapper platform package lookup (525774f)
 - Remove unsupported identity from config examples (e2319d2)
+- Harden platform process matching (5c38b4b)
+- Match shell-exec child commands (1a479e2)
 
 
 ### Refactoring
@@ -32,12 +36,33 @@ All notable changes are generated from git tags and Conventional Commit subjects
 - Tighten agent guidance for code organization (07cc1d7)
 - Clarify platform support (922416c)
 - Add adoption setup guidance (8b71674)
+- Add install channel guide (2822d41)
+- Update agent guidance for docs tooling (5a15710)
+- Add mdBook documentation site (a634a54)
 
 
 ### Tests
 
 - Raise workspace coverage (7891941)
 - Expand npm platform smoke coverage (9227701)
+- Cover registry pressure cleanup (aa0845b)
+- Align active process fixtures with matching commands (2d977c9)
+
+
+### CI
+
+- Serialize mise installs in workflows (8f0537e)
+- Reduce Linux workflow setup time (c807f0a)
+- Avoid slow mise task auto-installs (d7438ce)
+- Build docs site in pull request checks (b9839e6)
+- Run docs build without mise task overhead (5a8dbbf)
+
+
+### Build
+
+- Add git-cliff changelog generation (847a40d)
+- Add Homebrew formula release tooling (96fb391)
+- Move maintenance helpers into xtask (9b4bae4)
 
 ## v0.5.1 - 2026-07-02
 
