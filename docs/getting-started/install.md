@@ -121,7 +121,7 @@ and `.sha256` checksum files.
 Manual binary install:
 
 ```sh
-gh release download v0.5.1 --repo bindport/bindport --pattern 'bindport-linux-x64*' --dir dist/bindport
+gh release download v0.6.0 --repo bindport/bindport --pattern 'bindport-linux-x64*' --dir dist/bindport
 cd dist/bindport
 sha256sum -c bindport-linux-x64.sha256
 install -m 0755 bindport-linux-x64 ~/.local/bin/bindport
