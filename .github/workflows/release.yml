@@ -327,7 +327,11 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(dist/*)
+          assets=()
+          for asset in dist/*; do
+            [[ -f "$asset" ]] || continue
+            assets+=("$asset")
+          done
           if [[ ${#assets[@]} -eq 0 ]]; then
             echo "no release artifacts found in dist/" >&2
             exit 1
