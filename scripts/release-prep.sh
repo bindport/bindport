@@ -206,8 +206,7 @@ fi
 confirm "$new_version" "$request_label"
 
 git switch -c "$release_branch"
-cargo set-version --workspace "$new_version"
-cargo set-version -p xtask 0.0.0
+cargo set-version --workspace --exclude xtask "$new_version"
 update_workspace_dependency_versions "$new_version"
 update_npm_version "$new_version"
 RUST_LOG=error git-cliff --tag "v$new_version" --output CHANGELOG.md

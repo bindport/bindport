@@ -2,6 +2,25 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.6.1 - 2026-07-07
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.6.0...v0.6.1)
+
+### Fixes
+
+- Resolve monorepo hook paths from project config root (594bc41)
+
+
+### Tests
+
+- Relax hook event assertion for macOS compatibility (0dbd36e)
+- Avoid exact hook event ordering assumptions (40f66de)
+
+
+### Dependencies
+
+- Bump sha2 from 0.10.9 to 0.11.0 in the cargo-dependencies group (d5fc3eb)
+
 ## v0.6.0 - 2026-07-05
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.5.1...v0.6.0)
