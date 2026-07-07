@@ -85,22 +85,57 @@ pub fn http_request_with_headers(
     host: &str,
     headers: &[(&str, &str)],
 ) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect dashboard");
+    let deadline = Instant::now() + Duration::from_secs(2);
+
+    loop {
+        match try_http_request_with_headers(port, method, path, host, headers) {
+            Ok(response) => return response,
+            Err(error) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+                let _ = error;
+            }
+            Err(error) => panic!("read dashboard response: {error}"),
+        }
+    }
+}
+
+fn try_http_request_with_headers(
+    port: u16,
+    method: &str,
+    path: &str,
+    host: &str,
+    headers: &[(&str, &str)],
+) -> std::io::Result<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
     write!(stream, "{method} {path} HTTP/1.1\r\nHost: {host}\r\n")
-        .expect("write dashboard request");
+        .map_err(|error| std::io::Error::new(error.kind(), "write dashboard request"))?;
     for (name, value) in headers {
-        write!(stream, "{name}: {value}\r\n").expect("write dashboard request header");
+        write!(stream, "{name}: {value}\r\n")
+            .map_err(|error| std::io::Error::new(error.kind(), "write dashboard request header"))?;
     }
     if method == "POST" {
-        write!(stream, "Content-Length: 0\r\n").expect("write dashboard request body length");
+        write!(stream, "Content-Length: 0\r\n").map_err(|error| {
+            std::io::Error::new(error.kind(), "write dashboard request body length")
+        })?;
     }
-    write!(stream, "Connection: close\r\n\r\n").expect("finish dashboard request");
+    write!(stream, "Connection: close\r\n\r\n")
+        .map_err(|error| std::io::Error::new(error.kind(), "finish dashboard request"))?;
 
     let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .expect("read dashboard response");
-    response
+    match stream.read_to_string(&mut response) {
+        Ok(_) => Ok(response),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::BrokenPipe
+            ) && response.starts_with("HTTP/1.1 ") =>
+        {
+            Ok(response)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn http_body(response: &str) -> &str {
