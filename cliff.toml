@@ -31,7 +31,9 @@ topo_order = false
 sort_commits = "oldest"
 commit_parsers = [
   { message = "^build: [Pp]repare v[0-9]+\\.[0-9]+\\.[0-9]+ release", skip = true },
-  { message = "^build: [Ff]ix release changelog gate for v[0-9]+\\.[0-9]+\\.[0-9]+", skip = true },
+  # Release repair commits can land while recovering a tag or workflow failure.
+  # Keep those operational commits out of version notes to avoid changelog churn.
+  { message = "^(build|ci): .*[Rr]elease (changelog gate|asset directories|maintenance commits)", skip = true },
   { message = "^feat", group = "<!-- 0 --> Features" },
   { message = "^fix", group = "<!-- 1 --> Fixes" },
   { message = "^perf", group = "<!-- 2 --> Performance" },
