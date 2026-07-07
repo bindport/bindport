@@ -6,18 +6,30 @@ pub(crate) fn configured_hook_plan(cwd: &Path, config: &ResolvedConfig) -> Optio
     let commands = hooks.commands.as_deref().unwrap_or_default();
     let source = hook_command_source(config);
     let default_timeout = hooks.timeout_ms.unwrap_or(DEFAULT_HOOK_TIMEOUT_MS);
+    let base_dir = hook_base_dir(cwd, config);
     let hooks = commands
         .iter()
         .enumerate()
         .filter(|(_, hook)| hook.enabled.unwrap_or(true))
-        .filter_map(|(index, hook)| effective_hook(cwd, index, hook, default_timeout, &source))
+        .filter_map(|(index, hook)| {
+            effective_hook(&base_dir, index, hook, default_timeout, &source)
+        })
         .collect::<Vec<_>>();
 
-    Some(HookPlan { hooks })
+    Some(HookPlan { base_dir, hooks })
+}
+
+pub(crate) fn hook_base_dir(cwd: &Path, config: &ResolvedConfig) -> PathBuf {
+    config
+        .loaded
+        .as_ref()
+        .and_then(|loaded| loaded.path.parent())
+        .unwrap_or(cwd)
+        .to_path_buf()
 }
 
 pub(crate) fn effective_hook(
-    cwd: &Path,
+    base_dir: &Path,
     index: usize,
     hook: &HookCommandConfig,
     default_timeout_ms: u64,
@@ -33,7 +45,7 @@ pub(crate) fn effective_hook(
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| format!("hook-{}", index + 1));
-    let target = hook_target(cwd, &command);
+    let target = hook_target(base_dir, &command);
     let definition = hook_definition(&name, &events, &command, timeout_ms, source);
     let hook_hash = stable_hex_hash(definition.as_bytes());
 

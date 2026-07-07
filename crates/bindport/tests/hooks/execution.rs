@@ -41,6 +41,11 @@ fn hook_timeout_kills_spawned_process_group() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
+        String::from_utf8_lossy(&output.stderr).contains("hook `leaky` failed"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
         String::from_utf8_lossy(&output.stderr).contains("hook `sh -c"),
         "unexpected stderr: {}",
         String::from_utf8_lossy(&output.stderr)

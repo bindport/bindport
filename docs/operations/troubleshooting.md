@@ -150,6 +150,17 @@ bindport hooks status
 Hooks do not run until trusted. If a hook or local target file changes, the
 trust state becomes changed and the hook must be reviewed again.
 
+Relative hook paths and the hook working directory are based on the discovered
+BindPort config directory. In a monorepo with a root `.bindport.toml`, use
+root-relative hook paths such as `./ops/localhost/reload-proxy.sh` even when
+the service command is launched from `apps/web`.
+
+Hook processes receive a minimal environment. They do not inherit `HOME`,
+`KUBECONFIG`, cloud credentials, or other parent environment values unless the
+hook sets them itself. If a trusted hook appears to run but external tools fail,
+check the hook script's environment setup and the warning printed by
+`bindport run` or `bindport render`.
+
 ## Cleanup Issues
 
 Preview cleanup:

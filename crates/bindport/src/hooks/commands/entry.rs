@@ -40,7 +40,7 @@ pub(crate) fn run_hooks_command_result(args: &[String]) -> Result<(), HooksComma
     match options.command {
         HooksCommand::Status => print_hooks_status(&cwd, &config),
         HooksCommand::Trust | HooksCommand::Deny | HooksCommand::Reset => {
-            update_hook_trust(&cwd, plan.hooks, &options)
+            update_hook_trust(&cwd, &config, plan.hooks, &options)
         }
         HooksCommand::Help => Ok(()),
     }
