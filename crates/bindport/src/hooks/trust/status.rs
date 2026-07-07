@@ -45,7 +45,7 @@ pub(crate) fn hook_statuses_for_current_dir(
         return Vec::new();
     };
     let store = read_hook_trust_store().unwrap_or_default();
-    let subjects = hook_trust_subjects(cwd);
+    let subjects = hook_trust_subjects_for_config(cwd, config);
 
     plan.hooks
         .into_iter()

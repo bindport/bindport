@@ -90,7 +90,7 @@ pub(crate) fn print_doctor_hooks(cwd: &Path, config: &ResolvedConfig) {
     }
 
     let store = read_hook_trust_store().unwrap_or_default();
-    let subjects = hook_trust_subjects(cwd);
+    let subjects = hook_trust_subjects_for_config(cwd, config);
 
     println!("hooks: {} configured", plan.hooks.len());
     for hook in plan.hooks {

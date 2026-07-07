@@ -17,3 +17,17 @@ pub(crate) fn hook_trust_subjects(cwd: &Path) -> HookTrustSubjects {
         }
     }
 }
+
+pub(crate) fn hook_trust_subjects_for_config(
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> HookTrustSubjects {
+    let subject_dir = config
+        .loaded
+        .as_ref()
+        .filter(|loaded| loaded.source == ConfigSource::Project)
+        .and_then(|loaded| loaded.path.parent())
+        .unwrap_or(cwd);
+
+    hook_trust_subjects(subject_dir)
+}

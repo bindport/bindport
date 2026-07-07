@@ -38,6 +38,7 @@ impl HookTrustScope {
 
 #[derive(Debug, Clone)]
 pub(crate) struct HookPlan {
+    pub(crate) base_dir: PathBuf,
     pub(crate) hooks: Vec<EffectiveHook>,
 }
 

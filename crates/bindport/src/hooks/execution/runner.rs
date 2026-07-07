@@ -31,7 +31,7 @@ pub(crate) fn run_hooks_for_events(
             return 0;
         }
     };
-    let subjects = hook_trust_subjects(cwd);
+    let subjects = hook_trust_subjects_for_config(cwd, config);
     let env = HookEnvironment::new(events, &hook_events);
     let mut ran = 0;
     for hook in &matching_hooks {
@@ -44,8 +44,8 @@ pub(crate) fn run_hooks_for_events(
         match mode {
             HookRunMode::DryRun => print_hook_dry_run(hook),
             HookRunMode::Run => {
-                if let Err(error) = execute_hook(cwd, hook, &env) {
-                    eprintln!("bindport: warning: {error}");
+                if let Err(error) = execute_hook(&plan.base_dir, hook, &env) {
+                    eprintln!("bindport: warning: hook `{}` failed: {error}", hook.name);
                 }
             }
         }

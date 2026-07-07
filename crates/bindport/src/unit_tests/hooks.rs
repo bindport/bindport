@@ -60,6 +60,62 @@ fn hook_plan_reports_source_without_granting_trust() {
 }
 
 #[test]
+fn hook_plan_uses_config_directory_for_relative_targets() {
+    let cwd = Path::new("/workspace/demo/apps/web");
+    let plan = configured_hook_plan(
+        cwd,
+        &hook_resolved_config(
+            ConfigSource::Project,
+            HooksConfig {
+                commands: Some(vec![HookCommandConfig {
+                    name: Some(String::from("reload")),
+                    events: Some(vec![HookEvent::RouteStarted]),
+                    command: Some(vec![String::from("./ops/reload.sh")]),
+                    ..HookCommandConfig::default()
+                }]),
+                ..HooksConfig::default()
+            },
+            None,
+        ),
+    )
+    .expect("hook plan");
+
+    assert_eq!(plan.base_dir, PathBuf::from("/workspace/demo"));
+    assert_eq!(
+        plan.hooks[0].target.display,
+        "/workspace/demo/./ops/reload.sh"
+    );
+}
+
+#[test]
+fn fallback_hook_plan_uses_fallback_config_directory() {
+    let cwd = Path::new("/workspace/demo/apps/web");
+    let plan = configured_hook_plan(
+        cwd,
+        &hook_resolved_config(
+            ConfigSource::Fallback,
+            HooksConfig {
+                commands: Some(vec![HookCommandConfig {
+                    name: Some(String::from("reload")),
+                    events: Some(vec![HookEvent::RouteStarted]),
+                    command: Some(vec![String::from("./reload.sh")]),
+                    ..HookCommandConfig::default()
+                }]),
+                ..HooksConfig::default()
+            },
+            None,
+        ),
+    )
+    .expect("hook plan");
+
+    assert_eq!(plan.base_dir, PathBuf::from("/home/user/.config/bindport"));
+    assert_eq!(
+        plan.hooks[0].target.display,
+        "/home/user/.config/bindport/./reload.sh"
+    );
+}
+
+#[test]
 fn hook_trust_status_requires_exact_user_scoped_match() {
     let cwd = Path::new("/workspace/demo");
     let plan = configured_hook_plan(

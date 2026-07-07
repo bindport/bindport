@@ -25,6 +25,26 @@ timeout_ms = 2000
 Hook command arrays are structured argv, not shell strings. Use
 `["sh", "-c", "..."]` only when shell behavior is intentional and reviewed.
 
+## Paths And Working Directory
+
+Relative hook command paths are resolved from the directory that contains the
+discovered BindPort config. Hook processes also run with that directory as
+their working directory.
+
+In a monorepo, this lets package scripts run from `apps/web` while hooks live at
+the repository root:
+
+```toml
+[[hooks.commands]]
+name = "reload-proxy"
+events = ["output_rendered"]
+command = ["./ops/localhost/reload-proxy.sh"]
+```
+
+If `.bindport.toml` lives at the repository root, the command above resolves to
+`<repo>/ops/localhost/reload-proxy.sh` no matter which service directory
+launched `bindport run`.
+
 ## Events
 
 Supported events:
@@ -97,6 +117,11 @@ Hook processes receive a minimal environment:
 
 Other parent environment values are not inherited. Secret values are not copied
 into hook metadata or the registry.
+
+Hooks that call tools such as `kubectl`, `docker`, or cloud CLIs should declare
+the environment they need inside the hook or through reviewed wrapper scripts.
+For example, a Kubernetes reload hook may need to set `HOME` and `KUBECONFIG`
+before invoking `kubectl`.
 
 ## Dashboard Visibility
 
