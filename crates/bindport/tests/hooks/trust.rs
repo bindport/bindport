@@ -85,6 +85,108 @@ fn trusted_local_hooks_run_for_route_events() {
     assert!(hook_output.contains("route_started|cli_runner"));
     assert!(hook_output.contains("route_finished|cli_runner"));
 }
+
+#[cfg(unix)]
+#[test]
+fn trusted_project_hook_runs_from_config_root_when_invoked_from_service_dir() {
+    let registry_path = temp_registry_path("hooks-config-root-registry");
+    let root = temp_test_dir("hooks-config-root-root");
+    init_git_repo(&root, "main");
+    let service_dir = root.join("apps").join("web");
+    let hook_dir = root.join("ops").join("localhost").join("bindport");
+    fs::create_dir_all(&service_dir).expect("create service dir");
+    fs::create_dir_all(&hook_dir).expect("create hook dir");
+    write_executable(
+        &hook_dir.join("reload.sh"),
+        "#!/bin/sh\nprintf '%s|%s\\n' \"$BINDPORT_HOOK_EVENTS\" \"$(pwd)\" >> hook.log\n",
+    );
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"hooks-config-root\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\npath = \"apps/web\"\n[hooks]\ntimeout_ms = 1000\n[[hooks.commands]]\nname = \"reload\"\nevents = [\"route_started\"]\ncommand = [\"./ops/localhost/bindport/reload.sh\"]\n",
+        ),
+    )
+    .expect("write hook config");
+
+    let trust = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["hooks", "trust", "reload"])
+        .output()
+        .expect("trust hook from repo root");
+    assert!(
+        trust.status.success(),
+        "trust failed: {}",
+        String::from_utf8_lossy(&trust.stderr)
+    );
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&service_dir)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport from service dir");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let hook_output = fs::read_to_string(root.join("hook.log")).expect("hook output");
+
+    assert!(hook_output.contains("route_started|"));
+    assert!(hook_output.contains(root.to_string_lossy().as_ref()));
+}
+
+#[cfg(unix)]
+#[test]
+fn project_hook_trust_uses_config_root_without_git() {
+    let registry_path = temp_registry_path("hooks-config-root-no-git-registry");
+    let root = temp_test_dir("hooks-config-root-no-git-root");
+    let service_dir = root.join("apps").join("web");
+    let hook_dir = root.join("ops");
+    fs::create_dir_all(&service_dir).expect("create service dir");
+    fs::create_dir_all(&hook_dir).expect("create hook dir");
+    write_executable(
+        &hook_dir.join("reload.sh"),
+        "#!/bin/sh\nprintf '%s|%s\\n' \"$BINDPORT_HOOK_EVENTS\" \"$(pwd)\" >> hook.log\n",
+    );
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"hooks-config-root-no-git\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\npath = \"apps/web\"\n[hooks]\ntimeout_ms = 1000\n[[hooks.commands]]\nname = \"reload\"\nevents = [\"route_started\"]\ncommand = [\"./ops/reload.sh\"]\n",
+        ),
+    )
+    .expect("write hook config");
+
+    let trust = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["hooks", "trust", "reload"])
+        .output()
+        .expect("trust hook from project root");
+    assert!(
+        trust.status.success(),
+        "trust failed: {}",
+        String::from_utf8_lossy(&trust.stderr)
+    );
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&service_dir)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport from service dir");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let hook_output = fs::read_to_string(root.join("hook.log")).expect("hook output");
+
+    assert!(hook_output.contains("route_started|"));
+    assert!(hook_output.contains(root.to_string_lossy().as_ref()));
+}
+
 #[cfg(unix)]
 #[test]
 fn trusted_hook_invalidates_when_local_target_changes() {

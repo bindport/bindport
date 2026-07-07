@@ -182,6 +182,10 @@ from `PATH`, such as `docker`, are treated as opaque targets.
 
 Hook commands are structured argv arrays and are spawned directly, not through
 a shell. Use `["sh", "-c", "..."]` only when shell behavior is intentional.
+Relative hook command paths are resolved from the directory that contains the
+discovered BindPort config, and hook processes run with that directory as their
+working directory. This keeps root-level monorepo hooks stable when
+`bindport run` is launched from a package directory.
 Supported events are `route_started`, `route_finished`, `routes_removed`,
 `routes_marked_stale`, `render_requested`, and `output_rendered`. Hook
 processes receive a minimal environment: `PATH` from the parent process plus

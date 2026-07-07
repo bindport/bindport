@@ -2,11 +2,12 @@ use super::*;
 
 pub(crate) fn update_hook_trust(
     cwd: &Path,
+    config: &ResolvedConfig,
     hooks: Vec<EffectiveHook>,
     options: &HooksCommandOptions,
 ) -> Result<(), HooksCommandError> {
     let selected = selected_hooks(hooks, options)?;
-    let subjects = hook_trust_subjects(cwd);
+    let subjects = hook_trust_subjects_for_config(cwd, config);
     let mut store = read_hook_trust_store()?;
     let names = selected
         .iter()
