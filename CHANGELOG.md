@@ -17,6 +17,11 @@ All notable changes are generated from git tags and Conventional Commit subjects
 - Avoid exact hook event ordering assumptions (40f66de)
 
 
+### Build
+
+- Exclude xtask from release version bumps (23a0afb)
+
+
 ### Dependencies
 
 - Bump sha2 from 0.10.9 to 0.11.0 in the cargo-dependencies group (d5fc3eb)
