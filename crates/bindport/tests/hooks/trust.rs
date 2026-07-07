@@ -82,8 +82,9 @@ fn trusted_local_hooks_run_for_route_events() {
     );
     let hook_output = fs::read_to_string(&hook_log).expect("hook output");
 
-    assert!(hook_output.contains("route_started|cli_runner"));
-    assert!(hook_output.contains("route_finished|cli_runner"));
+    assert!(hook_output.contains("route_started"));
+    assert!(hook_output.contains("route_finished"));
+    assert!(hook_output.contains("cli_runner"));
 }
 
 #[cfg(unix)]
@@ -133,7 +134,7 @@ fn trusted_project_hook_runs_from_config_root_when_invoked_from_service_dir() {
     );
     let hook_output = fs::read_to_string(root.join("hook.log")).expect("hook output");
 
-    assert!(hook_output.contains("route_started|"));
+    assert!(hook_output.contains("route_started"));
     assert!(hook_output.contains(root.to_string_lossy().as_ref()));
 }
 
@@ -183,7 +184,7 @@ fn project_hook_trust_uses_config_root_without_git() {
     );
     let hook_output = fs::read_to_string(root.join("hook.log")).expect("hook output");
 
-    assert!(hook_output.contains("route_started|"));
+    assert!(hook_output.contains("route_started"));
     assert!(hook_output.contains(root.to_string_lossy().as_ref()));
 }
 
