@@ -109,7 +109,7 @@ impl Registry {
             path: path.clone(),
             source,
         })?;
-        let registry = Self { connection, path };
+        let mut registry = Self { connection, path };
         registry.ensure_schema()?;
 
         Ok(registry)

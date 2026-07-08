@@ -84,6 +84,7 @@ fn status_snapshot_reports_service_outputs_and_traefik_proxy_alias() {
     registry
         .record_output_file(&OutputFileRecord {
             output_name: String::from("traefik"),
+            scope: test_output_scope("/tmp/bindport/traefik"),
             route_key: identity.identity_key,
             rendered_path: PathBuf::from("/tmp/bindport/traefik/web.yml"),
             status: OutputFileStatus::Rendered,
@@ -141,6 +142,7 @@ fn status_snapshot_links_outputs_for_services_without_identity_keys() {
     registry
         .record_output_file(&OutputFileRecord {
             output_name: String::from("traefik"),
+            scope: test_output_scope("/tmp/bindport/traefik"),
             route_key,
             rendered_path: PathBuf::from("/tmp/bindport/traefik/next.yml"),
             status: OutputFileStatus::Rendered,

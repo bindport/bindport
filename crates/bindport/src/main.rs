@@ -19,8 +19,8 @@ use bindport_adapters::{
     OutputFileRemovalStatus as AdapterOutputFileRemovalStatus, OutputRenderConfig,
     OutputRouteSnapshot, RemovableOutputFile as AdapterRemovableOutputFile, RenderError,
     RenderPlan, RouteRecord, TemplateError as AdapterTemplateError, TemplateResolver,
-    TemplateSource, remove_owned_output_files, render_output_routes, render_plan_paths,
-    verify_render_plan_targets, write_render_plan,
+    TemplateSource, output_root_path, remove_owned_output_files, render_output_routes,
+    render_plan_paths, verify_render_plan_targets, write_render_plan,
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, BindPortConfig,
@@ -35,9 +35,9 @@ use bindport_dashboard::{
     DashboardCleanCallback, DashboardOptions, DashboardServer, DashboardStatusCallback,
 };
 use bindport_registry::{
-    CleanState, CleanSummary, OutputFileRecord, OutputFileStatus, REGISTRY_PATH_ENV, Registry,
-    RegistryError, ReserveLease, ReservedLease, RunStart, StartedRun, StatusService,
-    StatusSnapshot, default_registry_path, status_service_route_key,
+    CleanState, CleanSummary, OutputFileRecord, OutputFileScope, OutputFileStatus,
+    REGISTRY_PATH_ENV, Registry, RegistryError, ReserveLease, ReservedLease, RunStart, StartedRun,
+    StatusService, StatusSnapshot, default_registry_path, status_service_route_key,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
