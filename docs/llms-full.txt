@@ -132,6 +132,7 @@ should not run hook trust, deny, reset, or hook commands without user approval.
 - Monorepos: https://github.com/bindport/bindport/blob/main/docs/daily-use/monorepos.md
 - Dashboard: https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md
 - Templates: https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md
+- Proxy Outputs: https://github.com/bindport/bindport/blob/main/docs/integrations/proxy-outputs.md
 - Hooks: https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md
 - Status: https://github.com/bindport/bindport/blob/main/docs/operations/status.md
 - Troubleshooting: https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md

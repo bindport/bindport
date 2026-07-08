@@ -354,6 +354,8 @@ machine-readable counts. Active services are not removed.
   guidance.
 - [Templates](docs/integrations/templates.md): output template lookup, built-in
   proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
+- [Proxy Outputs](docs/integrations/proxy-outputs.md): Traefik and Caddy file
+  outputs, Docker/Rancher target hosts, and no-proxy usage.
 - [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
 - [Platform Support](docs/reference/platform-support.md): supported operating systems,
