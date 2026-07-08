@@ -43,6 +43,41 @@ pub struct OutputContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputRouteSnapshot {
+    generated_at: String,
+    routes: Vec<RouteRecord>,
+}
+
+impl OutputRouteSnapshot {
+    pub fn new(generated_at: impl Into<String>, routes: Vec<RouteRecord>) -> Self {
+        Self {
+            generated_at: generated_at.into(),
+            routes,
+        }
+    }
+
+    pub fn generated_at(&self) -> &str {
+        &self.generated_at
+    }
+
+    pub fn routes(&self) -> &[RouteRecord] {
+        &self.routes
+    }
+
+    pub fn retain_routes(&mut self, predicate: impl FnMut(&RouteRecord) -> bool) {
+        self.routes.retain(predicate);
+    }
+
+    pub fn push_route(&mut self, route: RouteRecord) {
+        self.routes.push(route);
+    }
+
+    pub fn route_count(&self) -> usize {
+        self.routes.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteRecord {
     pub key: String,
     pub project: String,
@@ -149,9 +184,16 @@ pub struct RouteContext {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct RenderContext {
+    pub snapshot: SnapshotContext,
     pub route: RouteContext,
     pub output: OutputContext,
     pub vars: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SnapshotContext {
+    pub generated_at: String,
+    pub route_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -228,12 +270,16 @@ impl std::error::Error for RenderError {
 pub fn render_output_routes(
     output: &OutputRenderConfig,
     template: &str,
-    routes: &[RouteRecord],
+    snapshot: &OutputRouteSnapshot,
 ) -> Result<RenderPlan, RenderError> {
     let mut targets = BTreeMap::<String, String>::new();
-    let mut files = Vec::with_capacity(routes.len());
+    let mut files = Vec::with_capacity(snapshot.route_count());
+    let snapshot_context = SnapshotContext {
+        generated_at: snapshot.generated_at().to_string(),
+        route_count: snapshot.route_count(),
+    };
 
-    for route in routes {
+    for route in snapshot.routes() {
         if let Some(hostname) = route.hostname.as_deref()
             && hostname.contains('`')
         {
@@ -243,6 +289,7 @@ pub fn render_output_routes(
             });
         }
         let context = RenderContext {
+            snapshot: snapshot_context.clone(),
             route: route.context(output),
             output: output.context.clone(),
             vars: output.vars.clone(),

@@ -45,9 +45,9 @@ pub(crate) fn render_outputs(
         Some(project_template_dir(cwd, config)),
         global_template_dir(),
     );
-    let snapshot = registry.status_snapshot()?;
-    let routes = route_records(snapshot.services);
-    let current_route_keys = routes
+    let snapshot = output_route_snapshot(registry.status_snapshot()?);
+    let current_route_keys = snapshot
+        .routes()
         .iter()
         .map(|route| route.key.clone())
         .collect::<BTreeSet<_>>();
@@ -57,13 +57,9 @@ pub(crate) fn render_outputs(
     for output in outputs {
         let template = resolver.resolve(&output.template, None)?;
         let render_config = OutputRenderConfig::from(&output);
-        let delete_route_keys = delete_route_keys(&output, &routes);
-        let render_routes = routes
-            .iter()
-            .filter(|route| !delete_route_keys.contains(&route.key))
-            .cloned()
-            .collect::<Vec<_>>();
-        let plan = render_output_routes(&render_config, &template.contents, &render_routes)?;
+        let delete_route_keys = delete_route_keys(&output, snapshot.routes());
+        let render_snapshot = filtered_output_route_snapshot(&snapshot, &delete_route_keys);
+        let plan = render_output_routes(&render_config, &template.contents, &render_snapshot)?;
 
         if dry_run {
             if report == RenderReport::Print {
