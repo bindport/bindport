@@ -16,8 +16,8 @@ development ports when BindPort config or scripts already describe the service.
    current directory.
 3. Run `bindport config validate` after editing BindPort config.
 4. Use `bindport run <service>` to run configured services.
-5. Use `bindport status --json` or `bindport open <service> --print` to find
-   active service URLs.
+5. Use `bindport status --json`, `bindport list --json`, or
+   `bindport open <service> --print` to find active service URLs.
 
 ## Config Rules
 
@@ -52,6 +52,7 @@ bindport config validate
 bindport doctor
 bindport doctor outputs
 bindport status --json
+bindport list --json
 bindport open <service> --print
 bindport run <service>
 bindport render --dry-run

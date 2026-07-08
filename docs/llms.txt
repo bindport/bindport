@@ -35,7 +35,7 @@ default.
 - [Security Model](https://github.com/bindport/bindport/blob/main/docs/operations/security.md): Local-first defaults, config safety, output ownership, dashboard auth, and hook trust.
 - [Health and Troubleshooting](https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md): Diagnostics, common failures, and recovery commands.
 - [Platform Support](https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md): Supported OS/package targets, paths, process behavior, and CI gates.
-- [Status JSON Schema](https://github.com/bindport/bindport/blob/main/docs/status.schema.json): Machine-readable `bindport status --json` schema.
+- [Status JSON Schema](https://github.com/bindport/bindport/blob/main/docs/status.schema.json): Machine-readable `bindport status --json` schema; use `bindport list --json` for grouped project/service inventory.
 - [Agent and LLM Setup](https://github.com/bindport/bindport/blob/main/docs/reference/agents.md): Agent instructions, Codex skill, and LLM discovery files.
 
 ## Project

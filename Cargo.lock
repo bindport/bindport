@@ -12,6 +12,7 @@ dependencies = [
  "bindport-registry",
  "bindport-runner",
  "libc",
+ "serde",
  "serde_json",
  "sha2",
 ]

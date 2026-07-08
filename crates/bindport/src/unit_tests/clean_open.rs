@@ -178,6 +178,7 @@ fn status_and_clean_commands_handle_empty_registry_and_help() {
         || {
             assert_eq!(print_status(), ExitCode::SUCCESS);
             assert_eq!(print_status_json(), ExitCode::SUCCESS);
+            assert!(run_list_command_result(&strings(["--json"])).is_ok());
             assert!(clean_registry_result(&strings(["--help"])).is_ok());
             assert!(clean_registry_result(&strings(["--dry-run", "--json"])).is_ok());
         },

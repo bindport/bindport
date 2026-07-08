@@ -59,8 +59,9 @@ The current source tree includes:
 - Service command, argument, and env templates through `[[services]].command`,
   `[[services]].args`, `[[services]].env`, and `bindport run --env`, including
   route hostname metadata when configured.
-- Basic SQLite-backed lease/run/output recording with `bindport status --json`,
-  including reserved leases for processes BindPort does not wrap.
+- Basic SQLite-backed lease/run/output recording with `bindport status --json`
+  and grouped inventory through `bindport list --json`, including reserved
+  leases for processes BindPort does not wrap.
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, known registry listener conflicts, unknown OS listener
   conflicts, and the next candidate port.
@@ -117,6 +118,7 @@ cargo run -p bindport -- doctor
 cargo run -p bindport -- init
 cargo run -p bindport -- init --user
 cargo run -p bindport -- status --json
+cargo run -p bindport -- list --json
 cargo run -p bindport -- open web --print
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- reserve web
@@ -328,8 +330,8 @@ machine-readable counts. Active services are not removed.
 - [Dashboard](docs/integrations/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
-- [Status](docs/operations/status.md): `status --json` schema, service URL selection, and
-  agent-oriented lookup guidance.
+- [Status](docs/operations/status.md): `status --json` schema, grouped service
+  listing, service URL selection, and agent-oriented lookup guidance.
 - [Templates](docs/integrations/templates.md): output template lookup, built-in
   proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
 - [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace

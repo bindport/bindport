@@ -26,8 +26,9 @@ state:
   `NEXT_PUBLIC_*`, or a service URL derived from the current branch.
 - Existing proxies can watch generated files instead of requiring BindPort to
   become the proxy.
-- Dashboards, scripts, and AI agents can ask `bindport status --json` or
-  `bindport open <service> --print` instead of guessing where a service is.
+- Dashboards, scripts, and AI agents can ask `bindport status --json`,
+  `bindport list --json`, or `bindport open <service> --print` instead of
+  guessing where a service is.
 - Hook execution is explicit and locally trusted, so checked-in config cannot
   silently run commands on a new machine.
 
