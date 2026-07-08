@@ -4,12 +4,8 @@ use crate::support::*;
 use bindport_registry::{OutputFileRecord, OutputFileScope, OutputFileStatus};
 
 fn output_scope_for_root(root: &Path) -> OutputFileScope {
-    OutputFileScope::new(
-        root.join(".bindport/generated"),
-        root.to_path_buf(),
-        None,
-        None,
-    )
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    OutputFileScope::new(root.join(".bindport/generated"), root, None, None)
 }
 
 #[test]
