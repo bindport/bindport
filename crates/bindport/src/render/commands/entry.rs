@@ -13,7 +13,7 @@ pub(crate) fn run_render_command(args: &[String]) -> ExitCode {
         }
         Err(RenderCommandError::InvalidArgument(error)) => {
             eprintln!("bindport: {error}");
-            eprintln!("usage: bindport render [output] [--all] [--dry-run] [--repair]");
+            eprintln!("usage: bindport render [output] [--all] [--dry-run] [--diff] [--repair]");
             ExitCode::FAILURE
         }
         Err(RenderCommandError::Registry(error)) => {
@@ -56,6 +56,8 @@ pub(crate) fn run_render_command_result(args: &[String]) -> Result<(), RenderCom
     let mut registry = Registry::open_default()?;
     let mode = if options.repair {
         RenderMode::Repair
+    } else if options.diff {
+        RenderMode::Diff
     } else {
         RenderMode::Normal
     };

@@ -77,8 +77,10 @@ unowned or externally modified files during normal render. Ownership is scoped
 to the resolved output root and config root, so separate worktrees can render
 the same output and route without overwriting each other's registry row.
 Legacy unscoped rows are considered only when their path is inside the current
-output root. `bindport render --repair` reconciles DB-owned files and can
-adopt content-identical planned files whose ownership row was lost. Files with
+output root. `bindport render --diff` previews content changes against
+DB-owned files without writing files or updating ownership rows.
+`bindport render --repair` reconciles DB-owned files and can adopt
+content-identical planned files whose ownership row was lost. Files with
 different content are never adopted.
 
 ## Hooks

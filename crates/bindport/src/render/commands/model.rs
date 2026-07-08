@@ -11,6 +11,7 @@ pub(crate) struct RenderCommandOptions {
     pub(crate) output: Option<String>,
     pub(crate) all: bool,
     pub(crate) dry_run: bool,
+    pub(crate) diff: bool,
     pub(crate) repair: bool,
 }
 
@@ -23,6 +24,7 @@ pub(crate) enum RenderReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RenderMode {
     Normal,
+    Diff,
     Repair,
 }
 

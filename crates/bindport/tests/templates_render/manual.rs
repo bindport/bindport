@@ -123,6 +123,80 @@ fn render_command_writes_config_files_and_records_ownership() {
 }
 
 #[test]
+fn render_diff_reports_changes_without_writing_files() {
+    let registry_path = temp_registry_path("render-diff-registry");
+    let root = temp_test_dir("render-diff-root");
+    let template_dir = root.join(".bindport/templates");
+    fs::create_dir_all(&template_dir).expect("template dir");
+    fs::write(
+        template_dir.join("custom.txt.j2"),
+        "service={{ route.service }}\n",
+    )
+    .expect("write initial template");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-diff\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"diff.localhost\"\n[[outputs]]\nname = \"custom\"\ntemplate = \"custom\"\nroot = \".bindport/generated\"\ntarget = \"custom/{{{{ route.service }}}}.txt\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "custom"])
+        .output()
+        .expect("render output");
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+
+    let rendered_path = root.join(".bindport/generated/custom/web.txt");
+    assert_eq!(
+        fs::read_to_string(&rendered_path).expect("rendered output"),
+        "service=web"
+    );
+
+    fs::write(
+        template_dir.join("custom.txt.j2"),
+        "service={{ route.service }}\nport={{ route.port }}\n",
+    )
+    .expect("write changed template");
+    let diff = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "custom", "--diff"])
+        .output()
+        .expect("diff output");
+
+    assert!(
+        diff.status.success(),
+        "diff failed: {}",
+        String::from_utf8_lossy(&diff.stderr)
+    );
+    let stdout = String::from_utf8(diff.stdout).expect("diff stdout");
+    assert!(stdout.contains("diff custom: 0 added, 1 modified, 0 removed, 0 unchanged"));
+    assert!(stdout.contains("diff --bindport modified custom/web.txt"));
+    assert!(stdout.contains("+port="));
+    assert_eq!(
+        fs::read_to_string(&rendered_path).expect("rendered output remains unchanged"),
+        "service=web"
+    );
+}
+
+#[test]
 fn render_scopes_same_output_and_route_to_distinct_output_roots() {
     let registry_path = temp_registry_path("render-scoped-roots-registry");
     let first_root = temp_test_dir("render-scoped-roots-first");

@@ -42,6 +42,31 @@ pub struct PlannedOutputFile {
     pub target: String,
     pub path: PathBuf,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFileDiffStatus {
+    Added,
+    Modified,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffedOutputFile {
+    pub route_key: String,
+    pub target: String,
+    pub path: PathBuf,
+    pub status: OutputFileDiffStatus,
+    pub old_contents: Option<String>,
+    pub new_contents: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffedRemovalOutputFile {
+    pub route_key: String,
+    pub path: PathBuf,
+    pub status: OutputFileRemovalStatus,
+    pub old_contents: Option<String>,
+}
 #[derive(Debug)]
 pub enum OutputFileError {
     UnsafeRoot { root: String },

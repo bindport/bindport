@@ -102,6 +102,7 @@ pub(crate) fn print_render_help() {
     println!("Options:");
     println!("  --all        Render every enabled output (default)");
     println!("  --dry-run    Render templates and print targets without writing files");
+    println!("  --diff       Print content changes without writing files");
     println!("  --repair     Re-render current routes and reconcile DB-owned files");
 }
 

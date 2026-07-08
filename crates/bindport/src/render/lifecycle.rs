@@ -37,22 +37,7 @@ pub(crate) fn remove_output_files_for_lifecycle(
     removal: LifecycleRemoval<'_>,
 ) -> Result<usize, RenderCommandError> {
     let output = removal.output;
-    let delete_removed = output.delete_on.contains(&OutputDeleteState::Removed);
-    let candidates = removal
-        .ownership
-        .iter()
-        .filter(|owned| {
-            removal.delete_route_keys.contains(&owned.route_key)
-                || (delete_removed
-                    && !removal.current_route_keys.contains(&owned.route_key)
-                    && !removal.planned_route_keys.contains(&owned.route_key))
-        })
-        .map(|owned| AdapterRemovableOutputFile {
-            route_key: owned.route_key.clone(),
-            path: owned.path.clone(),
-            content_hash: owned.content_hash.clone(),
-        })
-        .collect::<Vec<_>>();
+    let candidates = lifecycle_removal_candidates(&removal);
 
     if candidates.is_empty() {
         return Ok(0);
@@ -107,4 +92,29 @@ pub(crate) fn remove_output_files_for_lifecycle(
     }
 
     Ok(removed_count)
+}
+
+pub(crate) fn lifecycle_removal_candidates(
+    removal: &LifecycleRemoval<'_>,
+) -> Vec<AdapterRemovableOutputFile> {
+    let delete_removed = removal
+        .output
+        .delete_on
+        .contains(&OutputDeleteState::Removed);
+
+    removal
+        .ownership
+        .iter()
+        .filter(|owned| {
+            removal.delete_route_keys.contains(&owned.route_key)
+                || (delete_removed
+                    && !removal.current_route_keys.contains(&owned.route_key)
+                    && !removal.planned_route_keys.contains(&owned.route_key))
+        })
+        .map(|owned| AdapterRemovableOutputFile {
+            route_key: owned.route_key.clone(),
+            path: owned.path.clone(),
+            content_hash: owned.content_hash.clone(),
+        })
+        .collect()
 }
