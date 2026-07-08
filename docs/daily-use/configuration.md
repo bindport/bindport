@@ -253,9 +253,9 @@ bindport doctor outputs
 `config validate` catches missing or duplicate service names, unsafe service
 paths, restricted service env names, control characters in route metadata, YAML
 anchors or aliases, output configuration errors, and incomplete hook
-configuration. `doctor outputs` validates template lookup, render planning,
-safe output paths, output ownership checks, and hook trust status without
-writing files.
+configuration. `doctor outputs` validates target hosts, resolved output roots,
+template lookup, render planning, safe output paths, output ownership checks,
+and hook trust status without writing files.
 
 ## Examples
 

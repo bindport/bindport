@@ -65,8 +65,9 @@ The current source tree includes:
 - `bindport doctor` diagnostics for config, registry, effective identity,
   active registry ports, known registry listener conflicts, unknown OS listener
   conflicts, and the next candidate port.
-- `bindport doctor outputs` diagnostics for configured output templates and
-  planned render paths without writing files.
+- `bindport doctor outputs` diagnostics for configured output templates, target
+  hosts, output roots, ownership rows, and planned render paths without writing
+  files.
 - Built-in `bindport-traefik`, `bindport-caddy`, `bindport-json-snapshot`, and
   `bindport-env-local` output templates through the normal owned-output
   pipeline.
@@ -193,8 +194,9 @@ The current implementation reads top-level `project`, `service`,
 `[dashboard.auth]`, `output_defaults`, `[[outputs]]`, and `[hooks]`. Output
 configuration is used by `bindport render` to write text output files from the
 current registry snapshot. `bindport doctor outputs` validates output config,
-template lookup, planned render paths, and hook trust status without writing
-files. Template lookup, listing, showing, and export are available through
+target hosts, resolved output roots, template lookup, planned render paths,
+ownership rows, and hook trust status without writing files. Template lookup,
+listing, showing, and export are available through
 `bindport templates`. Wrapped command start/exit events auto-render outputs
 when `auto_render = true`;
 `debounce_ms` spaces automatic renders, `on_failure = "block"` validates
