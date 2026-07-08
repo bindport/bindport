@@ -4,6 +4,9 @@ BindPort resolves output templates by logical name. Template commands let
 projects inspect, export, and customize templates, and `bindport render` writes
 configured text output files from the current registry snapshot.
 
+For practical proxy setup with Traefik, Caddy, Docker Desktop, Rancher Desktop,
+or no proxy at all, see [Proxy Outputs](proxy-outputs.md).
+
 ## Commands
 
 List templates:

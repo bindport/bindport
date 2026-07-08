@@ -21,6 +21,7 @@
 
 - [Dashboard](integrations/dashboard.md)
 - [Templates](integrations/templates.md)
+- [Proxy Outputs](integrations/proxy-outputs.md)
 - [Hooks and Trust](integrations/hooks.md)
 
 # Operations

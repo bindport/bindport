@@ -64,6 +64,8 @@ Project maintainers should read:
 - [Monorepos and Worktrees](daily-use/monorepos.md) for multi-service repository layouts.
 - [Templates](integrations/templates.md) for generated integration files such as Traefik
   file-provider snippets and `.env.local` files.
+- [Proxy Outputs](integrations/proxy-outputs.md) for Traefik, Caddy, container
+  target hosts, and no-proxy usage.
 - [Hooks and Trust](integrations/hooks.md) for lifecycle events and local trust decisions.
 
 Operators and agents should read:
