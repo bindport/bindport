@@ -25,6 +25,10 @@ pub(crate) fn content_hash(contents: &str) -> String {
     sha256_hex(contents.as_bytes())
 }
 
+pub fn rendered_content_hash(contents: &str) -> String {
+    content_hash(contents)
+}
+
 pub(crate) fn content_hash_matches(contents: &str, expected_hash: &str) -> bool {
     content_hash(contents) == expected_hash || legacy_content_hash(contents) == expected_hash
 }

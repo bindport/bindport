@@ -69,8 +69,10 @@ built-in templates are `bindport-traefik` and `bindport-env-local`.
 
 Output roots must be relative to the config file and must not contain `..`.
 BindPort tracks output ownership in the registry and refuses to overwrite
-unowned or externally modified files. `bindport render --repair` reconciles
-DB-owned files without adopting unknown files.
+unowned or externally modified files during normal render. `bindport render
+--repair` reconciles DB-owned files and can adopt content-identical planned
+files whose ownership row was lost. Files with different content are never
+adopted.
 
 ## Hooks
 

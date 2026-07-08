@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) struct RenderWriteSummary {
     pub(crate) written: usize,
+    pub(crate) adopted: usize,
     pub(crate) external_modified: usize,
 }
 
@@ -14,6 +15,7 @@ pub(crate) fn write_repair_render_plan(
 ) -> Result<RenderWriteSummary, RenderCommandError> {
     let mut summary = RenderWriteSummary {
         written: 0,
+        adopted: 0,
         external_modified: 0,
     };
 
@@ -44,6 +46,29 @@ pub(crate) fn write_repair_render_plan(
                     run_id: None,
                 })?;
                 summary.external_modified += 1;
+            }
+            Err(OutputFileError::UnownedTarget { path }) => {
+                let existing_contents =
+                    fs::read_to_string(&path).map_err(|source| OutputFileError::Io {
+                        path: path.clone(),
+                        source,
+                    })?;
+                if existing_contents != file.contents {
+                    return Err(OutputFileError::UnownedTarget { path }.into());
+                }
+
+                registry.record_output_file(&OutputFileRecord {
+                    output_name: output.name.clone(),
+                    route_key: file.route_key.clone(),
+                    rendered_path: path,
+                    status: OutputFileStatus::Rendered,
+                    reason: None,
+                    content_hash: Some(bindport_adapters::rendered_content_hash(&file.contents)),
+                    template_hash: None,
+                    lease_id: None,
+                    run_id: None,
+                })?;
+                summary.adopted += 1;
             }
             Err(error) => return Err(error.into()),
         }

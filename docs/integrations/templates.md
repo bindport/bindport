@@ -217,13 +217,16 @@ the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
 
-`bindport render --repair` uses the same safety checks, but treats an
-externally modified DB-owned file as state to record instead of a command-wide
-failure. Current route files that are missing are rendered again. DB-owned files
-for removed or configured deletion states are deleted only when their current
-hash still matches the registry record. Missing DB-owned files are marked
-removed, and externally modified DB-owned files are preserved and marked with
-`external_modified`. Unknown files are never adopted.
+`bindport render --repair` uses the same safety checks, but treats recoverable
+filesystem drift as state to record instead of a command-wide failure. Current
+route files that are missing are rendered again. Content-identical planned files
+whose ownership row was lost are adopted back into the registry without
+rewriting them. DB-owned files for removed or configured deletion states are
+deleted only when their current hash still matches the registry record. Missing
+DB-owned files are marked removed, stale ownership rows outside the current
+output root are marked removed with `outside_output_root`, and externally
+modified DB-owned files are preserved and marked with `external_modified`.
+Unknown files with different content are never adopted.
 
 `delete_on` controls when DB-owned output files are removed. The default is
 `["removed"]`, which deletes a rendered file after the matching route has been
@@ -353,8 +356,13 @@ template files under project `.bindport/templates` or global
   works with `127.0.0.1`; containerized Traefik often needs
   `host.docker.internal` or an equivalent host gateway name.
 - If BindPort refuses to overwrite a file, the file is unowned or externally
-  modified. Use `bindport render --repair` to record externally modified
-  DB-owned files without adopting unknown files.
+  modified. Use `bindport render --repair` to adopt content-identical planned
+  files whose ownership row was lost, or to record externally modified DB-owned
+  files without overwriting them.
+- If render reports `outside_output_root`, a stale ownership row pointed at a
+  generated file outside the current output root, usually from a deleted
+  worktree or old output location. Repair or the next render marks that row
+  removed instead of deleting files outside the current root.
 - If cleanup does not delete a generated file, confirm the route was removed
   from the registry, that stale CLI cleanup was confirmed with `--yes` when run
   noninteractively, and that `delete_on` includes the lifecycle state you expect.

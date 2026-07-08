@@ -24,6 +24,7 @@ pub struct RemovedOutputFile {
 pub enum OutputFileRemovalStatus {
     Removed,
     Missing,
+    OutsideRoot,
     ExternalModified,
 }
 

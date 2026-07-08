@@ -66,6 +66,11 @@ pub(crate) fn remove_output_files_for_lifecycle(
                 Some(String::from("missing")),
                 None,
             ),
+            AdapterOutputFileRemovalStatus::OutsideRoot => (
+                OutputFileStatus::Removed,
+                Some(String::from("outside_output_root")),
+                None,
+            ),
             AdapterOutputFileRemovalStatus::ExternalModified => (
                 OutputFileStatus::Error,
                 Some(String::from("external_modified")),

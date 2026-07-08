@@ -23,7 +23,8 @@ mod render;
 mod resolver;
 mod templates;
 
-pub(crate) use hash::*;
+pub use hash::rendered_content_hash;
+pub(crate) use hash::{content_hash, content_hash_matches, short_hash, stable_hash};
 pub use kind::*;
 pub use ownership::*;
 pub use render::*;

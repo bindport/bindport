@@ -137,6 +137,9 @@ Common causes:
 - Output `root` is not relative to the config file.
 - Output `target` escapes the output root.
 - Existing file is unowned or externally modified.
+- `outside_output_root` means a stale ownership row pointed at a generated file
+  outside the current output root; rerun `bindport render --repair` or render
+  again from the intended worktree.
 - Required route metadata is missing, such as `hostname`.
 
 ## Hook Issues
