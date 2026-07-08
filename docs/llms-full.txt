@@ -65,7 +65,8 @@ human output or hardcoding ports. The JSON schema is in
 
 Outputs render one text file per route from the latest registry snapshot.
 Template lookup checks project templates, global templates, and built-ins. The
-built-in templates are `bindport-traefik` and `bindport-env-local`.
+built-in templates are `bindport-traefik`, `bindport-caddy`, and
+`bindport-env-local`.
 Templates receive `snapshot.generated_at`, `snapshot.route_count`, `route.*`,
 `output.*`, and user-provided `vars.*`.
 

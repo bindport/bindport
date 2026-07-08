@@ -66,8 +66,8 @@ The current source tree includes:
   conflicts, and the next candidate port.
 - `bindport doctor outputs` diagnostics for configured output templates and
   planned render paths without writing files.
-- Built-in `bindport-env-local` output template for explicit `.env.local`
-  generation through the normal owned-output pipeline.
+- Built-in `bindport-traefik`, `bindport-caddy`, and `bindport-env-local`
+  output templates through the normal owned-output pipeline.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
   and JSON output options.
 - Local dashboard API and embedded UI for active, stopped, and stale registry
@@ -124,6 +124,7 @@ cargo run -p bindport -- dashboard serve
 cargo run -p bindport -- doctor outputs
 cargo run -p bindport -- templates list
 cargo run -p bindport -- templates export bindport-traefik
+cargo run -p bindport -- templates export bindport-caddy
 cargo run -p bindport -- render --dry-run
 cargo run -p bindport -- render --repair
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
@@ -324,8 +325,8 @@ machine-readable counts. Active services are not removed.
   options, dev modes, and security posture.
 - [Status](docs/operations/status.md): `status --json` schema, service URL selection, and
   agent-oriented lookup guidance.
-- [Templates](docs/integrations/templates.md): output template lookup, built-in Traefik
-  file-provider setup, custom templates, render lifecycle, and troubleshooting.
+- [Templates](docs/integrations/templates.md): output template lookup, built-in
+  proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
 - [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
 - [Platform Support](docs/reference/platform-support.md): supported operating systems,

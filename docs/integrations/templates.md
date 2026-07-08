@@ -103,6 +103,24 @@ For an active route with a hostname, the template renders Traefik routers and
 services pointing at `route.target_url`. For stopped, stale, or missing-hostname
 routes, it renders comment-only YAML.
 
+### `bindport-caddy`
+
+The `bindport-caddy` built-in renders Caddyfile site blocks for Caddy's file
+adapter or an imported Caddyfile directory.
+
+Supported vars:
+
+```toml
+[outputs.vars]
+site_scheme = "http"
+```
+
+For an active route with a hostname, the template renders a site address and
+`reverse_proxy` directive pointing at `route.target_url`. The default
+`site_scheme = "http"` keeps local `.localhost` setups from opting into Caddy
+automatic HTTPS by accident. Export the template and change `site_scheme` when
+your local Caddy setup intentionally owns HTTPS.
+
 ### `bindport-env-local`
 
 The `bindport-env-local` built-in renders route metadata as a dotenv-style text
@@ -208,6 +226,11 @@ root = ".bindport/generated"
 name = "traefik"
 template = "bindport-traefik"
 target = "traefik/{{ route.service }}.yml"
+
+[[outputs]]
+name = "caddy"
+template = "bindport-caddy"
+target = "caddy/{{ route.service }}.caddy"
 ```
 
 `bindport render` reads the latest route state from the registry, renders one

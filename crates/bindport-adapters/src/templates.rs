@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
+pub(crate) const BUILT_IN_CADDY: &str = include_str!("../templates/bindport-caddy.caddy.j2");
 pub(crate) const BUILT_IN_ENV_LOCAL: &str = include_str!("../templates/bindport-env-local.env.j2");
 pub(crate) const TEMPLATE_FUEL: u64 = 200_000;
 pub(crate) const MAX_RENDERED_TEMPLATE_BYTES: usize = 1024 * 1024;
@@ -270,6 +271,10 @@ pub(crate) fn built_in_templates() -> &'static [BuiltInTemplate] {
         BuiltInTemplate {
             name: "bindport-traefik",
             contents: BUILT_IN_TRAEFIK,
+        },
+        BuiltInTemplate {
+            name: "bindport-caddy",
+            contents: BUILT_IN_CADDY,
         },
         BuiltInTemplate {
             name: "bindport-env-local",
