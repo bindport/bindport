@@ -21,21 +21,28 @@ pub(crate) fn route_delete_state(route: &RouteRecord) -> Option<OutputDeleteStat
     }
 }
 
+pub(crate) struct LifecycleRemoval<'a> {
+    pub(crate) output: &'a EffectiveOutputConfig,
+    pub(crate) scope: &'a OutputFileScope,
+    pub(crate) ownership: &'a [bindport_registry::OutputFileOwnership],
+    pub(crate) current_route_keys: &'a BTreeSet<String>,
+    pub(crate) delete_route_keys: &'a BTreeSet<String>,
+    pub(crate) base_dir: &'a Path,
+    pub(crate) render_config: &'a OutputRenderConfig,
+}
+
 pub(crate) fn remove_output_files_for_lifecycle(
     registry: &mut Registry,
-    output: &EffectiveOutputConfig,
-    ownership: &[bindport_registry::OutputFileOwnership],
-    current_route_keys: &BTreeSet<String>,
-    delete_route_keys: &BTreeSet<String>,
-    base_dir: &Path,
-    render_config: &OutputRenderConfig,
+    removal: LifecycleRemoval<'_>,
 ) -> Result<usize, RenderCommandError> {
+    let output = removal.output;
     let delete_removed = output.delete_on.contains(&OutputDeleteState::Removed);
-    let candidates = ownership
+    let candidates = removal
+        .ownership
         .iter()
         .filter(|owned| {
-            delete_route_keys.contains(&owned.route_key)
-                || (delete_removed && !current_route_keys.contains(&owned.route_key))
+            removal.delete_route_keys.contains(&owned.route_key)
+                || (delete_removed && !removal.current_route_keys.contains(&owned.route_key))
         })
         .map(|owned| AdapterRemovableOutputFile {
             route_key: owned.route_key.clone(),
@@ -48,7 +55,11 @@ pub(crate) fn remove_output_files_for_lifecycle(
         return Ok(0);
     }
 
-    let removed = remove_owned_output_files(&candidates, base_dir, &render_config.context)?;
+    let removed = remove_owned_output_files(
+        &candidates,
+        removal.base_dir,
+        &removal.render_config.context,
+    )?;
     let mut removed_count = 0;
 
     for file in removed {
@@ -80,6 +91,7 @@ pub(crate) fn remove_output_files_for_lifecycle(
 
         registry.record_output_file(&OutputFileRecord {
             output_name: output.name.clone(),
+            scope: removal.scope.clone(),
             route_key: file.route_key,
             rendered_path: file.path,
             status,

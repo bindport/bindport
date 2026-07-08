@@ -57,6 +57,7 @@ pub(crate) fn render_outputs(
     for output in outputs {
         let template = resolver.resolve(&output.template, None)?;
         let render_config = OutputRenderConfig::from(&output);
+        let scope = output_file_scope(&base_dir, &render_config)?;
         let delete_route_keys = delete_route_keys(&output, snapshot.routes());
         let render_snapshot = filtered_output_route_snapshot(&snapshot, &delete_route_keys);
         let plan = render_output_routes(&render_config, &template.contents, &render_snapshot)?;
@@ -72,7 +73,7 @@ pub(crate) fn render_outputs(
             continue;
         }
 
-        let ownership = registry.output_file_ownership(&output.name)?;
+        let ownership = registry.output_file_ownership(&output.name, &scope)?;
         let write_ownership = ownership
             .iter()
             .map(|owned| AdapterOutputFileOwnership {
@@ -82,26 +83,34 @@ pub(crate) fn render_outputs(
             .collect::<Vec<_>>();
         let removed = remove_output_files_for_lifecycle(
             registry,
-            &output,
-            &ownership,
-            &current_route_keys,
-            &delete_route_keys,
-            &base_dir,
-            &render_config,
+            LifecycleRemoval {
+                output: &output,
+                scope: &scope,
+                ownership: &ownership,
+                current_route_keys: &current_route_keys,
+                delete_route_keys: &delete_route_keys,
+                base_dir: &base_dir,
+                render_config: &render_config,
+            },
         )?;
         let write_summary = match mode {
             RenderMode::Normal => {
                 let written = write_render_plan(&plan, &base_dir, &write_ownership)?;
-                record_written_output_files(registry, &output, &written)?;
+                record_written_output_files(registry, &output, &scope, &written)?;
                 RenderWriteSummary {
                     written: written.len(),
                     adopted: 0,
                     external_modified: 0,
                 }
             }
-            RenderMode::Repair => {
-                write_repair_render_plan(registry, &output, &plan, &base_dir, &write_ownership)?
-            }
+            RenderMode::Repair => write_repair_render_plan(
+                registry,
+                &output,
+                &scope,
+                &plan,
+                &base_dir,
+                &write_ownership,
+            )?,
         };
 
         if report == RenderReport::Print {

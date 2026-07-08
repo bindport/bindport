@@ -217,6 +217,14 @@ the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
 
+Ownership is scoped to the resolved output root and config root. This lets two
+worktrees or monorepo checkouts render the same output name and route key into
+different `.bindport/generated` directories without replacing each other's
+registry rows. Legacy unscoped rows from older BindPort versions are considered
+only when their recorded path is inside the current output root, so same-root
+files can be adopted while deleted-worktree or foreign-root rows do not block
+current renders.
+
 Templates render from a single route snapshot. Each rendered file receives:
 
 - `snapshot.generated_at`: when the registry snapshot was captured.
@@ -231,15 +239,20 @@ Templates render from a single route snapshot. Each rendered file receives:
   `output.delete_on`, and `output.on_failure`.
 - `vars.*`: user-defined values from `[outputs.vars]` for the current output.
 
+Avoid embedding `snapshot.generated_at` unless the output should change on
+every render. A changing timestamp changes the file hash, which can trigger
+proxy reloads or hook events even when route data is otherwise unchanged.
+
 `bindport render --repair` uses the same safety checks, but treats recoverable
 filesystem drift as state to record instead of a command-wide failure. Current
 route files that are missing are rendered again. Content-identical planned files
 whose ownership row was lost are adopted back into the registry without
 rewriting them. DB-owned files for removed or configured deletion states are
 deleted only when their current hash still matches the registry record. Missing
-DB-owned files are marked removed, stale ownership rows outside the current
-output root are marked removed with `outside_output_root`, and externally
-modified DB-owned files are preserved and marked with `external_modified`.
+DB-owned files in the current output scope are marked removed, current-scope
+rows outside the current output root are marked removed with
+`outside_output_root`, and externally modified DB-owned files are preserved and
+marked with `external_modified`.
 Unknown files with different content are never adopted.
 
 `delete_on` controls when DB-owned output files are removed. The default is

@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: MIT
 
 use crate::support::*;
-use bindport_registry::{OutputFileRecord, OutputFileStatus};
+use bindport_registry::{OutputFileRecord, OutputFileScope, OutputFileStatus};
+
+fn output_scope_for_root(root: &Path) -> OutputFileScope {
+    OutputFileScope::new(
+        root.join(".bindport/generated"),
+        root.to_path_buf(),
+        None,
+        None,
+    )
+}
 
 #[test]
 fn render_command_writes_config_files_and_records_ownership() {
@@ -117,6 +126,61 @@ fn render_command_writes_config_files_and_records_ownership() {
         String::from_utf8_lossy(&rerender.stderr)
     );
 }
+
+#[test]
+fn render_scopes_same_output_and_route_to_distinct_output_roots() {
+    let registry_path = temp_registry_path("render-scoped-roots-registry");
+    let first_root = temp_test_dir("render-scoped-roots-first");
+    let second_root = temp_test_dir("render-scoped-roots-second");
+    let port = free_loopback_port();
+    let config = format!(
+        "project = \"render-scoped-roots\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"scoped.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
+    );
+
+    fs::write(first_root.join(".bindport.toml"), &config).expect("write first config");
+    fs::write(second_root.join(".bindport.toml"), &config).expect("write second config");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&first_root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    for root in [&first_root, &second_root] {
+        let render = bindport_with_registry(&registry_path)
+            .current_dir(root)
+            .args(["render", "traefik"])
+            .output()
+            .expect("render output");
+        assert!(
+            render.status.success(),
+            "render failed in {}: {}",
+            root.display(),
+            String::from_utf8_lossy(&render.stderr)
+        );
+        assert!(root.join(".bindport/generated/traefik/web.yml").is_file());
+    }
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    assert!(
+        status_output.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["outputs"][0]["name"], "traefik");
+    assert_eq!(status["outputs"][0]["rendered"], 2);
+}
+
 #[test]
 fn render_all_writes_every_enabled_output() {
     let registry_path = temp_registry_path("render-all-registry");
@@ -295,7 +359,7 @@ fn render_repair_records_externally_modified_owned_files() {
 }
 
 #[test]
-fn render_marks_stale_foreign_output_rows_removed_without_blocking() {
+fn render_ignores_foreign_scoped_output_rows_without_blocking() {
     let registry_path = temp_registry_path("render-stale-foreign-registry");
     let root = temp_test_dir("render-stale-foreign-root");
     let port = free_loopback_port();
@@ -323,6 +387,13 @@ fn render_marks_stale_foreign_output_rows_removed_without_blocking() {
         registry
             .record_output_file(&OutputFileRecord {
                 output_name: String::from("traefik"),
+                scope: OutputFileScope::new(
+                    root.with_file_name("deleted-worktree")
+                        .join(".bindport/generated"),
+                    root.with_file_name("deleted-worktree"),
+                    None,
+                    None,
+                ),
                 route_key: String::from("stale-foreign-route"),
                 rendered_path: root
                     .with_file_name("deleted-worktree")
@@ -354,8 +425,8 @@ fn render_marks_stale_foreign_output_rows_removed_without_blocking() {
         .expect("status json");
     let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
 
-    assert_eq!(status["outputs"][0]["rendered"], 1);
-    assert_eq!(status["outputs"][0]["removed"], 1);
+    assert_eq!(status["outputs"][0]["rendered"], 2);
+    assert_eq!(status["outputs"][0]["removed"], 0);
 }
 
 #[test]
@@ -411,6 +482,7 @@ fn render_repair_adopts_content_matching_unowned_files() {
         registry
             .record_output_file(&OutputFileRecord {
                 output_name: String::from("traefik"),
+                scope: output_scope_for_root(&root),
                 route_key,
                 rendered_path: rendered_path.clone(),
                 status: OutputFileStatus::Removed,
@@ -519,6 +591,7 @@ fn render_repair_refuses_to_adopt_content_divergent_unowned_files() {
         registry
             .record_output_file(&OutputFileRecord {
                 output_name: String::from("traefik"),
+                scope: output_scope_for_root(&root),
                 route_key,
                 rendered_path: rendered_path.clone(),
                 status: OutputFileStatus::Removed,

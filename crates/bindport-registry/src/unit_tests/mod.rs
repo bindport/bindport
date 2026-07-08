@@ -76,6 +76,10 @@ fn current_process_command() -> String {
         .unwrap_or_else(|| String::from("bindport test"))
 }
 
+fn test_output_scope(root: &str) -> OutputFileScope {
+    OutputFileScope::new(PathBuf::from(root), PathBuf::from(root), None, None)
+}
+
 fn mark_latest_run_started_before_grace(registry: &Registry) {
     registry
         .connection

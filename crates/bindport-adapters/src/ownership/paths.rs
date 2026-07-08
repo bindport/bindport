@@ -10,6 +10,13 @@ pub fn render_plan_paths(
     render_plan_paths_with_anchor(plan, base_dir, &root, &symlink_anchor)
 }
 
+pub fn output_root_path(
+    base_dir: &Path,
+    output: &OutputContext,
+) -> Result<PathBuf, OutputFileError> {
+    output_root(base_dir, output)
+}
+
 pub(crate) fn render_plan_paths_with_anchor(
     plan: &RenderPlan,
     base_dir: &Path,

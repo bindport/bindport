@@ -19,9 +19,50 @@ impl OutputFileStatus {
     }
 }
 
+pub const UNSCOPED_OUTPUT_SCOPE: &str = "unscoped";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFileScope {
+    pub key: String,
+    pub output_root: Option<PathBuf>,
+    pub config_root: Option<PathBuf>,
+    pub worktree_path: Option<PathBuf>,
+    pub worktree_hash: Option<String>,
+}
+
+impl OutputFileScope {
+    pub fn new(
+        output_root: PathBuf,
+        config_root: PathBuf,
+        worktree_path: Option<PathBuf>,
+        worktree_hash: Option<String>,
+    ) -> Self {
+        let key = output_scope_key(&output_root, &config_root);
+
+        Self {
+            key,
+            output_root: Some(output_root),
+            config_root: Some(config_root),
+            worktree_path,
+            worktree_hash,
+        }
+    }
+
+    pub fn unscoped() -> Self {
+        Self {
+            key: String::from(UNSCOPED_OUTPUT_SCOPE),
+            output_root: None,
+            config_root: None,
+            worktree_path: None,
+            worktree_hash: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputFileRecord {
     pub output_name: String,
+    pub scope: OutputFileScope,
     pub route_key: String,
     pub rendered_path: PathBuf,
     pub status: OutputFileStatus,
@@ -43,9 +84,10 @@ impl Registry {
     pub fn output_file_ownership(
         &self,
         output_name: &str,
+        scope: &OutputFileScope,
     ) -> Result<Vec<OutputFileOwnership>, RegistryError> {
         let mut statement = self.connection.prepare(
-            "SELECT route_key, rendered_path, content_hash
+            "SELECT output_scope, route_key, rendered_path, content_hash
              FROM output_files
              WHERE output_name = ?1
              AND content_hash IS NOT NULL
@@ -56,29 +98,94 @@ impl Registry {
              ORDER BY rendered_path, route_key",
         )?;
         let rows = statement.query_map(params![output_name], |row| {
-            Ok(OutputFileOwnership {
-                route_key: row.get(0)?,
-                path: PathBuf::from(row.get::<_, String>(1)?),
-                content_hash: row.get(2)?,
+            let output_scope = row.get::<_, String>(0)?;
+            let path = PathBuf::from(row.get::<_, String>(2)?);
+
+            Ok(OutputFileOwnershipRow {
+                route_key: row.get(1)?,
+                path,
+                content_hash: row.get(3)?,
+                output_scope,
             })
         })?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let mut by_path = std::collections::BTreeMap::<PathBuf, OutputFileOwnershipRow>::new();
+        for owned in rows
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|owned| output_file_scope_matches(owned, scope))
+        {
+            let should_replace = by_path.get(&owned.path).is_some_and(|existing| {
+                owned.output_scope == scope.key && existing.output_scope != scope.key
+            });
+            if should_replace || !by_path.contains_key(&owned.path) {
+                by_path.insert(owned.path.clone(), owned);
+            }
+        }
+        let ownership = by_path
+            .into_values()
+            .map(|owned| OutputFileOwnership {
+                route_key: owned.route_key,
+                path: owned.path,
+                content_hash: owned.content_hash,
+            })
+            .collect();
+
+        Ok(ownership)
     }
 
     pub fn record_output_file(&mut self, record: &OutputFileRecord) -> Result<(), RegistryError> {
         let now = utc_now(&self.connection)?;
         let rendered_path = record.rendered_path.display().to_string();
+        let output_root = record
+            .scope
+            .output_root
+            .as_ref()
+            .map(|path| path.display().to_string());
+        let config_root = record
+            .scope
+            .config_root
+            .as_ref()
+            .map(|path| path.display().to_string());
+        let worktree_path = record
+            .scope
+            .worktree_path
+            .as_ref()
+            .map(|path| path.display().to_string());
 
-        self.connection.execute(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if record.scope.key != UNSCOPED_OUTPUT_SCOPE {
+            transaction.execute(
+                "DELETE FROM output_files
+                 WHERE output_name = ?1
+                 AND output_scope = ?2
+                 AND route_key = ?3",
+                params![
+                    &record.output_name,
+                    UNSCOPED_OUTPUT_SCOPE,
+                    &record.route_key
+                ],
+            )?;
+        }
+
+        transaction.execute(
             "INSERT INTO output_files (
-                output_name, route_key, rendered_path, status, reason,
-                content_hash, template_hash, lease_id, run_id, rendered_at, updated_at
+                output_name, output_scope, route_key, rendered_path, output_root,
+                config_root, worktree_path, worktree_hash, status, reason,
+                content_hash, template_hash, lease_id, run_id, rendered_at,
+                updated_at
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?15
              )
-             ON CONFLICT(output_name, route_key) DO UPDATE SET
+             ON CONFLICT(output_name, output_scope, route_key) DO UPDATE SET
                 rendered_path = excluded.rendered_path,
+                output_root = excluded.output_root,
+                config_root = excluded.config_root,
+                worktree_path = excluded.worktree_path,
+                worktree_hash = excluded.worktree_hash,
                 status = excluded.status,
                 reason = excluded.reason,
                 content_hash = excluded.content_hash,
@@ -88,8 +195,13 @@ impl Registry {
                 updated_at = excluded.updated_at",
             params![
                 &record.output_name,
+                &record.scope.key,
                 &record.route_key,
                 rendered_path,
+                output_root,
+                config_root,
+                worktree_path,
+                &record.scope.worktree_hash,
                 record.status.as_str(),
                 &record.reason,
                 &record.content_hash,
@@ -99,6 +211,7 @@ impl Registry {
                 now
             ],
         )?;
+        transaction.commit()?;
 
         Ok(())
     }
@@ -161,4 +274,44 @@ impl Registry {
             u64::try_from(delay_ms).unwrap_or(u64::MAX),
         ))
     }
+}
+
+#[derive(Debug)]
+struct OutputFileOwnershipRow {
+    route_key: String,
+    path: PathBuf,
+    content_hash: String,
+    output_scope: String,
+}
+
+fn output_file_scope_matches(owned: &OutputFileOwnershipRow, scope: &OutputFileScope) -> bool {
+    if owned.output_scope == scope.key {
+        return true;
+    }
+
+    owned.output_scope == UNSCOPED_OUTPUT_SCOPE
+        && scope
+            .output_root
+            .as_ref()
+            .is_some_and(|root| owned.path.starts_with(root))
+}
+
+fn output_scope_key(output_root: &Path, config_root: &Path) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    let values = [
+        String::from("v1"),
+        output_root.display().to_string(),
+        config_root.display().to_string(),
+    ];
+
+    for value in values {
+        for byte in value.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    format!("{hash:016x}")
 }

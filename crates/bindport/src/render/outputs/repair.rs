@@ -9,6 +9,7 @@ pub(crate) struct RenderWriteSummary {
 pub(crate) fn write_repair_render_plan(
     registry: &mut Registry,
     output: &EffectiveOutputConfig,
+    scope: &OutputFileScope,
     plan: &RenderPlan,
     base_dir: &Path,
     ownership: &[AdapterOutputFileOwnership],
@@ -26,7 +27,7 @@ pub(crate) fn write_repair_render_plan(
         };
         match write_render_plan(&single_file_plan, base_dir, ownership) {
             Ok(written) => {
-                record_written_output_files(registry, output, &written)?;
+                record_written_output_files(registry, output, scope, &written)?;
                 summary.written += written.len();
             }
             Err(OutputFileError::ExternalModified { path }) => {
@@ -36,6 +37,7 @@ pub(crate) fn write_repair_render_plan(
                     .map(|owned| owned.content_hash.clone());
                 registry.record_output_file(&OutputFileRecord {
                     output_name: output.name.clone(),
+                    scope: scope.clone(),
                     route_key: file.route_key.clone(),
                     rendered_path: path,
                     status: OutputFileStatus::Error,
@@ -59,6 +61,7 @@ pub(crate) fn write_repair_render_plan(
 
                 registry.record_output_file(&OutputFileRecord {
                     output_name: output.name.clone(),
+                    scope: scope.clone(),
                     route_key: file.route_key.clone(),
                     rendered_path: path,
                     status: OutputFileStatus::Rendered,
@@ -80,11 +83,13 @@ pub(crate) fn write_repair_render_plan(
 pub(crate) fn record_written_output_files(
     registry: &mut Registry,
     output: &EffectiveOutputConfig,
+    scope: &OutputFileScope,
     written: &[bindport_adapters::WrittenOutputFile],
 ) -> Result<(), RegistryError> {
     for file in written {
         registry.record_output_file(&OutputFileRecord {
             output_name: output.name.clone(),
+            scope: scope.clone(),
             route_key: file.route_key.clone(),
             rendered_path: file.path.clone(),
             status: OutputFileStatus::Rendered,
