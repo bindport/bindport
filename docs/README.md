@@ -28,7 +28,8 @@ state:
   become the proxy.
 - Dashboards, scripts, and AI agents can ask `bindport status --json`,
   `bindport list --json`, or `bindport open <service> --print` instead of
-  guessing where a service is.
+  guessing where a service is. Use `bindport registry export` only when a debug
+  or backup workflow needs raw registry rows.
 - Hook execution is explicit and locally trusted, so checked-in config cannot
   silently run commands on a new machine.
 
@@ -69,8 +70,8 @@ Operators and agents should read:
 
 - [Dashboard](integrations/dashboard.md) for local dashboard controls, API behavior, auth,
   and cleanup actions.
-- [Status and Cleanup](operations/status.md) for registry states, URL lookup, reservations,
-  and stale/stopped cleanup.
+- [Status and Cleanup](operations/status.md) for registry states, registry
+  export, URL lookup, reservations, and stale/stopped cleanup.
 - [Health and Troubleshooting](operations/troubleshooting.md) for diagnostics and common
   failure modes.
 - [Security Model](operations/security.md) for local-first defaults, config safety, output

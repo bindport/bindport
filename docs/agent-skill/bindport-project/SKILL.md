@@ -18,6 +18,8 @@ development ports when BindPort config or scripts already describe the service.
 4. Use `bindport run <service>` to run configured services.
 5. Use `bindport status --json`, `bindport list --json`, or
    `bindport open <service> --print` to find active service URLs.
+6. Use `bindport registry export` only for debug/backup snapshots or output
+   ownership investigations; prefer `status --json` for normal automation.
 
 ## Config Rules
 
@@ -53,6 +55,7 @@ bindport doctor
 bindport doctor outputs
 bindport status --json
 bindport list --json
+bindport registry export
 bindport open <service> --print
 bindport run <service>
 bindport render --dry-run

@@ -75,6 +75,7 @@ mod list;
 mod open;
 mod paths;
 mod ports;
+mod registry;
 mod render;
 mod reserve;
 mod route_events;
@@ -93,6 +94,7 @@ pub(crate) use list::*;
 pub(crate) use open::*;
 pub(crate) use paths::*;
 pub(crate) use ports::*;
+pub(crate) use registry::*;
 pub(crate) use render::*;
 pub(crate) use reserve::*;
 pub(crate) use route_events::*;
@@ -128,6 +130,7 @@ fn dispatch(args: impl IntoIterator<Item = String>) -> ExitCode {
             }
         }
         Some("list") => run_list_command(&args[1..]),
+        Some("registry") => run_registry_command(&args[1..]),
         Some("open") => run_open_command(&args[1..]),
         Some("reserve") => run_reserve_command(&args[1..]),
         Some("release") => run_release_command(&args[1..]),

@@ -15,6 +15,7 @@ scripts.
 | `bindport release [service\|port]` | Release a reserved port. |
 | `bindport status [--json]` | Show active, reserved, stopped, and stale registry state. |
 | `bindport list [--json]` | Group registry services by project for inventory views. |
+| `bindport registry export` | Print a full registry debug/backup JSON snapshot. |
 | `bindport open [service]` | Print or open the best URL for an active service. |
 | `bindport clean` | Remove stopped and stale registry entries. |
 | `bindport init` | Create project or user fallback config. |
@@ -108,7 +109,15 @@ bindport status
 bindport status --json
 bindport list
 bindport list --json
+bindport registry export
 ```
+
+`status --json` is the normal machine-readable current-state API. `list --json`
+is a grouped inventory view. `registry export` is a fuller debug/backup payload
+with raw lease, run, output ownership, and output render scheduling rows.
+It can contain sensitive local data, including full command lines that may
+include tokens or passwords passed as arguments, plus filesystem paths. Review
+and redact it before sharing in a bug report.
 
 Resolve the best service URL:
 

@@ -119,6 +119,7 @@ cargo run -p bindport -- init
 cargo run -p bindport -- init --user
 cargo run -p bindport -- status --json
 cargo run -p bindport -- list --json
+cargo run -p bindport -- registry export
 cargo run -p bindport -- open web --print
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- reserve web
@@ -307,6 +308,19 @@ bindport release web
 
 ## Registry Cleanup
 
+Export the registry for local debug or backup workflows:
+
+```sh
+bindport registry export
+```
+
+The export is JSON-only and includes raw lease, run, output ownership, and
+output render scheduling rows. It is more complete than `status --json` and is
+intended for troubleshooting, bug reports, and local backups.
+The export can contain sensitive local data, including full command lines that
+may include tokens or passwords passed as arguments, plus filesystem paths.
+Review and redact it before sharing in a bug report.
+
 Stopped and stale entries can be removed from the local registry with:
 
 ```sh
@@ -331,7 +345,8 @@ machine-readable counts. Active services are not removed.
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
 - [Status](docs/operations/status.md): `status --json` schema, grouped service
-  listing, service URL selection, and agent-oriented lookup guidance.
+  listing, registry export, service URL selection, and agent-oriented lookup
+  guidance.
 - [Templates](docs/integrations/templates.md): output template lookup, built-in
   proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
 - [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace

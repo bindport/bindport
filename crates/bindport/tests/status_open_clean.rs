@@ -8,6 +8,9 @@ mod status;
 #[path = "status_open_clean/list.rs"]
 mod list;
 
+#[path = "status_open_clean/export.rs"]
+mod export;
+
 #[path = "status_open_clean/open.rs"]
 mod open;
 
