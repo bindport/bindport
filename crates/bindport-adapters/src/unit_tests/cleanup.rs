@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
+use crate::hash::legacy_content_hash;
 
 #[test]
 fn content_hash_uses_sha256_and_accepts_legacy_hashes() {
@@ -63,12 +64,12 @@ fn remove_owned_output_files_reports_missing_files() {
 }
 
 #[test]
-fn remove_owned_output_files_rejects_targets_outside_root() {
+fn remove_owned_output_files_reports_targets_outside_root() {
     let root = temp_test_dir("remove-outside-root");
     let output = test_render_plan("routes/demo.yml", "owned").output;
     let outside = root.join("outside/demo.yml");
 
-    let error = remove_owned_output_files(
+    let removed = remove_owned_output_files(
         &[RemovableOutputFile {
             route_key: String::from("route-1"),
             path: outside.clone(),
@@ -77,12 +78,12 @@ fn remove_owned_output_files_rejects_targets_outside_root() {
         &root,
         &output,
     )
-    .expect_err("outside root");
+    .expect("outside root is reported");
 
-    assert!(matches!(
-        error,
-        OutputFileError::TargetEscapesRoot { ref target, .. } if target == &outside.display().to_string()
-    ));
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].route_key, "route-1");
+    assert_eq!(removed[0].path, outside);
+    assert_eq!(removed[0].status, OutputFileRemovalStatus::OutsideRoot);
 }
 
 #[cfg(unix)]

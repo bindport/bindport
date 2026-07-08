@@ -11,10 +11,12 @@ pub fn remove_owned_output_files(
 
     for file in files {
         if !file.path.starts_with(&root) {
-            return Err(OutputFileError::TargetEscapesRoot {
-                target: file.path.display().to_string(),
-                root: root.clone(),
+            removed.push(RemovedOutputFile {
+                route_key: file.route_key.clone(),
+                path: file.path.clone(),
+                status: OutputFileRemovalStatus::OutsideRoot,
             });
+            continue;
         }
         if file.path.file_name().is_none() {
             return Err(OutputFileError::UnsafeTarget {

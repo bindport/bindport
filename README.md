@@ -196,8 +196,8 @@ files for stopped/stale/removed routes, and CLI or dashboard cleanup triggers
 removed-route output cleanup. Hooks can subscribe to the same lifecycle events,
 but checked-in project config cannot enable hook execution by itself. Approve
 or deny configured hooks per machine with `bindport hooks trust|deny|reset`.
-`bindport render --repair` reconciles DB-owned files without adopting unknown
-files.
+`bindport render --repair` reconciles DB-owned files and can adopt
+content-identical planned files whose ownership row was lost.
 `bindport reserve [service]` allocates and holds a port without running a child
 process, which is useful for compose-managed or otherwise external services.
 `bindport release [service|port]` releases a reserved lease and marks it

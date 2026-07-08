@@ -99,6 +99,7 @@ pub(crate) fn render_outputs(
                 record_written_output_files(registry, &output, &written)?;
                 RenderWriteSummary {
                     written: written.len(),
+                    adopted: 0,
                     external_modified: 0,
                 }
             }
@@ -116,6 +117,9 @@ pub(crate) fn render_outputs(
             println!("{verb} {}: {} files", output.name, write_summary.written);
             if removed > 0 {
                 println!("removed {}: {} files", output.name, removed);
+            }
+            if write_summary.adopted > 0 {
+                println!("adopted {}: {} files", output.name, write_summary.adopted);
             }
             if write_summary.external_modified > 0 {
                 println!(

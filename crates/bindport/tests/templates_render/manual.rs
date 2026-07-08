@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::support::*;
+use bindport_registry::{OutputFileRecord, OutputFileStatus};
 
 #[test]
 fn render_command_writes_config_files_and_records_ownership() {
@@ -290,5 +291,265 @@ fn render_repair_records_externally_modified_owned_files() {
     assert_eq!(
         status["services"][0]["outputs"][0]["reason"],
         "external_modified"
+    );
+}
+
+#[test]
+fn render_marks_stale_foreign_output_rows_removed_without_blocking() {
+    let registry_path = temp_registry_path("render-stale-foreign-registry");
+    let root = temp_test_dir("render-stale-foreign-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-stale-foreign\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"foreign.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    {
+        let mut registry = Registry::open(&registry_path).expect("registry");
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key: String::from("stale-foreign-route"),
+                rendered_path: root
+                    .with_file_name("deleted-worktree")
+                    .join(".bindport/generated/traefik/stale.yml"),
+                status: OutputFileStatus::Rendered,
+                reason: None,
+                content_hash: Some(String::from("deadbeef")),
+                template_hash: None,
+                lease_id: None,
+                run_id: None,
+            })
+            .expect("record stale foreign output");
+    }
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "traefik"])
+        .output()
+        .expect("render output");
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["outputs"][0]["rendered"], 1);
+    assert_eq!(status["outputs"][0]["removed"], 1);
+}
+
+#[test]
+fn render_repair_adopts_content_matching_unowned_files() {
+    let registry_path = temp_registry_path("render-repair-adopt-registry");
+    let root = temp_test_dir("render-repair-adopt-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-repair-adopt\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"adopt.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+    let rendered_path = root.join(".bindport/generated/traefik/web.yml");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "traefik"])
+        .output()
+        .expect("render output");
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let rendered_contents = fs::read_to_string(&rendered_path).expect("rendered file");
+
+    let route_key = {
+        let status_output = bindport_with_registry(&registry_path)
+            .args(["status", "--json"])
+            .output()
+            .expect("status json");
+        let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+        status["services"][0]["identity_key"]
+            .as_str()
+            .expect("identity key")
+            .to_owned()
+    };
+    {
+        let mut registry = Registry::open(&registry_path).expect("registry");
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key,
+                rendered_path: rendered_path.clone(),
+                status: OutputFileStatus::Removed,
+                reason: Some(String::from("lost_ownership_fixture")),
+                content_hash: None,
+                template_hash: None,
+                lease_id: None,
+                run_id: None,
+            })
+            .expect("remove output ownership");
+    }
+    assert_eq!(
+        fs::read_to_string(&rendered_path).expect("rendered file remains"),
+        rendered_contents
+    );
+
+    let rerender = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "traefik"])
+        .output()
+        .expect("rerender output");
+    assert!(
+        !rerender.status.success(),
+        "normal render should still refuse unowned files"
+    );
+    assert!(
+        String::from_utf8_lossy(&rerender.stderr).contains("unowned output file"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&rerender.stderr)
+    );
+
+    let repair = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "--repair", "traefik"])
+        .output()
+        .expect("repair output");
+    assert!(
+        repair.status.success(),
+        "repair failed: {}",
+        String::from_utf8_lossy(&repair.stderr)
+    );
+    let repair_stdout = String::from_utf8(repair.stdout).expect("repair stdout");
+    assert!(repair_stdout.contains("repaired traefik: 0 files"));
+    assert!(repair_stdout.contains("adopted traefik: 1 files"));
+
+    let status_output = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status json");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+
+    assert_eq!(status["outputs"][0]["rendered"], 1);
+    assert_eq!(status["services"][0]["outputs"][0]["status"], "rendered");
+}
+
+#[test]
+fn render_repair_refuses_to_adopt_content_divergent_unowned_files() {
+    let registry_path = temp_registry_path("render-repair-divergent-registry");
+    let root = temp_test_dir("render-repair-divergent-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-repair-divergent\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"divergent.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+    let rendered_path = root.join(".bindport/generated/traefik/web.yml");
+
+    let run_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+    assert!(
+        run_output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "traefik"])
+        .output()
+        .expect("render output");
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let rendered_contents = fs::read_to_string(&rendered_path).expect("rendered file");
+
+    let route_key = {
+        let status_output = bindport_with_registry(&registry_path)
+            .args(["status", "--json"])
+            .output()
+            .expect("status json");
+        let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+        status["services"][0]["identity_key"]
+            .as_str()
+            .expect("identity key")
+            .to_owned()
+    };
+    {
+        let mut registry = Registry::open(&registry_path).expect("registry");
+        registry
+            .record_output_file(&OutputFileRecord {
+                output_name: String::from("traefik"),
+                route_key,
+                rendered_path: rendered_path.clone(),
+                status: OutputFileStatus::Removed,
+                reason: Some(String::from("lost_ownership_fixture")),
+                content_hash: None,
+                template_hash: None,
+                lease_id: None,
+                run_id: None,
+            })
+            .expect("remove output ownership");
+    }
+
+    let divergent_contents = format!("{rendered_contents}\nmanual edit\n");
+    fs::write(&rendered_path, &divergent_contents).expect("modify unowned file");
+
+    let repair = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "--repair", "traefik"])
+        .output()
+        .expect("repair output");
+    assert!(
+        !repair.status.success(),
+        "repair should refuse divergent unowned files"
+    );
+    assert!(
+        String::from_utf8_lossy(&repair.stderr).contains("unowned output file"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&repair.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&rendered_path).expect("divergent file remains"),
+        divergent_contents
     );
 }
