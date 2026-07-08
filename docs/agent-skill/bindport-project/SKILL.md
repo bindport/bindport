@@ -36,8 +36,8 @@ development ports when BindPort config or scripts already describe the service.
 
 ## Outputs And Hooks
 
-- Run `bindport doctor outputs` before changing output templates or render
-  targets.
+- Run `bindport doctor outputs` before changing output templates, target hosts,
+  render targets, or output roots.
 - Run `bindport render --dry-run` before writing output files.
 - Run `bindport render --diff` before replacing DB-owned output files when the
   content change matters.

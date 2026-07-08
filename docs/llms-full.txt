@@ -28,7 +28,8 @@ BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
 - `bindport config explain` explains config discovery and identity sources.
 - `bindport config validate` validates config.
 - `bindport doctor` checks local diagnostics.
-- `bindport doctor outputs` validates output setup without writing files.
+- `bindport doctor outputs` validates output setup, target hosts, output roots,
+  ownership rows, and hook trust without writing files.
 - `bindport dashboard serve|start|status|stop` operates the dashboard.
 - `bindport render [output]` renders configured output files.
 - `bindport templates list|show|export` inspects output templates.
@@ -85,6 +86,8 @@ DB-owned files without writing files or updating ownership rows.
 `bindport render --repair` reconciles DB-owned files and can adopt
 content-identical planned files whose ownership row was lost. Files with
 different content are never adopted.
+`bindport doctor outputs` also reports foreign or stale ownership rows from
+other output roots or worktrees as diagnostics.
 
 ## Hooks
 

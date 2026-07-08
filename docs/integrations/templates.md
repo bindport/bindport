@@ -342,9 +342,9 @@ rendered output files, and only when the current on-disk hash matches the
 recorded hash. Missing files are marked removed. Externally modified files are
 preserved and marked as output errors.
 
-`bindport doctor outputs` checks the same configured outputs, template lookup,
-target planning, and output path safety without writing files or recording
-ownership.
+`bindport doctor outputs` checks the same configured outputs, target host
+syntax, resolved output roots, template lookup, target planning, output path
+safety, and ownership rows without writing files or recording ownership.
 
 Wrapped command start and exit events automatically render outputs where
 `auto_render = true`, which is the default. The start render records the active
@@ -454,6 +454,9 @@ template files under project `.bindport/templates` or global
 - If Traefik cannot reach the service, check `target_host`. Host Traefik usually
   works with `127.0.0.1`; containerized Traefik often needs
   `host.docker.internal` or an equivalent host gateway name.
+- If `doctor outputs` reports foreign or stale ownership rows, the registry has
+  output records for the same output name from another output root or worktree.
+  Those rows are diagnostic context and do not block current-scope rendering.
 - If BindPort refuses to overwrite a file, the file is unowned or externally
   modified. Use `bindport render --repair` to adopt content-identical planned
   files whose ownership row was lost, or to record externally modified DB-owned

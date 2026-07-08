@@ -140,9 +140,13 @@ bindport render --repair
 Common causes:
 
 - Template name does not match project, global, or built-in lookup.
+- Output `target_host` includes a URL, path, port, whitespace, or an
+  unspecified bind address such as `0.0.0.0`.
 - Output `root` is not relative to the config file.
 - Output `target` escapes the output root.
 - Existing file is unowned or externally modified.
+- Foreign or stale ownership rows belong to another output root or worktree and
+  are shown for diagnosis without blocking current-scope rendering.
 - `outside_output_root` means a stale ownership row pointed at a generated file
   outside the current output root; rerun `bindport render --repair` or render
   again from the intended worktree.

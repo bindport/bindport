@@ -167,7 +167,8 @@ fn config_and_doctor_diagnostics_render_constructed_state() {
         &output,
         &resolver,
         &route_snapshot,
-        &temp_test_dir("doctor-output")
+        &temp_test_dir("doctor-output"),
+        &[]
     ));
 
     let empty_range_config = ResolvedConfig {
@@ -210,6 +211,57 @@ fn config_and_doctor_diagnostics_render_constructed_state() {
 
     print_git_diagnostics(Path::new("/definitely/not-a-bindport-git-worktree"));
     print_git_diagnostics(Path::new(env!("CARGO_MANIFEST_DIR")));
+}
+
+#[test]
+fn target_host_kind_classifies_hosts() {
+    let cases = [
+        ("127.0.0.1", Ok("loopback")),
+        ("localhost", Ok("loopback")),
+        ("api.localhost", Ok("loopback")),
+        ("host.docker.internal", Ok("container host gateway")),
+        ("example.test", Ok("custom host")),
+        ("[::1]", Ok("loopback")),
+        ("[2001:db8::1]", Ok("ip address")),
+        ("", Err("target_host must not be empty")),
+        ("has space", Err("target_host must not contain whitespace")),
+        (
+            "http://127.0.0.1",
+            Err("target_host must be a host name or IP address, not a URL"),
+        ),
+        (
+            "example.test/path",
+            Err("target_host must not include a path, query, or fragment"),
+        ),
+        (
+            "[::1",
+            Err("IPv6 target_host values must use matching brackets"),
+        ),
+        (
+            "127.0.0.1:8080",
+            Err("target_host must not include a port; BindPort adds the route port"),
+        ),
+        (
+            "::1",
+            Err("target_host must not include a port; BindPort adds the route port"),
+        ),
+        (
+            "0.0.0.0",
+            Err("target_host must be connectable, not an unspecified bind address"),
+        ),
+        (
+            "[::]",
+            Err("target_host must be connectable, not an unspecified bind address"),
+        ),
+        (
+            "[localhost]",
+            Err("bracketed target_host values must be IPv6 addresses"),
+        ),
+    ];
+
+    for (host, expected) in cases {
+        assert_eq!(target_host_kind(host), expected, "host: {host}");
+    }
 }
 
 #[test]

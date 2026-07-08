@@ -241,4 +241,5 @@ bindport doctor outputs
 `doctor` reports config discovery, registry health, effective identity, active
 registry ports, obvious registry/listener conflicts, unknown OS listener
 conflicts, and the next candidate port. `doctor outputs` validates configured
-outputs and hook trust state without writing output files.
+outputs, target hosts, resolved output roots, ownership rows, and hook trust
+state without writing output files.

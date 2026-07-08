@@ -38,8 +38,9 @@ use bindport_dashboard::{
 };
 use bindport_registry::{
     CleanState, CleanSummary, OutputFileRecord, OutputFileScope, OutputFileStatus,
-    REGISTRY_PATH_ENV, Registry, RegistryError, ReserveLease, ReservedLease, RunStart, StartedRun,
-    StatusService, StatusSnapshot, default_registry_path, status_service_route_key,
+    REGISTRY_PATH_ENV, Registry, RegistryError, RegistryExportOutputFile, ReserveLease,
+    ReservedLease, RunStart, StartedRun, StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE,
+    default_registry_path, status_service_route_key,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,

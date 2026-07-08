@@ -2,6 +2,7 @@
 
 mod support;
 
+use bindport_registry::{OutputFileRecord, OutputFileScope, OutputFileStatus};
 use support::*;
 
 #[test]
@@ -31,9 +32,89 @@ fn doctor_outputs_reports_configured_output() {
     assert!(stdout.contains("routes: 0"));
     assert!(stdout.contains("output traefik:"));
     assert!(stdout.contains("template: bindport-traefik (built-in)"));
+    assert!(stdout.contains("target host: 127.0.0.1 (loopback)"));
+    assert!(stdout.contains("target scheme: http"));
+    assert!(stdout.contains("resolved root:"));
+    assert!(stdout.contains("(missing, will be created)"));
+    assert!(stdout.contains("ownership rows: none"));
     assert!(stdout.contains("planned files: 0"));
     assert!(!root.join(".bindport/generated").exists());
 }
+
+#[test]
+fn doctor_outputs_rejects_invalid_target_host() {
+    let registry_path = temp_registry_path("doctor-output-target-host-registry");
+    let root = temp_test_dir("doctor-output-target-host-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-output-project\"\n[output_defaults]\ntarget_host = \"http://127.0.0.1\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{ route.service }}.yml\"\n",
+    )
+    .expect("write output config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor", "outputs"])
+        .output()
+        .expect("run bindport doctor outputs");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("target host: http://127.0.0.1 (invalid: target_host must be a host name or IP address, not a URL)"));
+    assert!(stdout.contains("resolved root:"));
+    assert!(stdout.contains("planned files: 0"));
+}
+
+#[test]
+fn doctor_outputs_reports_foreign_ownership_rows() {
+    let registry_path = temp_registry_path("doctor-output-ownership-registry");
+    let root = temp_test_dir("doctor-output-ownership-root");
+    let foreign_root = temp_test_dir("doctor-output-ownership-foreign-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-output-project\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{ route.service }}.yml\"\n",
+    )
+    .expect("write output config");
+    let mut registry = Registry::open(&registry_path).expect("registry");
+    registry
+        .record_output_file(&OutputFileRecord {
+            output_name: String::from("traefik"),
+            scope: OutputFileScope::new(
+                foreign_root.join(".bindport/generated"),
+                foreign_root.clone(),
+                None,
+                None,
+            ),
+            route_key: String::from("foreign-route"),
+            rendered_path: foreign_root.join(".bindport/generated/traefik/web.yml"),
+            status: OutputFileStatus::Rendered,
+            reason: None,
+            content_hash: Some(String::from("foreign-hash")),
+            template_hash: None,
+            lease_id: None,
+            run_id: None,
+        })
+        .expect("record foreign output");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor", "outputs"])
+        .output()
+        .expect("run bindport doctor outputs");
+
+    assert!(
+        output.status.success(),
+        "doctor outputs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(
+        stdout.contains("ownership rows: 0 current-scope, 0 legacy-adoptable, 1 foreign/stale")
+    );
+    assert!(stdout.contains("ownership warning: 1 rows outside current output root"));
+}
+
 #[test]
 fn doctor_outputs_reports_hook_trust_status_without_outputs() {
     let registry_path = temp_registry_path("doctor-hook-registry");
