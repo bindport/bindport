@@ -225,3 +225,13 @@ fn status_service(identity_key: &str, state: &str, exited_at: Option<&str>) -> S
         proxy: None,
     }
 }
+
+fn test_status_snapshot(services: Vec<StatusService>) -> StatusSnapshot {
+    StatusSnapshot {
+        schema_version: bindport_registry::STATUS_SCHEMA_VERSION,
+        generated_at: String::from("2026-06-29T00:02:00Z"),
+        outputs: Vec::new(),
+        services,
+        runs: Vec::new(),
+    }
+}

@@ -42,7 +42,7 @@ pub(crate) fn print_doctor_outputs() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let routes = route_records(snapshot.services);
+    let route_snapshot = output_route_snapshot(snapshot);
     let base_dir = output_base_dir(&cwd, &config);
     let resolver = TemplateResolver::new(
         Some(project_template_dir(&cwd, &config)),
@@ -50,11 +50,11 @@ pub(crate) fn print_doctor_outputs() -> ExitCode {
     );
     let mut ok = true;
 
-    println!("routes: {}", routes.len());
+    println!("routes: {}", route_snapshot.routes().len());
     println!("base dir: {}", base_dir.display());
 
     for output in &outputs {
-        if !print_doctor_output(output, &resolver, &routes, &base_dir) {
+        if !print_doctor_output(output, &resolver, &route_snapshot, &base_dir) {
             ok = false;
         }
     }
@@ -86,7 +86,7 @@ pub(crate) fn print_doctor_output_config(config: &ResolvedConfig) {
 pub(crate) fn print_doctor_output(
     output: &EffectiveOutputConfig,
     resolver: &TemplateResolver,
-    routes: &[RouteRecord],
+    snapshot: &OutputRouteSnapshot,
     base_dir: &Path,
 ) -> bool {
     println!("output {}:", output.name);
@@ -122,7 +122,7 @@ pub(crate) fn print_doctor_output(
     };
 
     let render_config = OutputRenderConfig::from(output);
-    let plan = match render_output_routes(&render_config, &template.contents, routes) {
+    let plan = match render_output_routes(&render_config, &template.contents, snapshot) {
         Ok(plan) => plan,
         Err(error) => {
             println!("  plan: invalid ({error})");

@@ -35,6 +35,10 @@ fn test_render_plan(target: &str, contents: &str) -> RenderPlan {
             target: target.to_string(),
             contents: contents.to_string(),
             context: RenderContext {
+                snapshot: SnapshotContext {
+                    generated_at: String::from("2026-06-29T00:02:00Z"),
+                    route_count: 1,
+                },
                 route: RouteContext {
                     key: String::from("route-1"),
                     project: String::from("demo"),
@@ -97,4 +101,8 @@ fn test_route(key: &str, state: &str, hostname: Option<&str>) -> RouteRecord {
         started_at: String::from("2026-06-29T00:00:00Z"),
         updated_at: String::from("2026-06-29T00:01:00Z"),
     }
+}
+
+fn test_route_snapshot(routes: Vec<RouteRecord>) -> OutputRouteSnapshot {
+    OutputRouteSnapshot::new("2026-06-29T00:02:00Z", routes)
 }

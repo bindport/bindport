@@ -62,9 +62,11 @@ fn render_route_helpers_preserve_status_and_pending_metadata() {
         status_service("route-3", "stale", None),
     ];
 
-    let routes = route_records(services);
+    let snapshot = output_route_snapshot(test_status_snapshot(services));
+    let routes = snapshot.routes();
 
     assert_eq!(routes.len(), 3);
+    assert_eq!(snapshot.generated_at(), "2026-06-29T00:02:00Z");
     assert_eq!(routes[0].key, "route-1");
     assert_eq!(routes[0].updated_at, "2026-06-29T00:05:00Z");
     assert_eq!(routes[1].state, "stopped");
@@ -87,12 +89,12 @@ fn render_route_helpers_preserve_status_and_pending_metadata() {
     let mut output = test_output_config("debug");
     output.delete_on = vec![OutputDeleteState::Stopped];
     assert_eq!(
-        delete_route_keys(&output, &routes),
+        delete_route_keys(&output, routes),
         BTreeSet::from([String::from("route-2")])
     );
     output.delete_on = vec![OutputDeleteState::Stopped, OutputDeleteState::Stale];
     assert_eq!(
-        delete_route_keys(&output, &routes),
+        delete_route_keys(&output, routes),
         BTreeSet::from([String::from("route-2"), String::from("route-3")])
     );
 

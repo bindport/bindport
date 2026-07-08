@@ -20,11 +20,12 @@ fn render_output_routes_builds_targets_and_context() {
         vars,
     });
     let route = test_route("route-1", "active", Some("feature-tree.demo.localhost"));
+    let snapshot = test_route_snapshot(vec![route]);
 
     let plan = render_output_routes(
         &output,
-        "target={{ route.target_url }} mode={{ vars.mode }} output={{ output.name }}",
-        &[route],
+        "target={{ route.target_url }} mode={{ vars.mode }} output={{ output.name }} snapshot={{ snapshot.generated_at }} routes={{ snapshot.route_count }}",
+        &snapshot,
     )
     .expect("render plan");
 
@@ -33,7 +34,7 @@ fn render_output_routes_builds_targets_and_context() {
     assert_eq!(plan.files[0].target, "debug/demo-web-feature-tree.txt");
     assert_eq!(
         plan.files[0].contents,
-        "target=https://host.docker.internal:29100 mode=dev output=debug"
+        "target=https://host.docker.internal:29100 mode=dev output=debug snapshot=2026-06-29T00:02:00Z routes=1"
     );
     assert_eq!(
         plan.files[0].context.route.unique_slug,
@@ -59,8 +60,9 @@ fn render_output_routes_reports_target_collisions() {
     });
     let first = test_route("route-1", "active", Some("first.demo.localhost"));
     let second = test_route("route-2", "active", Some("second.demo.localhost"));
+    let snapshot = test_route_snapshot(vec![first, second]);
 
-    let error = render_output_routes(&output, "ok", &[first, second]).expect_err("collision");
+    let error = render_output_routes(&output, "ok", &snapshot).expect_err("collision");
 
     assert!(matches!(
         error,
@@ -91,8 +93,9 @@ fn render_output_routes_rejects_hostname_backticks() {
         vars: BTreeMap::new(),
     });
     let route = test_route("route-1", "active", Some("x`) || PathPrefix(`/admin"));
+    let snapshot = test_route_snapshot(vec![route]);
 
-    let error = render_output_routes(&output, "ok", &[route]).expect_err("unsafe hostname");
+    let error = render_output_routes(&output, "ok", &snapshot).expect_err("unsafe hostname");
 
     assert!(matches!(
         error,
@@ -122,9 +125,9 @@ fn render_output_routes_reports_template_errors_with_sources() {
         vars: BTreeMap::new(),
     });
     let route = test_route("route-1", "active", Some("first.demo.localhost"));
+    let snapshot = test_route_snapshot(vec![route]);
 
-    let target_error =
-        render_output_routes(&output, "ok", std::slice::from_ref(&route)).expect_err("target");
+    let target_error = render_output_routes(&output, "ok", &snapshot).expect_err("target");
     assert!(matches!(
         target_error,
         RenderError::TargetTemplate { ref route_key, .. } if route_key == "route-1"
@@ -138,7 +141,7 @@ fn render_output_routes_reports_template_errors_with_sources() {
 
     let mut output = output;
     output.context.target = String::from("debug/{{ route.service }}.txt");
-    let body_error = render_output_routes(&output, "{{ missing }}", &[route]).expect_err("body");
+    let body_error = render_output_routes(&output, "{{ missing }}", &snapshot).expect_err("body");
     assert!(matches!(
         body_error,
         RenderError::BodyTemplate { ref route_key, .. } if route_key == "route-1"
@@ -170,8 +173,9 @@ fn built_in_traefik_plan_renders_comment_for_stopped_route() {
         vars: BTreeMap::new(),
     });
     let route = test_route("route-1", "stopped", Some("feature-tree.demo.localhost"));
+    let snapshot = test_route_snapshot(vec![route]);
 
-    let plan = render_output_routes(&output, &template.contents, &[route]).expect("plan");
+    let plan = render_output_routes(&output, &template.contents, &snapshot).expect("plan");
 
     assert_eq!(plan.files[0].target, "traefik/demo-web-feature-tree.yml");
     assert!(plan.files[0].contents.contains("is stopped"));

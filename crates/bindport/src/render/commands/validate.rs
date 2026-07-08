@@ -15,12 +15,11 @@ pub(crate) fn preflight_blocking_outputs(
         return Ok(());
     }
 
-    let snapshot = registry.status_snapshot()?;
-    let mut routes = route_records(snapshot.services);
-    routes.retain(|route| route.key != pending_route.key);
-    routes.push(pending_route);
+    let mut snapshot = output_route_snapshot(registry.status_snapshot()?);
+    snapshot.retain_routes(|route| route.key != pending_route.key);
+    snapshot.push_route(pending_route);
 
-    validate_render_outputs(cwd, config, registry, outputs, &routes)
+    validate_render_outputs(cwd, config, registry, outputs, &snapshot)
 }
 
 pub(crate) fn validate_render_outputs(
@@ -28,7 +27,7 @@ pub(crate) fn validate_render_outputs(
     config: &ResolvedConfig,
     registry: &Registry,
     outputs: Vec<EffectiveOutputConfig>,
-    routes: &[RouteRecord],
+    snapshot: &OutputRouteSnapshot,
 ) -> Result<(), RenderCommandError> {
     let resolver = TemplateResolver::new(
         Some(project_template_dir(cwd, config)),
@@ -39,13 +38,9 @@ pub(crate) fn validate_render_outputs(
     for output in outputs {
         let template = resolver.resolve(&output.template, None)?;
         let render_config = OutputRenderConfig::from(&output);
-        let delete_route_keys = delete_route_keys(&output, routes);
-        let render_routes = routes
-            .iter()
-            .filter(|route| !delete_route_keys.contains(&route.key))
-            .cloned()
-            .collect::<Vec<_>>();
-        let plan = render_output_routes(&render_config, &template.contents, &render_routes)?;
+        let delete_route_keys = delete_route_keys(&output, snapshot.routes());
+        let render_snapshot = filtered_output_route_snapshot(snapshot, &delete_route_keys);
+        let plan = render_output_routes(&render_config, &template.contents, &render_snapshot)?;
         let ownership = registry.output_file_ownership(&output.name)?;
         let write_ownership = ownership
             .iter()

@@ -217,6 +217,20 @@ the same output file and the on-disk content still matches the recorded hash.
 Unowned or externally modified files cause the render to fail instead of being
 overwritten.
 
+Templates render from a single route snapshot. Each rendered file receives:
+
+- `snapshot.generated_at`: when the registry snapshot was captured.
+- `snapshot.route_count`: number of routes in that snapshot after lifecycle
+  deletion filtering.
+- `route.*`: route metadata for the file being rendered, such as
+  `route.project`, `route.service`, `route.state`, `route.port`,
+  `route.hostname`, `route.route_url`, `route.target_url`, `route.branch_label`,
+  `route.slug`, and `route.unique_slug`.
+- `output.*`: the output config context, such as `output.name`,
+  `output.template`, `output.root`, `output.target`, `output.auto_render`,
+  `output.delete_on`, and `output.on_failure`.
+- `vars.*`: user-defined values from `[outputs.vars]` for the current output.
+
 `bindport render --repair` uses the same safety checks, but treats recoverable
 filesystem drift as state to record instead of a command-wide failure. Current
 route files that are missing are rendered again. Content-identical planned files

@@ -1,6 +1,25 @@
 use super::*;
 
-pub(crate) fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
+pub(crate) fn output_route_snapshot(snapshot: StatusSnapshot) -> OutputRouteSnapshot {
+    OutputRouteSnapshot::new(snapshot.generated_at, route_records(snapshot.services))
+}
+
+pub(crate) fn filtered_output_route_snapshot(
+    snapshot: &OutputRouteSnapshot,
+    omitted_route_keys: &BTreeSet<String>,
+) -> OutputRouteSnapshot {
+    OutputRouteSnapshot::new(
+        snapshot.generated_at().to_string(),
+        snapshot
+            .routes()
+            .iter()
+            .filter(|route| !omitted_route_keys.contains(&route.key))
+            .cloned()
+            .collect(),
+    )
+}
+
+fn route_records(services: Vec<StatusService>) -> Vec<RouteRecord> {
     services
         .into_iter()
         .map(|service| {

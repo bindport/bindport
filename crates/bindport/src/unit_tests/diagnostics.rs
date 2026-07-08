@@ -153,20 +153,20 @@ fn config_and_doctor_diagnostics_render_constructed_state() {
     assert_eq!(identity.service_source, "local override config `service`");
 
     let resolver = TemplateResolver::new(None, None);
-    let routes = route_records(vec![
+    let route_snapshot = output_route_snapshot(test_status_snapshot(vec![
         status_service("route-1", "active", None),
         status_service("route-2", "active", None),
         status_service("route-3", "active", None),
         status_service("route-4", "active", None),
         status_service("route-5", "active", None),
         status_service("route-6", "active", None),
-    ]);
+    ]));
     let mut output = test_output_config("traefik");
     output.target = String::from("routes/{{ route.key }}.yml");
     assert!(print_doctor_output(
         &output,
         &resolver,
-        &routes,
+        &route_snapshot,
         &temp_test_dir("doctor-output")
     ));
 
