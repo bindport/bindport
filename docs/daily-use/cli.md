@@ -193,7 +193,14 @@ bindport render traefik
 bindport render --dry-run
 bindport render --diff
 bindport render --repair
+bindport render --verbose
 ```
+
+`--verbose` / `-v` prints render diagnostics to stderr. It includes selected
+outputs, template source, route and file counts, output roots, ownership row
+counts, and lifecycle removal/adoption counts. Set `BINDPORT_LOG=debug` when
+you need the same diagnostics from automatic renders triggered by
+`bindport run`, `clean`, or dashboard cleanup.
 
 Validate output config, template lookup, and planned target paths:
 

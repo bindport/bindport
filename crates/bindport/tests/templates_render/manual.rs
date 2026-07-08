@@ -53,6 +53,23 @@ fn render_command_writes_config_files_and_records_ownership() {
     assert!(dry_run_stdout.contains("traefik/web.yml"));
     assert!(!rendered_path.exists());
 
+    let verbose_dry_run = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "traefik", "--dry-run", "--verbose"])
+        .output()
+        .expect("verbose dry-run render");
+    assert!(
+        verbose_dry_run.status.success(),
+        "verbose render dry-run failed: {}",
+        String::from_utf8_lossy(&verbose_dry_run.stderr)
+    );
+    let verbose_stderr = String::from_utf8(verbose_dry_run.stderr).expect("verbose render stderr");
+    assert!(verbose_stderr.contains("bindport: debug: render start"));
+    assert!(verbose_stderr.contains("mode=normal dry_run=true report=print"));
+    assert!(verbose_stderr.contains("render output=traefik"));
+    assert!(verbose_stderr.contains("template=bindport-traefik"));
+    assert!(verbose_stderr.contains("planned=1"));
+
     let render = bindport_with_registry(&registry_path)
         .current_dir(&root)
         .args(["render", "traefik"])
@@ -120,6 +137,42 @@ fn render_command_writes_config_files_and_records_ownership() {
         "rerender failed: {}",
         String::from_utf8_lossy(&rerender.stderr)
     );
+}
+
+#[test]
+fn auto_render_debug_log_reports_events_and_output_work() {
+    let registry_path = temp_registry_path("auto-render-log-registry");
+    let root = temp_test_dir("auto-render-log-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"auto-render-log\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"auto-log.localhost\"\n[[outputs]]\nname = \"traefik\"\ntemplate = \"bindport-traefik\"\nroot = \".bindport/generated\"\ntarget = \"traefik/{{{{ route.service }}}}.yml\"\nauto_render = true\n"
+        ),
+    )
+    .expect("write render config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .env("BINDPORT_LOG", "debug")
+        .args(["run", "web", "--", "sh", "-c", "true"])
+        .output()
+        .expect("run bindport");
+
+    assert!(
+        output.status.success(),
+        "bindport failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).expect("auto-render stderr");
+    assert!(stderr.contains("bindport: debug: auto-render requested by cli_runner:route_started"));
+    assert!(stderr.contains("bindport: debug: auto-render queued output=traefik"));
+    assert!(
+        stderr.contains("bindport: debug: render start mode=normal dry_run=false report=quiet")
+    );
+    assert!(stderr.contains("bindport: debug: render output=traefik"));
+    assert!(stderr.contains("bindport: debug: render finish output=traefik"));
+    assert!(stderr.contains("bindport: debug: hooks skipped: no hooks configured"));
 }
 
 #[test]

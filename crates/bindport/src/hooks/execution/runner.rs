@@ -6,12 +6,15 @@ pub(crate) fn run_hooks_for_events(
     events: &RouteEventCollector,
     output_rendered: bool,
     mode: HookRunMode,
+    log: DiagnosticLog,
 ) -> usize {
     let Some(plan) = configured_hook_plan(cwd, config) else {
+        log.debug(format_args!("hooks skipped: no hooks configured"));
         return 0;
     };
     let hook_events = events.hook_events(output_rendered);
     if hook_events.is_empty() {
+        log.debug(format_args!("hooks skipped: no matching events"));
         return 0;
     }
     let matching_hooks = plan
@@ -21,9 +24,20 @@ pub(crate) fn run_hooks_for_events(
         .collect::<Vec<_>>();
 
     if matching_hooks.is_empty() {
+        log.debug(format_args!(
+            "hooks skipped: no configured hooks matched events={}",
+            hook_event_set_display(&hook_events)
+        ));
         return 0;
     }
 
+    log.debug(format_args!(
+        "hooks matched count={} mode={} events={} sources={}",
+        matching_hooks.len(),
+        mode.as_str(),
+        hook_event_set_display(&hook_events),
+        events.hook_sources()
+    ));
     let store = match read_hook_trust_store() {
         Ok(store) => store,
         Err(error) => {
@@ -37,6 +51,11 @@ pub(crate) fn run_hooks_for_events(
     for hook in &matching_hooks {
         let trust = hook_trust_status(hook, &store, &subjects);
         if !trust.is_approved() {
+            log.debug(format_args!(
+                "hook skipped name={} trust={}",
+                hook.name,
+                hook_trust_status_display(trust)
+            ));
             print_hook_not_trusted_warning(hook, trust);
             continue;
         }
@@ -44,6 +63,10 @@ pub(crate) fn run_hooks_for_events(
         match mode {
             HookRunMode::DryRun => print_hook_dry_run(hook),
             HookRunMode::Run => {
+                log.debug(format_args!(
+                    "hook run name={} source={}",
+                    hook.name, hook.source
+                ));
                 if let Err(error) = execute_hook(&plan.base_dir, hook, &env) {
                     eprintln!("bindport: warning: hook `{}` failed: {error}", hook.name);
                 }
@@ -53,6 +76,23 @@ pub(crate) fn run_hooks_for_events(
     }
 
     ran
+}
+
+impl HookRunMode {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Run => "run",
+            Self::DryRun => "dry-run",
+        }
+    }
+}
+
+fn hook_event_set_display(events: &BTreeSet<HookEvent>) -> String {
+    events
+        .iter()
+        .map(|event| event.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) fn hook_matches_events(hook: &EffectiveHook, events: &BTreeSet<HookEvent>) -> bool {

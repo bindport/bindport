@@ -12,6 +12,10 @@ fn render_command_parser_and_output_selection_validate_combinations() {
 
     let (_, options) = parse_render_command(&strings(["--diff"])).expect("render diff");
     assert!(options.diff);
+    let (_, options) = parse_render_command(&strings(["--verbose"])).expect("render verbose");
+    assert!(options.verbose);
+    let (_, options) = parse_render_command(&strings(["-v"])).expect("render verbose short");
+    assert!(options.verbose);
 
     let (command, _) = parse_render_command(&strings(["--help"])).expect("render help");
     assert_eq!(command, RenderCommand::Help);
@@ -37,4 +41,15 @@ fn render_command_parser_and_output_selection_validate_combinations() {
     let selected = selected_outputs(outputs.clone(), Some("traefik")).expect("selected");
     assert_eq!(selected.len(), 1);
     assert!(selected_outputs(outputs, Some("missing")).is_err());
+}
+
+#[test]
+fn diagnostic_log_env_values_are_explicit() {
+    assert!(diagnostic_log_env_value_enabled("debug"));
+    assert!(diagnostic_log_env_value_enabled("info,debug"));
+    assert!(diagnostic_log_env_value_enabled(" verbose "));
+    assert!(diagnostic_log_env_value_enabled("1"));
+    assert!(!diagnostic_log_env_value_enabled(""));
+    assert!(!diagnostic_log_env_value_enabled("info"));
+    assert!(!diagnostic_log_env_value_enabled("false"));
 }

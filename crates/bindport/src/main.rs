@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
+    env, fmt, fs,
     io::{self, BufRead, IsTerminal, Write},
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -73,6 +73,7 @@ mod errors;
 mod help;
 mod hooks;
 mod list;
+mod logging;
 mod open;
 mod paths;
 mod ports;
@@ -92,6 +93,7 @@ pub(crate) use errors::*;
 pub(crate) use help::*;
 pub(crate) use hooks::*;
 pub(crate) use list::*;
+pub(crate) use logging::*;
 pub(crate) use open::*;
 pub(crate) use paths::*;
 pub(crate) use ports::*;

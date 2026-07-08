@@ -359,6 +359,14 @@ output. The default `debounce_ms = 250` spaces rapid events; set
 `bindport render`, `bindport render --diff`, and `bindport render --repair`
 bypass debounce.
 
+For render troubleshooting, pass `--verbose` to manual render commands. The
+diagnostics are printed to stderr and include the selected output, resolved
+template source, output root/scope, route count, planned file count, ownership
+row count, and lifecycle cleanup summary. For automatic renders triggered by
+`bindport run`, `clean`, or dashboard cleanup, set `BINDPORT_LOG=debug` in the
+environment. Debug logs intentionally avoid hook environment payloads and child
+process environment values.
+
 Hooks subscribe to the same lifecycle events as output rendering. Approved
 hooks can run after route start, route finish, CLI or dashboard cleanup,
 stale-route reconciliation, manual render requests, or successful output

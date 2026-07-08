@@ -13,6 +13,7 @@ pub(crate) fn parse_render_command(
             "--dry-run" => options.dry_run = true,
             "--diff" => options.diff = true,
             "--repair" => options.repair = true,
+            "--verbose" | "-v" => options.verbose = true,
             option if option.starts_with("--") => {
                 return Err(RenderCommandError::InvalidArgument(format!(
                     "unknown render option `{option}`"

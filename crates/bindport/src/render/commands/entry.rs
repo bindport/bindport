@@ -13,7 +13,9 @@ pub(crate) fn run_render_command(args: &[String]) -> ExitCode {
         }
         Err(RenderCommandError::InvalidArgument(error)) => {
             eprintln!("bindport: {error}");
-            eprintln!("usage: bindport render [output] [--all] [--dry-run] [--diff] [--repair]");
+            eprintln!(
+                "usage: bindport render [output] [--all] [--dry-run] [--diff] [--repair] [--verbose]"
+            );
             ExitCode::FAILURE
         }
         Err(RenderCommandError::Registry(error)) => {
@@ -61,6 +63,11 @@ pub(crate) fn run_render_command_result(args: &[String]) -> Result<(), RenderCom
     } else {
         RenderMode::Normal
     };
+    let log = if options.verbose {
+        DiagnosticLog::enabled()
+    } else {
+        DiagnosticLog::from_env()
+    };
     let events = RouteEventCollector::single(
         RouteEventSource::ManualRender,
         RouteEventKind::RenderRequested,
@@ -74,6 +81,7 @@ pub(crate) fn run_render_command_result(args: &[String]) -> Result<(), RenderCom
             dry_run: options.dry_run,
             mode,
             report: RenderReport::Print,
+            log,
             events: &events,
         },
     )?;

@@ -31,7 +31,8 @@ BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
 - `bindport doctor outputs` validates output setup, target hosts, output roots,
   ownership rows, and hook trust without writing files.
 - `bindport dashboard serve|start|status|stop` operates the dashboard.
-- `bindport render [output]` renders configured output files.
+- `bindport render [output]` renders configured output files. Use
+  `--verbose` for manual render diagnostics.
 - `bindport templates list|show|export` inspects output templates.
 - `bindport hooks status|trust|deny|reset` manages hook trust.
 
@@ -88,6 +89,10 @@ content-identical planned files whose ownership row was lost. Files with
 different content are never adopted.
 `bindport doctor outputs` also reports foreign or stale ownership rows from
 other output roots or worktrees as diagnostics.
+Manual render diagnostics are available with `bindport render --verbose`.
+Automatic render diagnostics from `bindport run`, cleanup, or dashboard cleanup
+are available with `BINDPORT_LOG=debug`; debug output avoids child environment
+values and hook context payloads.
 
 ## Hooks
 

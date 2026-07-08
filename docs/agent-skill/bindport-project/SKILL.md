@@ -59,5 +59,6 @@ bindport registry export
 bindport open <service> --print
 bindport run <service>
 bindport render --dry-run
+BINDPORT_LOG=debug bindport run <service>
 bindport hooks status
 ```
