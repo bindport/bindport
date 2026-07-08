@@ -125,6 +125,12 @@ Preview before writing:
 bindport render --dry-run
 ```
 
+Preview content changes against DB-owned files:
+
+```sh
+bindport render --diff
+```
+
 Repair DB-owned output files:
 
 ```sh

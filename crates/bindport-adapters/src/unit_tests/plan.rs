@@ -127,6 +127,71 @@ fn verify_render_plan_targets_checks_ownership_without_writing() {
 }
 
 #[test]
+fn diff_render_plan_reports_changes_without_writing() {
+    let root = temp_test_dir("diff-plan-owned");
+    let path = root.join(".bindport/out/routes/demo.yml");
+    fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+    fs::write(&path, "old\nstable\n").expect("old file");
+    let plan = test_render_plan("routes/demo.yml", "new\nstable\n");
+
+    let diffed = diff_render_plan(
+        &plan,
+        &root,
+        &[OutputFileOwnership {
+            path: path.clone(),
+            content_hash: content_hash("old\nstable\n"),
+        }],
+    )
+    .expect("diff plan");
+
+    assert_eq!(diffed.len(), 1);
+    assert_eq!(diffed[0].status, OutputFileDiffStatus::Modified);
+    assert_eq!(diffed[0].old_contents.as_deref(), Some("old\nstable\n"));
+    assert_eq!(diffed[0].new_contents, "new\nstable\n");
+    assert_eq!(
+        fs::read_to_string(&path).expect("unchanged file"),
+        "old\nstable\n"
+    );
+}
+
+#[test]
+fn diff_render_plan_reports_added_files_without_writing() {
+    let root = temp_test_dir("diff-plan-added");
+    let path = root.join(".bindport/out/routes/demo.yml");
+    let plan = test_render_plan("routes/demo.yml", "new\n");
+
+    let diffed = diff_render_plan(&plan, &root, &[]).expect("diff plan");
+
+    assert_eq!(diffed[0].status, OutputFileDiffStatus::Added);
+    assert_eq!(diffed[0].path, path);
+    assert!(!diffed[0].path.exists());
+}
+
+#[test]
+fn diff_removable_output_files_reports_deletes_without_deleting() {
+    let root = temp_test_dir("diff-remove-owned");
+    let plan = test_render_plan("routes/demo.yml", "old\n");
+    let path = root.join(".bindport/out/routes/demo.yml");
+    let written = write_render_plan(&plan, &root, &[]).expect("write plan");
+
+    let diffed = diff_removable_output_files(
+        &[RemovableOutputFile {
+            route_key: written[0].route_key.clone(),
+            path: path.clone(),
+            content_hash: written[0].content_hash.clone(),
+        }],
+        &root,
+        &plan.output,
+    )
+    .expect("diff removable files");
+
+    assert_eq!(diffed.len(), 1);
+    assert_eq!(diffed[0].status, OutputFileRemovalStatus::Removed);
+    assert_eq!(diffed[0].old_contents.as_deref(), Some("old\n"));
+    assert_eq!(fs::read_to_string(&path).expect("file remains"), "old\n");
+}
+
+#[test]
 fn write_render_plan_refuses_externally_modified_owned_file() {
     let root = temp_test_dir("write-plan-modified");
     let path = root.join(".bindport/out/routes/demo.yml");

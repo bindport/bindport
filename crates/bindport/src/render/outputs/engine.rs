@@ -22,7 +22,7 @@ pub(crate) fn render_outputs_for_events(
         invocation.mode,
         invocation.report,
     )?;
-    let mode = if invocation.dry_run {
+    let mode = if invocation.dry_run || invocation.mode == RenderMode::Diff {
         HookRunMode::DryRun
     } else {
         HookRunMode::Run
@@ -86,19 +86,31 @@ pub(crate) fn render_outputs(
                 content_hash: owned.content_hash.clone(),
             })
             .collect::<Vec<_>>();
-        let removed = remove_output_files_for_lifecycle(
-            registry,
-            LifecycleRemoval {
-                output: &output,
-                scope: &scope,
-                ownership: &ownership,
-                current_route_keys: &current_route_keys,
-                planned_route_keys: &planned_route_keys,
-                delete_route_keys: &delete_route_keys,
-                base_dir: &base_dir,
-                render_config: &render_config,
-            },
-        )?;
+        let lifecycle_removal = LifecycleRemoval {
+            output: &output,
+            scope: &scope,
+            ownership: &ownership,
+            current_route_keys: &current_route_keys,
+            planned_route_keys: &planned_route_keys,
+            delete_route_keys: &delete_route_keys,
+            base_dir: &base_dir,
+            render_config: &render_config,
+        };
+
+        if mode == RenderMode::Diff {
+            let removal_candidates = lifecycle_removal_candidates(&lifecycle_removal);
+            let removals = diff_removable_output_files(
+                &removal_candidates,
+                &base_dir,
+                &render_config.context,
+            )?;
+            let diffs = diff_render_plan(&plan, &base_dir, &write_ownership)?;
+            let diff_summary = print_render_diff(&output.name, &base_dir, &diffs, &removals);
+            rendered += diff_summary.changed_files();
+            continue;
+        }
+
+        let removed = remove_output_files_for_lifecycle(registry, lifecycle_removal)?;
         let write_summary = match mode {
             RenderMode::Normal => {
                 let written = write_render_plan(&plan, &base_dir, &write_ownership)?;
@@ -117,6 +129,7 @@ pub(crate) fn render_outputs(
                 &base_dir,
                 &write_ownership,
             )?,
+            RenderMode::Diff => unreachable!("diff mode returns before writing"),
         };
 
         if report == RenderReport::Print {

@@ -15,12 +15,14 @@ use std::{
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 
 use bindport_adapters::{
-    AdapterKind, OutputFileError, OutputFileOwnership as AdapterOutputFileOwnership,
+    AdapterKind, DiffedOutputFile, DiffedRemovalOutputFile, OutputFileDiffStatus, OutputFileError,
+    OutputFileOwnership as AdapterOutputFileOwnership,
     OutputFileRemovalStatus as AdapterOutputFileRemovalStatus, OutputRenderConfig,
     OutputRouteSnapshot, RemovableOutputFile as AdapterRemovableOutputFile, RenderError,
     RenderPlan, RouteRecord, TemplateError as AdapterTemplateError, TemplateResolver,
-    TemplateSource, output_root_path, remove_owned_output_files, render_output_plan,
-    render_plan_paths, verify_render_plan_targets, write_render_plan,
+    TemplateSource, diff_removable_output_files, diff_render_plan, output_root_path,
+    remove_owned_output_files, render_output_plan, render_plan_paths, verify_render_plan_targets,
+    write_render_plan,
 };
 use bindport_core::{
     APPLIED_CONFIG_KEYS, BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, BindPortConfig,

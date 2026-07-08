@@ -179,6 +179,7 @@ Render configured outputs:
 bindport render
 bindport render traefik
 bindport render --dry-run
+bindport render --diff
 bindport render --repair
 ```
 

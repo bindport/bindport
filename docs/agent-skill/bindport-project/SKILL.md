@@ -37,6 +37,8 @@ development ports when BindPort config or scripts already describe the service.
 - Run `bindport doctor outputs` before changing output templates or render
   targets.
 - Run `bindport render --dry-run` before writing output files.
+- Run `bindport render --diff` before replacing DB-owned output files when the
+  content change matters.
 - Treat hooks as disabled until trusted by the user through the CLI.
 - Do not run `bindport hooks trust`, `bindport hooks deny`, or hook commands
   without explicit user approval.

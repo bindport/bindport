@@ -128,6 +128,7 @@ cargo run -p bindport -- templates export bindport-traefik
 cargo run -p bindport -- templates export bindport-caddy
 cargo run -p bindport -- templates export bindport-json-snapshot
 cargo run -p bindport -- render --dry-run
+cargo run -p bindport -- render --diff
 cargo run -p bindport -- render --repair
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'
 cargo run -p bindport -- run web --env NEXT_PUBLIC_BINDPORT_URL='{route_url}' --hostname '{branch}.{project}.localhost' -- sh -c 'echo "$NEXT_PUBLIC_BINDPORT_URL"'
@@ -199,6 +200,8 @@ files for stopped/stale/removed routes, and CLI or dashboard cleanup triggers
 removed-route output cleanup. Hooks can subscribe to the same lifecycle events,
 but checked-in project config cannot enable hook execution by itself. Approve
 or deny configured hooks per machine with `bindport hooks trust|deny|reset`.
+`bindport render --diff` previews content changes against DB-owned output files
+without writing files or updating registry ownership.
 `bindport render --repair` reconciles DB-owned files and can adopt
 content-identical planned files whose ownership row was lost.
 `bindport reserve [service]` allocates and holds a port without running a child

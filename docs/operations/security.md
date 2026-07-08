@@ -50,9 +50,11 @@ It overwrites a file only when BindPort owns the file and the on-disk content
 still matches the recorded hash.
 
 Unowned or externally modified files cause normal rendering to fail instead of
-being overwritten. `bindport render --repair` reconciles DB-owned files and can
-adopt content-identical planned files whose ownership row was lost. Files with
-different content are never adopted.
+being overwritten. `bindport render --diff` previews content changes against
+DB-owned files without writing files, deleting lifecycle-managed files, or
+updating registry ownership. `bindport render --repair` reconciles DB-owned
+files and can adopt content-identical planned files whose ownership row was
+lost. Files with different content are never adopted.
 
 ## Hook Trust
 

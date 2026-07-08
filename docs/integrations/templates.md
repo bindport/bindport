@@ -46,6 +46,12 @@ Preview rendered targets without writing files:
 bindport render --dry-run
 ```
 
+Preview content changes against DB-owned files without writing files:
+
+```sh
+bindport render --diff
+```
+
 Repair DB-owned output records and files:
 
 ```sh
@@ -300,6 +306,12 @@ Avoid embedding `snapshot.generated_at` unless the output should change on
 every render. A changing timestamp changes the file hash, which can trigger
 proxy reloads or hook events even when route data is otherwise unchanged.
 
+`bindport render --diff` uses the normal render plan and ownership checks, then
+prints added, modified, removed, and unchanged counts plus content hunks for
+changed files. It does not write files, delete lifecycle-managed files, update
+registry ownership rows, or execute hooks. Approved hooks that would match the
+render request are printed in dry-run mode.
+
 `bindport render --repair` uses the same safety checks, but treats recoverable
 filesystem drift as state to record instead of a command-wide failure. Current
 route files that are missing are rendered again. Content-identical planned files
@@ -344,7 +356,8 @@ public API, but keeps local CLI and dashboard actions on the same path for later
 trusted automation. Automatic renders reserve a SQLite-backed debounce slot per
 output. The default `debounce_ms = 250` spaces rapid events; set
 `debounce_ms = 0` to render immediately on every automatic event. Manual
-`bindport render` and `bindport render --repair` bypass debounce.
+`bindport render`, `bindport render --diff`, and `bindport render --repair`
+bypass debounce.
 
 Hooks subscribe to the same lifecycle events as output rendering. Approved
 hooks can run after route start, route finish, CLI or dashboard cleanup,
@@ -431,6 +444,8 @@ template files under project `.bindport/templates` or global
   template lookup, target rendering, path safety, target collisions, and
   wildcard-template ambiguity without writing files.
 - Run `bindport render --dry-run` to see planned files without touching disk.
+- Run `bindport render --diff` to inspect content changes against DB-owned
+  files before overwriting or deleting them.
 - Run `bindport status --json` and inspect `outputs` plus per-service
   `services[].outputs` when a generated file is missing or preserved.
 - If Traefik renders comment-only YAML, confirm the route is active and has
