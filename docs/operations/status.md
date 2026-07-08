@@ -95,6 +95,27 @@ Agents and scripts should prefer `status --json` or `list --json` over parsing
 human output. Use `status --json` for full registry detail and `list --json`
 for grouped project/service inventory.
 
+## Registry Export
+
+Use registry export for debug or backup workflows:
+
+```sh
+bindport registry export
+```
+
+The export is JSON-only and includes raw `leases`, `runs`, `output_files`, and
+`output_render_state` rows. Output rows include scoped ownership fields such as
+`output_scope`, `output_root`, `config_root`, `worktree_path`, and
+`worktree_hash`, which makes the payload useful when diagnosing multi-worktree
+output ownership problems.
+
+Prefer `status --json` for normal automation. Use `registry export` when you
+need a fuller local registry snapshot for troubleshooting, bug reports, or a
+local backup before manual cleanup.
+The export can contain sensitive local data, including full command lines that
+may include tokens or passwords passed as arguments, plus filesystem paths.
+Review and redact it before sharing in a bug report.
+
 ## URL Lookup
 
 `bindport open [service]` resolves the best active service URL from the same
@@ -190,6 +211,7 @@ Common shell checks:
 
 ```sh
 bindport status --json
+bindport registry export
 bindport open web
 bindport open web --project example
 bindport open web --browser

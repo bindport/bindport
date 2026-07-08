@@ -10,6 +10,7 @@ pub(crate) fn print_help() {
     println!("                                  Release a reserved port");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport list [--json]       List projects and services in the registry");
+    println!("  bindport registry export     Export registry debug JSON");
     println!("  bindport open [service]      Print or open the best service URL");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport config explain      Explain resolved config and identity sources");
@@ -79,6 +80,16 @@ pub(crate) fn print_list_help() {
     println!();
     println!("Options:");
     println!("  --json    Print grouped project/service data as JSON");
+}
+
+pub(crate) fn print_registry_help() {
+    println!("BindPort registry");
+    println!();
+    println!("Usage:");
+    println!("  bindport registry export");
+    println!();
+    println!("Commands:");
+    println!("  export    Print a full registry debug/backup JSON snapshot");
 }
 
 pub(crate) fn print_config_help() {

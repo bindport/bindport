@@ -58,10 +58,11 @@ Registry states are `active`, `reserved`, `stopped`, and `stale`. The registry
 is local state stored under `$XDG_STATE_HOME/bindport/registry.sqlite` or
 `~/.local/state/bindport/registry.sqlite`.
 
-Agents and scripts should inspect `bindport status --json` for full registry
+Agents and scripts should inspect `bindport status --json` for normal registry
 detail or `bindport list --json` for grouped project/service inventory instead
-of parsing human output or hardcoding ports. The status JSON schema is in
-`docs/status.schema.json`.
+of parsing human output or hardcoding ports. Use `bindport registry export` for
+debug/backup snapshots that need raw lease, run, output ownership, and render
+state rows. The status JSON schema is in `docs/status.schema.json`.
 
 ## Outputs And Templates
 
