@@ -222,6 +222,58 @@ fn render_builtin_caddy_template_writes_caddyfile_snippet() {
 }
 
 #[test]
+fn render_builtin_json_snapshot_template_writes_route_snapshot() {
+    let registry_path = temp_registry_path("render-json-snapshot-registry");
+    let root = temp_test_dir("render-json-snapshot-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-json-snapshot\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"json.localhost\"\n[[outputs]]\nname = \"routes-json\"\ntemplate = \"bindport-json-snapshot\"\nroot = \".bindport/generated\"\ntarget = \"routes.json\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+
+    let mut bindport = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "sleep 5"])
+        .spawn()
+        .expect("spawn bindport");
+    wait_for_open_url(
+        &registry_path,
+        &["open", "web", "--print"],
+        Duration::from_secs(5),
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "routes-json"])
+        .output()
+        .expect("render output");
+
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+
+    let contents =
+        fs::read_to_string(root.join(".bindport/generated/routes.json")).expect("json output");
+    let document = serde_json::from_str::<Value>(&contents).expect("json output");
+
+    assert_eq!(document["snapshot"]["route_count"], 1);
+    assert_eq!(document["routes"][0]["service"], "web");
+    assert_eq!(document["routes"][0]["hostname"], "json.localhost");
+    assert_eq!(
+        document["routes"][0]["target_url"],
+        format!("http://127.0.0.1:{port}")
+    );
+
+    let status = wait_for_child(&mut bindport, Duration::from_secs(8)).expect("bindport exits");
+    assert!(status.success());
+}
+
+#[test]
 fn render_all_writes_every_enabled_output() {
     let registry_path = temp_registry_path("render-all-registry");
     let root = temp_test_dir("render-all-root");

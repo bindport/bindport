@@ -33,6 +33,21 @@ fn templates_export_builtin_caddy_template() {
 }
 
 #[test]
+fn templates_export_builtin_json_snapshot_template() {
+    let registry_path = temp_registry_path("templates-builtin-json-registry");
+    let output = bindport_with_registry(&registry_path)
+        .args(["templates", "export", "bindport-json-snapshot"])
+        .output()
+        .expect("export built-in template");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+
+    assert!(stdout.contains("\"snapshot\": {{ snapshot | tojson }}"));
+    assert!(stdout.contains("\"routes\": {{ routes | tojson }}"));
+}
+
+#[test]
 fn project_template_shadows_builtin_template() {
     let registry_path = temp_registry_path("templates-project-registry");
     let root = temp_test_dir("templates-project-root");

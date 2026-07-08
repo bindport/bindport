@@ -121,6 +121,34 @@ For an active route with a hostname, the template renders a site address and
 automatic HTTPS by accident. Export the template and change `site_scheme` when
 your local Caddy setup intentionally owns HTTPS.
 
+### `bindport-json-snapshot`
+
+The `bindport-json-snapshot` built-in renders one JSON file for the current
+route snapshot. It is useful for tools that can watch a file but should not poll
+`bindport status --json`.
+
+Example config:
+
+```toml
+[[outputs]]
+name = "routes-json"
+template = "bindport-json-snapshot"
+root = ".bindport/generated"
+target = "routes.json"
+```
+
+The generated document has:
+
+- `snapshot.generated_at`: when the registry snapshot was captured.
+- `snapshot.route_count`: number of routes rendered into the snapshot.
+- `routes`: an array using the same route fields available to per-route
+  templates, including `project`, `service`, `state`, `port`, `hostname`,
+  `route_url`, `target_url`, branch/worktree fields, and command metadata.
+
+Unlike normal output templates, `bindport-json-snapshot` renders once for the
+whole snapshot. Its `target` template receives `snapshot.*`, `routes`,
+`output.*`, and `vars.*`, but not a per-route `route.*` value.
+
 ### `bindport-env-local`
 
 The `bindport-env-local` built-in renders route metadata as a dotenv-style text
@@ -231,14 +259,20 @@ target = "traefik/{{ route.service }}.yml"
 name = "caddy"
 template = "bindport-caddy"
 target = "caddy/{{ route.service }}.caddy"
+
+[[outputs]]
+name = "routes-json"
+template = "bindport-json-snapshot"
+target = "routes.json"
 ```
 
-`bindport render` reads the latest route state from the registry, renders one
-text file per route, and records ownership in the registry after a successful
-write. Existing files are overwritten only when BindPort previously rendered
-the same output file and the on-disk content still matches the recorded hash.
-Unowned or externally modified files cause the render to fail instead of being
-overwritten.
+`bindport render` reads the latest route state from the registry, renders text
+files, and records ownership in the registry after a successful write. Most
+templates render one file per route; `bindport-json-snapshot` renders one file
+for the whole route snapshot. Existing files are overwritten only when BindPort
+previously rendered the same output file and the on-disk content still matches
+the recorded hash. Unowned or externally modified files cause the render to
+fail instead of being overwritten.
 
 Ownership is scoped to the resolved output root and config root. This lets two
 worktrees or monorepo checkouts render the same output name and route key into

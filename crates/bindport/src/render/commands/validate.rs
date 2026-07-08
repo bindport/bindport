@@ -41,7 +41,7 @@ pub(crate) fn validate_render_outputs(
         let scope = output_file_scope(&base_dir, &render_config)?;
         let delete_route_keys = delete_route_keys(&output, snapshot.routes());
         let render_snapshot = filtered_output_route_snapshot(snapshot, &delete_route_keys);
-        let plan = render_output_routes(&render_config, &template.contents, &render_snapshot)?;
+        let plan = render_output_plan(&render_config, &template.contents, &render_snapshot)?;
         let ownership = registry.output_file_ownership(&output.name, &scope)?;
         let write_ownership = ownership
             .iter()
