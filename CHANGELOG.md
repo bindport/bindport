@@ -2,6 +2,14 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.6.2 - 2026-07-08
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.6.1...v0.6.2)
+
+### Fixes
+
+- Recover stale output ownership safely (cbd592a)
+
 ## v0.6.1 - 2026-07-07
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.6.0...v0.6.1)
