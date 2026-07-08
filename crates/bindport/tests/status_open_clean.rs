@@ -5,6 +5,9 @@ mod support;
 #[path = "status_open_clean/status.rs"]
 mod status;
 
+#[path = "status_open_clean/list.rs"]
+mod list;
+
 #[path = "status_open_clean/open.rs"]
 mod open;
 

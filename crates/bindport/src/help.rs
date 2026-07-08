@@ -9,6 +9,7 @@ pub(crate) fn print_help() {
     println!("  bindport release [service|port]");
     println!("                                  Release a reserved port");
     println!("  bindport status [--json]     Show registry status");
+    println!("  bindport list [--json]       List projects and services in the registry");
     println!("  bindport open [service]      Print or open the best service URL");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport config explain      Explain resolved config and identity sources");
@@ -68,6 +69,16 @@ pub(crate) fn print_open_help() {
     println!("  --project <project>    Disambiguate services with the same name");
     println!("  --browser              Open the URL with the system browser and print it");
     println!("  --print                Print the URL without launching a browser (default)");
+}
+
+pub(crate) fn print_list_help() {
+    println!("BindPort registry listing");
+    println!();
+    println!("Usage:");
+    println!("  bindport list [--json]");
+    println!();
+    println!("Options:");
+    println!("  --json    Print grouped project/service data as JSON");
 }
 
 pub(crate) fn print_config_help() {

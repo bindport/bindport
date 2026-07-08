@@ -17,6 +17,7 @@ fn version_arg_succeeds() {
 fn subcommand_help_surfaces_succeed() {
     assert_eq!(dispatch(strings(["config", "--help"])), ExitCode::SUCCESS);
     assert_eq!(dispatch(strings(["doctor", "--help"])), ExitCode::SUCCESS);
+    assert_eq!(dispatch(strings(["list", "--help"])), ExitCode::SUCCESS);
     assert_eq!(dispatch(strings(["render", "--help"])), ExitCode::SUCCESS);
     assert_eq!(
         dispatch(strings(["templates", "--help"])),
@@ -38,6 +39,8 @@ fn invalid_command_surfaces_fail_without_panicking() {
         strings(["config", "explain", "extra"]),
         strings(["doctor", "unknown"]),
         strings(["doctor", "outputs", "extra"]),
+        strings(["list", "--bad"]),
+        strings(["list", "web"]),
         strings(["render", "--bad"]),
         strings(["templates", "unknown"]),
         strings(["templates", "show"]),

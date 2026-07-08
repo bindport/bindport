@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     io::{self, BufRead, IsTerminal, Write},
     net::Ipv4Addr,
@@ -71,6 +71,7 @@ mod doctor;
 mod errors;
 mod help;
 mod hooks;
+mod list;
 mod open;
 mod paths;
 mod ports;
@@ -88,6 +89,7 @@ pub(crate) use doctor::*;
 pub(crate) use errors::*;
 pub(crate) use help::*;
 pub(crate) use hooks::*;
+pub(crate) use list::*;
 pub(crate) use open::*;
 pub(crate) use paths::*;
 pub(crate) use ports::*;
@@ -125,6 +127,7 @@ fn dispatch(args: impl IntoIterator<Item = String>) -> ExitCode {
                 print_status()
             }
         }
+        Some("list") => run_list_command(&args[1..]),
         Some("open") => run_open_command(&args[1..]),
         Some("reserve") => run_reserve_command(&args[1..]),
         Some("release") => run_release_command(&args[1..]),

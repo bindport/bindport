@@ -1,8 +1,8 @@
 # Status And Cleanup
 
 BindPort records service state in its local SQLite registry. The registry is
-what powers `bindport status`, `bindport open`, the dashboard, output rendering,
-and cleanup.
+what powers `bindport status`, `bindport list`, `bindport open`, the dashboard,
+output rendering, and cleanup.
 
 The registry is local machine state, not project config. By default it lives at
 `$XDG_STATE_HOME/bindport/registry.sqlite`, or
@@ -40,6 +40,25 @@ buttons and stopped/stale cleanup actions:
 bindport dashboard serve
 ```
 
+## Project Listing
+
+Run:
+
+```sh
+bindport list
+bindport list --json
+```
+
+`bindport list` is a registry-wide inventory view. It groups latest service
+records by project and prints compact service rows with state, address, best URL,
+branch label, and PID. `bindport list --json` exposes the same grouping through
+a small JSON payload with `schema_version`, `generated_at`, aggregate counts,
+and `projects[].services[]`.
+
+Use `list` when you need to answer "what projects and services are recorded on
+this machine?" Use `status --json` when you need the full registry snapshot,
+including output summaries, run history, hook visibility, and all service fields.
+
 ## JSON Status
 
 `bindport status --json` returns the local registry snapshot:
@@ -72,8 +91,9 @@ Service fields most useful to agents:
 - `branch`, `branch_label`, `worktree_path`, `commit`: git context when known.
 - `outputs`, `proxy`: generated output files and proxy-oriented summary.
 
-Agents and scripts should prefer `status --json` over parsing the human status
-output.
+Agents and scripts should prefer `status --json` or `list --json` over parsing
+human output. Use `status --json` for full registry detail and `list --json`
+for grouped project/service inventory.
 
 ## URL Lookup
 

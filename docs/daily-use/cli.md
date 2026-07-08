@@ -14,6 +14,7 @@ scripts.
 | `bindport reserve [service]` | Hold a port for an externally managed process. |
 | `bindport release [service\|port]` | Release a reserved port. |
 | `bindport status [--json]` | Show active, reserved, stopped, and stale registry state. |
+| `bindport list [--json]` | Group registry services by project for inventory views. |
 | `bindport open [service]` | Print or open the best URL for an active service. |
 | `bindport clean` | Remove stopped and stale registry entries. |
 | `bindport init` | Create project or user fallback config. |
@@ -105,6 +106,8 @@ Show the registry:
 ```sh
 bindport status
 bindport status --json
+bindport list
+bindport list --json
 ```
 
 Resolve the best service URL:

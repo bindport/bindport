@@ -9,6 +9,7 @@ mod dashboard;
 mod diagnostics;
 mod dispatch;
 mod hooks;
+mod list;
 mod render;
 mod route_events;
 mod run;
