@@ -104,6 +104,18 @@ impl RouteEventCollector {
         }
     }
 
+    pub(crate) fn diagnostic_summary(&self) -> String {
+        if self.events.is_empty() {
+            return String::from("none");
+        }
+
+        self.events
+            .iter()
+            .map(|event| format!("{}:{}", event.source.as_str(), event.kind.as_str()))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     pub(crate) fn events(&self) -> &[RouteEvent] {
         &self.events
     }

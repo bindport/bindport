@@ -209,6 +209,9 @@ or deny configured hooks per machine with `bindport hooks trust|deny|reset`.
 without writing files or updating registry ownership.
 `bindport render --repair` reconciles DB-owned files and can adopt
 content-identical planned files whose ownership row was lost.
+Use `bindport render --verbose` for manual render diagnostics, or set
+`BINDPORT_LOG=debug` before a wrapped command to trace automatic output
+rendering and hook dispatch without printing secret environment values.
 `bindport reserve [service]` allocates and holds a port without running a child
 process, which is useful for compose-managed or otherwise external services.
 `bindport release [service|port]` releases a reserved lease and marks it

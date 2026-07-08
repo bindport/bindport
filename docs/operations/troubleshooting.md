@@ -29,6 +29,24 @@ bindport doctor outputs
 That checks output config, template lookup, planned file paths, ownership
 rules, and hook trust status without writing files.
 
+For render execution details, run manual renders with:
+
+```sh
+bindport render --verbose
+```
+
+For automatic render details from `bindport run`, `clean`, or dashboard cleanup,
+set:
+
+```sh
+BINDPORT_LOG=debug bindport run web
+```
+
+Debug logs go to stderr and include render events, selected outputs, template
+sources, output roots, ownership row counts, lifecycle removals, and hook
+dispatch decisions. They do not print child environment values or hook context
+payloads.
+
 ## Config Issues
 
 Check discovery and precedence:

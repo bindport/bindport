@@ -13,6 +13,7 @@ pub(crate) struct RenderCommandOptions {
     pub(crate) dry_run: bool,
     pub(crate) diff: bool,
     pub(crate) repair: bool,
+    pub(crate) verbose: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,5 +34,6 @@ pub(crate) struct RenderInvocation<'a> {
     pub(crate) dry_run: bool,
     pub(crate) mode: RenderMode,
     pub(crate) report: RenderReport,
+    pub(crate) log: DiagnosticLog,
     pub(crate) events: &'a RouteEventCollector,
 }

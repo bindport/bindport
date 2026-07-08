@@ -126,6 +126,8 @@ pub(crate) fn print_render_help() {
     println!("  --dry-run    Render templates and print targets without writing files");
     println!("  --diff       Print content changes without writing files");
     println!("  --repair     Re-render current routes and reconcile DB-owned files");
+    println!("  --verbose, -v");
+    println!("               Print render diagnostics to stderr");
 }
 
 pub(crate) fn print_templates_help() {
