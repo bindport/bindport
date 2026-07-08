@@ -34,7 +34,7 @@ fn test_render_plan(target: &str, contents: &str) -> RenderPlan {
             route_key: String::from("route-1"),
             target: target.to_string(),
             contents: contents.to_string(),
-            context: RenderContext {
+            context: Some(RenderContext {
                 snapshot: SnapshotContext {
                     generated_at: String::from("2026-06-29T00:02:00Z"),
                     route_count: 1,
@@ -74,7 +74,7 @@ fn test_render_plan(target: &str, contents: &str) -> RenderPlan {
                     on_failure: String::from("warn"),
                 },
                 vars: BTreeMap::new(),
-            },
+            }),
         }],
     }
 }

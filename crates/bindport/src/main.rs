@@ -19,7 +19,7 @@ use bindport_adapters::{
     OutputFileRemovalStatus as AdapterOutputFileRemovalStatus, OutputRenderConfig,
     OutputRouteSnapshot, RemovableOutputFile as AdapterRemovableOutputFile, RenderError,
     RenderPlan, RouteRecord, TemplateError as AdapterTemplateError, TemplateResolver,
-    TemplateSource, output_root_path, remove_owned_output_files, render_output_routes,
+    TemplateSource, output_root_path, remove_owned_output_files, render_output_plan,
     render_plan_paths, verify_render_plan_targets, write_render_plan,
 };
 use bindport_core::{

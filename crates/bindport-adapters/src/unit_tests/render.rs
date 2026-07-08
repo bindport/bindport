@@ -37,10 +37,23 @@ fn render_output_routes_builds_targets_and_context() {
         "target=https://host.docker.internal:29100 mode=dev output=debug snapshot=2026-06-29T00:02:00Z routes=1"
     );
     assert_eq!(
-        plan.files[0].context.route.unique_slug,
+        plan.files[0]
+            .context
+            .as_ref()
+            .expect("route context")
+            .route
+            .unique_slug,
         "demo-web-feature-tree-abc12345"
     );
-    assert_eq!(plan.files[0].context.output.delete_on, vec!["removed"]);
+    assert_eq!(
+        plan.files[0]
+            .context
+            .as_ref()
+            .expect("route context")
+            .output
+            .delete_on,
+        vec!["removed"]
+    );
 }
 
 #[test]
@@ -180,4 +193,41 @@ fn built_in_traefik_plan_renders_comment_for_stopped_route() {
     assert_eq!(plan.files[0].target, "traefik/demo-web-feature-tree.yml");
     assert!(plan.files[0].contents.contains("is stopped"));
     assert!(!plan.files[0].contents.contains("routers:"));
+}
+
+#[test]
+fn render_output_plan_writes_single_json_snapshot_file() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-json-snapshot", None)
+        .expect("built-in template");
+    let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+        name: String::from("routes-json"),
+        template: String::from("bindport-json-snapshot"),
+        root: Some(String::from(".bindport/generated")),
+        target: String::from("routes.json"),
+        target_host: String::from("127.0.0.1"),
+        target_scheme: String::from("http"),
+        auto_render: true,
+        delete_on: vec![OutputDeleteState::Removed],
+        on_failure: OutputFailurePolicy::Warn,
+        debounce_ms: 250,
+        vars: BTreeMap::new(),
+    });
+    let first = test_route("route-1", "active", Some("first.demo.localhost"));
+    let mut second = test_route("route-2", "stopped", Some("second.demo.localhost"));
+    second.service = String::from("api");
+    second.port = 29_101;
+    let snapshot = test_route_snapshot(vec![first, second]);
+
+    let plan = render_output_plan(&output, &template.contents, &snapshot).expect("snapshot plan");
+
+    assert_eq!(plan.files.len(), 1);
+    assert_eq!(plan.files[0].route_key, SNAPSHOT_OUTPUT_ROUTE_KEY);
+    assert_eq!(plan.files[0].target, "routes.json");
+    assert!(plan.files[0].context.is_none());
+    let document =
+        serde_json::from_str::<serde_json::Value>(&plan.files[0].contents).expect("snapshot json");
+    assert_eq!(document["snapshot"]["route_count"], 2);
+    assert_eq!(document["routes"][0]["hostname"], "first.demo.localhost");
+    assert_eq!(document["routes"][1]["service"], "api");
 }

@@ -190,6 +190,14 @@ pub struct RenderContext {
     pub vars: BTreeMap<String, serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SnapshotRenderContext {
+    pub snapshot: SnapshotContext,
+    pub output: OutputContext,
+    pub vars: BTreeMap<String, serde_json::Value>,
+    pub routes: Vec<RouteContext>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SnapshotContext {
     pub generated_at: String,
@@ -201,7 +209,7 @@ pub struct RenderedRouteFile {
     pub route_key: String,
     pub target: String,
     pub contents: String,
-    pub context: RenderContext,
+    pub context: Option<RenderContext>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -228,6 +236,8 @@ pub enum RenderError {
         route_keys: Vec<String>,
     },
 }
+
+pub const SNAPSHOT_OUTPUT_ROUTE_KEY: &str = "__bindport_snapshot__";
 
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -267,6 +277,18 @@ impl std::error::Error for RenderError {
         }
     }
 }
+pub fn render_output_plan(
+    output: &OutputRenderConfig,
+    template: &str,
+    snapshot: &OutputRouteSnapshot,
+) -> Result<RenderPlan, RenderError> {
+    if output.context.template == BUILT_IN_JSON_SNAPSHOT_NAME {
+        render_output_snapshot(output, template, snapshot)
+    } else {
+        render_output_routes(output, template, snapshot)
+    }
+}
+
 pub fn render_output_routes(
     output: &OutputRenderConfig,
     template: &str,
@@ -317,12 +339,54 @@ pub fn render_output_routes(
             route_key: route.key.clone(),
             target,
             contents,
-            context,
+            context: Some(context),
         });
     }
 
     Ok(RenderPlan {
         output: output.context.clone(),
         files,
+    })
+}
+
+pub fn render_output_snapshot(
+    output: &OutputRenderConfig,
+    template: &str,
+    snapshot: &OutputRouteSnapshot,
+) -> Result<RenderPlan, RenderError> {
+    let snapshot_context = SnapshotContext {
+        generated_at: snapshot.generated_at().to_string(),
+        route_count: snapshot.route_count(),
+    };
+    let context = SnapshotRenderContext {
+        snapshot: snapshot_context,
+        output: output.context.clone(),
+        vars: output.vars.clone(),
+        routes: snapshot
+            .routes()
+            .iter()
+            .map(|route| route.context(output))
+            .collect(),
+    };
+    let target = render_template(&output.context.target, &context).map_err(|source| {
+        RenderError::TargetTemplate {
+            route_key: String::from(SNAPSHOT_OUTPUT_ROUTE_KEY),
+            source,
+        }
+    })?;
+    let contents =
+        render_template(template, &context).map_err(|source| RenderError::BodyTemplate {
+            route_key: String::from(SNAPSHOT_OUTPUT_ROUTE_KEY),
+            source,
+        })?;
+
+    Ok(RenderPlan {
+        output: output.context.clone(),
+        files: vec![RenderedRouteFile {
+            route_key: String::from(SNAPSHOT_OUTPUT_ROUTE_KEY),
+            target,
+            contents,
+            context: None,
+        }],
     })
 }

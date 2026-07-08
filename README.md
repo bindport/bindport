@@ -66,8 +66,9 @@ The current source tree includes:
   conflicts, and the next candidate port.
 - `bindport doctor outputs` diagnostics for configured output templates and
   planned render paths without writing files.
-- Built-in `bindport-traefik`, `bindport-caddy`, and `bindport-env-local`
-  output templates through the normal owned-output pipeline.
+- Built-in `bindport-traefik`, `bindport-caddy`, `bindport-json-snapshot`, and
+  `bindport-env-local` output templates through the normal owned-output
+  pipeline.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
   and JSON output options.
 - Local dashboard API and embedded UI for active, stopped, and stale registry
@@ -125,6 +126,7 @@ cargo run -p bindport -- doctor outputs
 cargo run -p bindport -- templates list
 cargo run -p bindport -- templates export bindport-traefik
 cargo run -p bindport -- templates export bindport-caddy
+cargo run -p bindport -- templates export bindport-json-snapshot
 cargo run -p bindport -- render --dry-run
 cargo run -p bindport -- render --repair
 cargo run -p bindport -- run web -- sh -c 'echo "$PORT"'

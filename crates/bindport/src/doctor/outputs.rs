@@ -122,7 +122,7 @@ pub(crate) fn print_doctor_output(
     };
 
     let render_config = OutputRenderConfig::from(output);
-    let plan = match render_output_routes(&render_config, &template.contents, snapshot) {
+    let plan = match render_output_plan(&render_config, &template.contents, snapshot) {
         Ok(plan) => plan,
         Err(error) => {
             println!("  plan: invalid ({error})");

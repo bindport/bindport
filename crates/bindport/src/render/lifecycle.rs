@@ -26,6 +26,7 @@ pub(crate) struct LifecycleRemoval<'a> {
     pub(crate) scope: &'a OutputFileScope,
     pub(crate) ownership: &'a [bindport_registry::OutputFileOwnership],
     pub(crate) current_route_keys: &'a BTreeSet<String>,
+    pub(crate) planned_route_keys: &'a BTreeSet<String>,
     pub(crate) delete_route_keys: &'a BTreeSet<String>,
     pub(crate) base_dir: &'a Path,
     pub(crate) render_config: &'a OutputRenderConfig,
@@ -42,7 +43,9 @@ pub(crate) fn remove_output_files_for_lifecycle(
         .iter()
         .filter(|owned| {
             removal.delete_route_keys.contains(&owned.route_key)
-                || (delete_removed && !removal.current_route_keys.contains(&owned.route_key))
+                || (delete_removed
+                    && !removal.current_route_keys.contains(&owned.route_key)
+                    && !removal.planned_route_keys.contains(&owned.route_key))
         })
         .map(|owned| AdapterRemovableOutputFile {
             route_key: owned.route_key.clone(),

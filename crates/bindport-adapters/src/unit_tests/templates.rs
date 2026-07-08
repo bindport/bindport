@@ -165,6 +165,10 @@ fn lists_templates_with_first_match_precedence_and_source_filters() {
     assert_eq!(by_name["global-only"].source, TemplateSource::Global);
     assert_eq!(by_name["bindport-caddy"].source, TemplateSource::BuiltIn);
     assert_eq!(
+        by_name["bindport-json-snapshot"].source,
+        TemplateSource::BuiltIn
+    );
+    assert_eq!(
         by_name["bindport-env-local"].source,
         TemplateSource::BuiltIn
     );
@@ -288,6 +292,37 @@ fn built_in_caddy_template_escapes_caddyfile_tokens() {
 
     assert!(rendered.contains("\"http://feature\\\".demo.localhost\" {"));
     assert!(rendered.contains("reverse_proxy \"http://127.0.0.1:29100/path\\\"\""));
+}
+
+#[test]
+fn built_in_json_snapshot_template_renders_snapshot_document() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-json-snapshot", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            snapshot => minijinja::context! {
+                generated_at => "2026-06-29T00:02:00Z",
+                route_count => 1,
+            },
+            routes => [minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                service => "web",
+                target_url => "http://127.0.0.1:29100",
+            }],
+        },
+    )
+    .expect("built-in template renders");
+
+    let document = serde_json::from_str::<serde_json::Value>(&rendered).expect("json document");
+    assert_eq!(document["snapshot"]["route_count"], 1);
+    assert_eq!(document["routes"][0]["service"], "web");
+    assert_eq!(
+        document["routes"][0]["target_url"],
+        "http://127.0.0.1:29100"
+    );
 }
 
 #[test]
