@@ -163,6 +163,7 @@ fn lists_templates_with_first_match_precedence_and_source_filters() {
     assert_eq!(by_name["app"].path, Some(project.join("app.yaml.j2")));
     assert_eq!(by_name["bindport-traefik"].source, TemplateSource::Project);
     assert_eq!(by_name["global-only"].source, TemplateSource::Global);
+    assert_eq!(by_name["bindport-caddy"].source, TemplateSource::BuiltIn);
     assert_eq!(
         by_name["bindport-env-local"].source,
         TemplateSource::BuiltIn
@@ -239,6 +240,54 @@ fn built_in_traefik_template_renders_active_route() {
 
     assert!(rendered.contains("rule: \"Host(`feature.demo.localhost`)\""));
     assert!(rendered.contains("url: \"http://127.0.0.1:29100\""));
+}
+
+#[test]
+fn built_in_caddy_template_renders_active_route() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-caddy", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            route => minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                hostname => "feature.demo.localhost",
+                target_url => "http://127.0.0.1:29100",
+            },
+            vars => minijinja::context! {},
+        },
+    )
+    .expect("built-in template renders");
+
+    assert!(rendered.contains("\"http://feature.demo.localhost\" {"));
+    assert!(rendered.contains("reverse_proxy \"http://127.0.0.1:29100\""));
+}
+
+#[test]
+fn built_in_caddy_template_escapes_caddyfile_tokens() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-caddy", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            route => minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                hostname => "feature\".demo.localhost",
+                target_url => "http://127.0.0.1:29100/path\"",
+            },
+            vars => minijinja::context! {
+                site_scheme => "http",
+            },
+        },
+    )
+    .expect("built-in template renders");
+
+    assert!(rendered.contains("\"http://feature\\\".demo.localhost\" {"));
+    assert!(rendered.contains("reverse_proxy \"http://127.0.0.1:29100/path\\\"\""));
 }
 
 #[test]

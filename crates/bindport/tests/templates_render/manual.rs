@@ -26,7 +26,6 @@ fn render_command_writes_config_files_and_records_ownership() {
         .args(["run", "web", "--", "sh", "-c", "true"])
         .output()
         .expect("run bindport");
-
     assert!(
         run_output.status.success(),
         "bindport failed: {}",
@@ -175,6 +174,51 @@ fn render_scopes_same_output_and_route_to_distinct_output_roots() {
 
     assert_eq!(status["outputs"][0]["name"], "traefik");
     assert_eq!(status["outputs"][0]["rendered"], 2);
+}
+
+#[test]
+fn render_builtin_caddy_template_writes_caddyfile_snippet() {
+    let registry_path = temp_registry_path("render-caddy-registry");
+    let root = temp_test_dir("render-caddy-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-caddy\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"caddy.localhost\"\n[[outputs]]\nname = \"caddy\"\ntemplate = \"bindport-caddy\"\nroot = \".bindport/generated\"\ntarget = \"caddy/{{{{ route.service }}}}.caddy\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+
+    let mut bindport = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "sleep 5"])
+        .spawn()
+        .expect("spawn bindport");
+    wait_for_open_url(
+        &registry_path,
+        &["open", "web", "--print"],
+        Duration::from_secs(5),
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "caddy"])
+        .output()
+        .expect("render output");
+
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let contents =
+        fs::read_to_string(root.join(".bindport/generated/caddy/web.caddy")).expect("caddy output");
+
+    assert!(contents.contains("\"http://caddy.localhost\" {"));
+    assert!(contents.contains(&format!("reverse_proxy \"http://127.0.0.1:{port}\"")));
+
+    let status = wait_for_child(&mut bindport, Duration::from_secs(8)).expect("bindport exits");
+    assert!(status.success());
 }
 
 #[test]

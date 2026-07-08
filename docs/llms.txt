@@ -26,7 +26,7 @@ default.
 - [Configuration](https://github.com/bindport/bindport/blob/main/docs/daily-use/configuration.md): Config discovery, precedence, fields, placeholders, validation, outputs, hooks, and dashboard settings.
 - [Monorepos and Worktrees](https://github.com/bindport/bindport/blob/main/docs/daily-use/monorepos.md): Multi-service repositories, local overrides, and branch/worktree identity.
 - [Dashboard](https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md): Local UI, API, service controls, auth, and cleanup actions.
-- [Templates](https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md): Output templates, MiniJinja, built-ins, Traefik setup, and ownership rules.
+- [Templates](https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md): Output templates, MiniJinja, built-ins, proxy/env setup, and ownership rules.
 - [Hooks and Trust](https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md): Lifecycle hooks, trust workflow, changed-hook handling, and dashboard visibility.
 - [Status and Cleanup](https://github.com/bindport/bindport/blob/main/docs/operations/status.md): Registry states, JSON status, URL lookup, reservations, and cleanup.
 
