@@ -12,6 +12,10 @@ That boundary keeps generated routing state inspectable, reviewable, and easy
 to delete. The proxy still owns entrypoints, TLS, middleware, DNS, certificates,
 and reload behavior.
 
+For TCP alias candidates, Kubernetes Ingress, Traefik IngressRoute, container
+helper files, and similar custom file-based integrations, see
+[Optional Output Patterns](optional-output-patterns.md).
+
 ## Shared BindPort Config
 
 Most proxy outputs start with the same BindPort shape:

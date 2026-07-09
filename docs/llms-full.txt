@@ -94,6 +94,13 @@ Automatic render diagnostics from `bindport run`, cleanup, or dashboard cleanup
 are available with `BINDPORT_LOG=debug`; debug output avoids child environment
 values and hook context payloads.
 
+Custom templates are the extension point for file-based integrations. They can
+feed TCP forwarder config, Kubernetes or IngressRoute manifests, container
+helper input, env files, or JSON bridge files when another local tool owns the
+actual watch, reload, apply, or forwarding behavior. BindPort should not be
+treated as the TCP proxy, Kubernetes reconciler, Docker mutator, certificate
+manager, DNS manager, or secret transport.
+
 ## Hooks
 
 Hooks are declared in config but disabled until locally trusted with
@@ -133,6 +140,7 @@ should not run hook trust, deny, reset, or hook commands without user approval.
 - Dashboard: https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md
 - Templates: https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md
 - Proxy Outputs: https://github.com/bindport/bindport/blob/main/docs/integrations/proxy-outputs.md
+- Optional Output Patterns: https://github.com/bindport/bindport/blob/main/docs/integrations/optional-output-patterns.md
 - Hooks: https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md
 - Status: https://github.com/bindport/bindport/blob/main/docs/operations/status.md
 - Troubleshooting: https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md

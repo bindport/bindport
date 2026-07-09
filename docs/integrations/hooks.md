@@ -7,6 +7,12 @@ after generated files change.
 Hooks are powerful local code execution. BindPort therefore treats every hook as
 disabled until the user explicitly trusts it with the CLI.
 
+Prefer file-watching integrations when possible. If an optional output needs an
+explicit reload or apply step, use a small reviewed hook and keep the generated
+files as the inspectable source of truth. See
+[Optional Output Patterns](optional-output-patterns.md) for TCP alias,
+Kubernetes, container, and JSON bridge examples.
+
 ## Configure Hooks
 
 Example:

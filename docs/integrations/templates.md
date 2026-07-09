@@ -5,7 +5,9 @@ projects inspect, export, and customize templates, and `bindport render` writes
 configured text output files from the current registry snapshot.
 
 For practical proxy setup with Traefik, Caddy, Docker Desktop, Rancher Desktop,
-or no proxy at all, see [Proxy Outputs](proxy-outputs.md).
+or no proxy at all, see [Proxy Outputs](proxy-outputs.md). For deferred TCP
+aliasing, Kubernetes, and IngressRoute ideas that stay outside core behavior,
+see [Optional Output Patterns](optional-output-patterns.md).
 
 ## Commands
 
@@ -448,6 +450,12 @@ Custom templates receive the same `route`, `output`, and `vars` context as the
 built-in template. They are text-only and are resolved by logical name, so keep
 template files under project `.bindport/templates` or global
 `$XDG_CONFIG_HOME/bindport/templates`.
+
+Use custom templates to produce files for tools that already know how to watch,
+load, or apply those files. Do not use templates as a hidden proxy manager,
+cluster reconciler, Docker mutator, or secret transport. The supported
+extension patterns and review checklist are covered in
+[Optional Output Patterns](optional-output-patterns.md).
 
 ## Troubleshooting
 

@@ -170,6 +170,23 @@ Common causes:
   again from the intended worktree.
 - Required route metadata is missing, such as `hostname`.
 
+For custom optional outputs such as TCP forwarder config, Kubernetes manifests,
+or container helper input, separate BindPort failures from consumer failures:
+
+- If `bindport render --dry-run` fails, fix the BindPort config or template.
+- If `bindport render --diff` looks right but the external tool does nothing,
+  check whether that tool is watching the generated directory.
+- If a hook should reload or apply the generated file, check
+  `bindport hooks status` and confirm the hook is approved, unchanged, and
+  subscribed to `output_rendered`.
+- If a proxy or local cluster cannot reach the service, check the target host
+  from that tool's network namespace, not only from the host shell.
+- If manifests or configs need namespaces, gateway addresses, socket paths, or
+  reload modes, keep those in local output vars or reviewed local scripts.
+
+See [Optional Output Patterns](../integrations/optional-output-patterns.md) for
+the supported boundary between BindPort-owned files and external tools.
+
 ## Hook Issues
 
 Inspect trust:

@@ -123,8 +123,11 @@ bindport status
 bindport open web --print
 ```
 
-Add outputs later only when an external tool, such as Traefik, needs generated
-route files.
+Add outputs later only when an external tool needs generated route files. The
+common path is Traefik or Caddy file-provider config, but the same owned-output
+contract can feed TCP forwarders, local cluster manifests, `.env.local` files,
+or JSON bridges for other tooling. Keep those integrations file-based first and
+add hooks only for reviewed local reload/apply steps.
 
 For services started by another tool, such as Docker Compose, reserve the port
 first and pass the assigned value to that tool's own config or command:
@@ -230,6 +233,8 @@ rules:
 - [Status](../operations/status.md): `status --json` schema and service URL lookup.
 - [Templates](../integrations/templates.md): output templates, render lifecycle, ownership, and
   Traefik file-provider setup.
+- [Optional Output Patterns](../integrations/optional-output-patterns.md): custom output
+  boundaries for TCP, Kubernetes, container, and JSON integrations.
 - [Dashboard](../integrations/dashboard.md): local dashboard service controls and API behavior.
 - [Monorepos](../daily-use/monorepos.md): root config, service paths, local overrides, and
   workspace inference.

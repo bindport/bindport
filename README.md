@@ -70,7 +70,8 @@ The current source tree includes:
   files.
 - Built-in `bindport-traefik`, `bindport-caddy`, `bindport-json-snapshot`, and
   `bindport-env-local` output templates through the normal owned-output
-  pipeline.
+  pipeline, with custom text templates for file-based integrations such as TCP
+  forwarder config, local cluster manifests, and JSON bridge inputs.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
   and JSON output options.
 - Local dashboard API and embedded UI for active, stopped, and stale registry
@@ -356,6 +357,9 @@ machine-readable counts. Active services are not removed.
   proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
 - [Proxy Outputs](docs/integrations/proxy-outputs.md): Traefik and Caddy file
   outputs, Docker/Rancher target hosts, and no-proxy usage.
+- [Optional Output Patterns](docs/integrations/optional-output-patterns.md):
+  custom output boundaries, TCP alias candidates, Kubernetes/IngressRoute
+  manifests, container workflows, and JSON bridge patterns.
 - [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
 - [Platform Support](docs/reference/platform-support.md): supported operating systems,

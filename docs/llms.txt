@@ -28,6 +28,7 @@ default.
 - [Dashboard](https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md): Local UI, API, service controls, auth, and cleanup actions.
 - [Templates](https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md): Output templates, MiniJinja, built-ins, proxy/env setup, and ownership rules.
 - [Proxy Outputs](https://github.com/bindport/bindport/blob/main/docs/integrations/proxy-outputs.md): Traefik, Caddy, target host selection, Docker/Rancher Desktop, and no-proxy usage.
+- [Optional Output Patterns](https://github.com/bindport/bindport/blob/main/docs/integrations/optional-output-patterns.md): File-based custom output boundaries for TCP alias candidates, Kubernetes/IngressRoute manifests, container workflows, hooks, and JSON bridge patterns.
 - [Hooks and Trust](https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md): Lifecycle hooks, trust workflow, changed-hook handling, and dashboard visibility.
 - [Status and Cleanup](https://github.com/bindport/bindport/blob/main/docs/operations/status.md): Registry states, JSON status, URL lookup, reservations, and cleanup.
 
