@@ -107,7 +107,7 @@ fn render_command_writes_config_files_and_records_ownership() {
         .display()
         .to_string();
 
-    assert_eq!(status["schema_version"], "0.4");
+    assert_eq!(status["schema_version"], "0.7");
     assert_eq!(status["outputs"][0]["name"], "traefik");
     assert_eq!(status["outputs"][0]["pending"], 0);
     assert_eq!(status["outputs"][0]["rendered"], 1);

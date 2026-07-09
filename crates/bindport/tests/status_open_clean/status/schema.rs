@@ -8,7 +8,7 @@ fn status_schema_document_matches_current_contract() {
         serde_json::from_str::<Value>(include_str!("../../../../../docs/status.schema.json"))
             .expect("status schema json");
 
-    assert_eq!(schema["properties"]["schema_version"]["const"], "0.4");
+    assert_eq!(schema["properties"]["schema_version"]["const"], "0.7");
     assert_eq!(schema["additionalProperties"].as_bool(), Some(false));
 
     let top_level_required = schema["required"]
