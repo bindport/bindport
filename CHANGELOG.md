@@ -2,6 +2,39 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.7.0 - 2026-07-09
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.6.2...v0.7.0)
+
+### Features
+
+- Add output route snapshot contract (34b3148)
+- Scope rendered output ownership (f516d38)
+- Add Caddy output template (402e1de)
+- Add JSON snapshot output template (dfed5bf)
+- Add render diff previews (a0b084f)
+- Add grouped service list command (f765379)
+- Add registry export command (b85ebc8)
+- Add output target diagnostics to doctor (1c8c59c)
+- Add render diagnostics logging (d5dd2e1)
+- Add nginx and HAProxy output templates (d52d8be)
+
+
+### Fixes
+
+- Bump status schema contract to 0.7 (4f0dcd5)
+
+
+### Documentation
+
+- Add proxy output setup guide (1049c29)
+- Add optional output integration patterns (1c3660b)
+
+
+### Tests
+
+- Canonicalize output repair fixture scope (cdb3601)
+
 ## v0.6.2 - 2026-07-08
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.6.1...v0.6.2)
