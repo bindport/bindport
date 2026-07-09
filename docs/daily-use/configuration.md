@@ -150,9 +150,9 @@ Traefik or another consumer at the generated project-relative directory instead
 of making BindPort render to an arbitrary absolute path. Output targets are
 relative text file paths under the output root.
 
-Use built-in outputs for the common Traefik, Caddy, JSON snapshot, and env-file
-cases. When a project needs to feed another local tool, keep the same owned-file
-contract and use a custom text template; see
+Use built-in outputs for the common Traefik, Caddy, nginx, HAProxy, JSON
+snapshot, and env-file cases. When a project needs to feed another local tool,
+keep the same owned-file contract and use a custom text template; see
 [Optional Output Patterns](../integrations/optional-output-patterns.md) for TCP
 alias, Kubernetes manifest, Docker/container, and JSON bridge patterns.
 

@@ -543,10 +543,11 @@ diagnostics from a fresh checkout or clean worktree:
 3. Start `bindport dashboard serve` and confirm `/api/status` returns the same
    schema version and payload shape as `bindport status --json`.
 4. Run `bindport templates list` and confirm `bindport-caddy`,
-   `bindport-json-snapshot`, `bindport-traefik`, and `bindport-env-local`
-   appear.
-5. Configure Caddy and JSON snapshot outputs, run `bindport doctor outputs`,
-   and confirm both templates resolve without writing files.
+   `bindport-haproxy`, `bindport-json-snapshot`, `bindport-nginx`,
+   `bindport-traefik`, and `bindport-env-local` appear.
+5. Configure Caddy, nginx, HAProxy, and JSON snapshot outputs, run
+   `bindport doctor outputs`, and confirm all templates resolve without writing
+   files.
 6. Run a service with route metadata, then run `bindport render --dry-run`,
    `bindport render --diff`, and `bindport render`; confirm dry-run and diff do
    not write files, while render writes DB-owned output files.

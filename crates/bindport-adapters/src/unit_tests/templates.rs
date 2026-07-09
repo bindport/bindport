@@ -164,6 +164,8 @@ fn lists_templates_with_first_match_precedence_and_source_filters() {
     assert_eq!(by_name["bindport-traefik"].source, TemplateSource::Project);
     assert_eq!(by_name["global-only"].source, TemplateSource::Global);
     assert_eq!(by_name["bindport-caddy"].source, TemplateSource::BuiltIn);
+    assert_eq!(by_name["bindport-nginx"].source, TemplateSource::BuiltIn);
+    assert_eq!(by_name["bindport-haproxy"].source, TemplateSource::BuiltIn);
     assert_eq!(
         by_name["bindport-json-snapshot"].source,
         TemplateSource::BuiltIn
@@ -292,6 +294,117 @@ fn built_in_caddy_template_escapes_caddyfile_tokens() {
 
     assert!(rendered.contains("\"http://feature\\\".demo.localhost\" {"));
     assert!(rendered.contains("reverse_proxy \"http://127.0.0.1:29100/path\\\"\""));
+}
+
+#[test]
+fn built_in_nginx_template_renders_active_route() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-nginx", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            route => minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                hostname => "feature.demo.localhost",
+                target_url => "http://127.0.0.1:29100",
+            },
+            vars => minijinja::context! {},
+        },
+    )
+    .expect("built-in template renders");
+
+    assert!(rendered.contains("listen 80;"));
+    assert!(rendered.contains("server_name \"feature.demo.localhost\";"));
+    assert!(rendered.contains("proxy_pass \"http://127.0.0.1:29100\";"));
+}
+
+#[test]
+fn built_in_nginx_template_escapes_nginx_tokens() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-nginx", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            route => minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                hostname => "feature\".demo.localhost",
+                target_url => "http://127.0.0.1:29100/path\"",
+            },
+            vars => minijinja::context! {
+                listen => "8080",
+            },
+        },
+    )
+    .expect("built-in template renders");
+
+    assert!(rendered.contains("listen 8080;"));
+    assert!(rendered.contains("server_name \"feature\\\".demo.localhost\";"));
+    assert!(rendered.contains("proxy_pass \"http://127.0.0.1:29100/path\\\"\";"));
+}
+
+#[test]
+fn built_in_haproxy_template_renders_active_routes() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-haproxy", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            routes => [minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                hostname => "feature.demo.localhost",
+                unique_slug => "demo-web-feature-abc12345",
+                target_address => "127.0.0.1:29100",
+            }],
+            vars => minijinja::context! {},
+        },
+    )
+    .expect("built-in template renders");
+
+    assert!(rendered.contains("frontend bindport_http"));
+    assert!(
+        rendered
+            .contains("acl host_demo-web-feature-abc12345 hdr(host) -i \"feature.demo.localhost\"")
+    );
+    assert!(rendered.contains(
+        "use_backend backend_demo-web-feature-abc12345 if host_demo-web-feature-abc12345"
+    ));
+    assert!(rendered.contains("backend backend_demo-web-feature-abc12345"));
+    assert!(rendered.contains("server demo-web-feature-abc12345 \"127.0.0.1:29100\""));
+}
+
+#[test]
+fn built_in_haproxy_template_uses_configured_frontend_values() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-haproxy", None)
+        .expect("built-in template");
+    let rendered = render_template(
+        &template.contents,
+        minijinja::context! {
+            routes => [minijinja::context! {
+                key => "demo:web:feature",
+                state => "active",
+                hostname => "feature\".demo.localhost",
+                unique_slug => "demo-web-feature-abc12345",
+                target_address => "host.docker.internal:29100",
+            }],
+            vars => minijinja::context! {
+                bind => "127.0.0.1:8080",
+                frontend_name => "bindport_local",
+            },
+        },
+    )
+    .expect("built-in template renders");
+
+    assert!(rendered.contains("frontend bindport_local"));
+    assert!(rendered.contains("bind 127.0.0.1:8080"));
+    assert!(rendered.contains("hdr(host) -i \"feature\\\".demo.localhost\""));
+    assert!(rendered.contains("server demo-web-feature-abc12345 \"host.docker.internal:29100\""));
 }
 
 #[test]

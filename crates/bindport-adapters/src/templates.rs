@@ -2,9 +2,12 @@ use super::*;
 
 pub(crate) const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
 pub(crate) const BUILT_IN_CADDY: &str = include_str!("../templates/bindport-caddy.caddy.j2");
+pub(crate) const BUILT_IN_NGINX: &str = include_str!("../templates/bindport-nginx.conf.j2");
+pub(crate) const BUILT_IN_HAPROXY: &str = include_str!("../templates/bindport-haproxy.cfg.j2");
 pub(crate) const BUILT_IN_JSON_SNAPSHOT: &str =
     include_str!("../templates/bindport-json-snapshot.json.j2");
 pub(crate) const BUILT_IN_ENV_LOCAL: &str = include_str!("../templates/bindport-env-local.env.j2");
+pub const BUILT_IN_HAPROXY_NAME: &str = "bindport-haproxy";
 pub const BUILT_IN_JSON_SNAPSHOT_NAME: &str = "bindport-json-snapshot";
 pub(crate) const TEMPLATE_FUEL: u64 = 200_000;
 pub(crate) const MAX_RENDERED_TEMPLATE_BYTES: usize = 1024 * 1024;
@@ -280,6 +283,14 @@ pub(crate) fn built_in_templates() -> &'static [BuiltInTemplate] {
             contents: BUILT_IN_CADDY,
         },
         BuiltInTemplate {
+            name: "bindport-nginx",
+            contents: BUILT_IN_NGINX,
+        },
+        BuiltInTemplate {
+            name: BUILT_IN_HAPROXY_NAME,
+            contents: BUILT_IN_HAPROXY,
+        },
+        BuiltInTemplate {
             name: BUILT_IN_JSON_SNAPSHOT_NAME,
             contents: BUILT_IN_JSON_SNAPSHOT,
         },
@@ -301,4 +312,8 @@ pub(crate) fn resolve_built_in(name: &str) -> Option<ResolvedTemplate> {
             contents: template.contents.to_string(),
             wildcard_matches: Vec::new(),
         })
+}
+
+pub(crate) fn is_built_in_snapshot_template(name: &str) -> bool {
+    matches!(name, BUILT_IN_JSON_SNAPSHOT_NAME | BUILT_IN_HAPROXY_NAME)
 }

@@ -349,6 +349,99 @@ fn render_builtin_caddy_template_writes_caddyfile_snippet() {
 }
 
 #[test]
+fn render_builtin_nginx_template_writes_server_snippet() {
+    let registry_path = temp_registry_path("render-nginx-registry");
+    let root = temp_test_dir("render-nginx-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-nginx\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"nginx.localhost\"\n[[outputs]]\nname = \"nginx\"\ntemplate = \"bindport-nginx\"\nroot = \".bindport/generated\"\ntarget = \"nginx/{{{{ route.service }}}}.conf\"\nauto_render = false\n"
+        ),
+    )
+    .expect("write render config");
+
+    let mut bindport = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "sleep 5"])
+        .spawn()
+        .expect("spawn bindport");
+    wait_for_open_url(
+        &registry_path,
+        &["open", "web", "--print"],
+        Duration::from_secs(5),
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "nginx"])
+        .output()
+        .expect("render output");
+
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let contents =
+        fs::read_to_string(root.join(".bindport/generated/nginx/web.conf")).expect("nginx output");
+
+    assert!(contents.contains("server_name \"nginx.localhost\";"));
+    assert!(contents.contains(&format!("proxy_pass \"http://127.0.0.1:{port}\";")));
+
+    let status = wait_for_child(&mut bindport, Duration::from_secs(8)).expect("bindport exits");
+    assert!(status.success());
+}
+
+#[test]
+fn render_builtin_haproxy_template_writes_route_config() {
+    let registry_path = temp_registry_path("render-haproxy-registry");
+    let root = temp_test_dir("render-haproxy-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"render-haproxy\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[output_defaults]\ntarget_host = \"host.docker.internal\"\n[[services]]\nname = \"web\"\nhostname = \"haproxy.localhost\"\n[[outputs]]\nname = \"haproxy\"\ntemplate = \"bindport-haproxy\"\nroot = \".bindport/generated\"\ntarget = \"haproxy/bindport.cfg\"\nauto_render = false\n[outputs.vars]\nbind = \"127.0.0.1:8080\"\nfrontend_name = \"bindport_local\"\n"
+        ),
+    )
+    .expect("write render config");
+
+    let mut bindport = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web", "--", "sh", "-c", "sleep 5"])
+        .spawn()
+        .expect("spawn bindport");
+    wait_for_open_url(
+        &registry_path,
+        &["open", "web", "--print"],
+        Duration::from_secs(5),
+    );
+
+    let render = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["render", "haproxy"])
+        .output()
+        .expect("render output");
+
+    assert!(
+        render.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let contents = fs::read_to_string(root.join(".bindport/generated/haproxy/bindport.cfg"))
+        .expect("haproxy output");
+
+    assert!(contents.contains("frontend bindport_local"));
+    assert!(contents.contains("bind 127.0.0.1:8080"));
+    assert!(contents.contains("hdr(host) -i \"haproxy.localhost\""));
+    assert!(contents.contains("server render-haproxy-web-render-haproxy-"));
+    assert!(contents.contains(&format!("\"host.docker.internal:{port}\"")));
+
+    let status = wait_for_child(&mut bindport, Duration::from_secs(8)).expect("bindport exits");
+    assert!(status.success());
+}
+
+#[test]
 fn render_builtin_json_snapshot_template_writes_route_snapshot() {
     let registry_path = temp_registry_path("render-json-snapshot-registry");
     let root = temp_test_dir("render-json-snapshot-root");
