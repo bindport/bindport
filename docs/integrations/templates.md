@@ -4,10 +4,10 @@ BindPort resolves output templates by logical name. Template commands let
 projects inspect, export, and customize templates, and `bindport render` writes
 configured text output files from the current registry snapshot.
 
-For practical proxy setup with Traefik, Caddy, Docker Desktop, Rancher Desktop,
-or no proxy at all, see [Proxy Outputs](proxy-outputs.md). For deferred TCP
-aliasing, Kubernetes, and IngressRoute ideas that stay outside core behavior,
-see [Optional Output Patterns](optional-output-patterns.md).
+For practical proxy setup with Traefik, Caddy, nginx, HAProxy, Docker Desktop,
+Rancher Desktop, or no proxy at all, see [Proxy Outputs](proxy-outputs.md). For
+deferred TCP aliasing, Kubernetes, and IngressRoute ideas that stay outside core
+behavior, see [Optional Output Patterns](optional-output-patterns.md).
 
 ## Commands
 
@@ -131,6 +131,50 @@ For an active route with a hostname, the template renders a site address and
 `site_scheme = "http"` keeps local `.localhost` setups from opting into Caddy
 automatic HTTPS by accident. Export the template and change `site_scheme` when
 your local Caddy setup intentionally owns HTTPS.
+
+### `bindport-nginx`
+
+The `bindport-nginx` built-in renders one nginx HTTP `server` block per route.
+It is intended for an existing nginx setup that imports generated files from a
+directory.
+
+Supported vars:
+
+```toml
+[outputs.vars]
+listen = "80"
+```
+
+For an active route with a hostname, the template renders a `server_name` and a
+`proxy_pass` directive pointing at `route.target_url`. For stopped, stale, or
+missing-hostname routes, it renders comments only. BindPort does not start
+nginx, configure TLS, or reload nginx for you.
+
+### `bindport-haproxy`
+
+The `bindport-haproxy` built-in renders one aggregate HAProxy HTTP config file
+for the current route snapshot. HAProxy config usually needs a shared frontend
+with one backend per route, so this template is snapshot-oriented instead of
+per-route.
+
+Example config:
+
+```toml
+[[outputs]]
+name = "haproxy"
+template = "bindport-haproxy"
+root = ".bindport/generated"
+target = "haproxy/bindport.cfg"
+
+[outputs.vars]
+bind = ":80"
+frontend_name = "bindport_http"
+```
+
+For each active route with a hostname, the template renders a host ACL,
+`use_backend` rule, and backend server pointing at `route.target_address`.
+Stopped, stale, and missing-hostname routes render comments only. BindPort does
+not start HAProxy, configure TLS, or reload HAProxy for you.
 
 ### `bindport-json-snapshot`
 
@@ -272,6 +316,16 @@ template = "bindport-caddy"
 target = "caddy/{{ route.service }}.caddy"
 
 [[outputs]]
+name = "nginx"
+template = "bindport-nginx"
+target = "nginx/{{ route.service }}.conf"
+
+[[outputs]]
+name = "haproxy"
+template = "bindport-haproxy"
+target = "haproxy/bindport.cfg"
+
+[[outputs]]
 name = "routes-json"
 template = "bindport-json-snapshot"
 target = "routes.json"
@@ -279,11 +333,12 @@ target = "routes.json"
 
 `bindport render` reads the latest route state from the registry, renders text
 files, and records ownership in the registry after a successful write. Most
-templates render one file per route; `bindport-json-snapshot` renders one file
-for the whole route snapshot. Existing files are overwritten only when BindPort
-previously rendered the same output file and the on-disk content still matches
-the recorded hash. Unowned or externally modified files cause the render to
-fail instead of being overwritten.
+templates render one file per route; `bindport-haproxy` and
+`bindport-json-snapshot` render one file for the whole route snapshot. Existing
+files are overwritten only when BindPort previously rendered the same output
+file and the on-disk content still matches the recorded hash. Unowned or
+externally modified files cause the render to fail instead of being
+overwritten.
 
 Ownership is scoped to the resolved output root and config root. This lets two
 worktrees or monorepo checkouts render the same output name and route key into
@@ -300,8 +355,9 @@ Templates render from a single route snapshot. Each rendered file receives:
   deletion filtering.
 - `route.*`: route metadata for the file being rendered, such as
   `route.project`, `route.service`, `route.state`, `route.port`,
-  `route.hostname`, `route.route_url`, `route.target_url`, `route.branch_label`,
-  `route.slug`, and `route.unique_slug`.
+  `route.hostname`, `route.route_url`, `route.target_scheme`,
+  `route.target_host`, `route.target_address`, `route.target_url`,
+  `route.branch_label`, `route.slug`, and `route.unique_slug`.
 - `output.*`: the output config context, such as `output.name`,
   `output.template`, `output.root`, `output.target`, `output.auto_render`,
   `output.delete_on`, and `output.on_failure`.

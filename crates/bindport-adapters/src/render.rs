@@ -126,6 +126,7 @@ impl RouteRecord {
             "{}://{}:{}",
             output.target_scheme, output.target_host, self.port
         );
+        let target_address = format!("{}:{}", output.target_host, self.port);
 
         RouteContext {
             key: self.key.clone(),
@@ -138,6 +139,9 @@ impl RouteRecord {
             url: self.url.clone(),
             hostname: self.hostname.clone(),
             route_url: self.route_url.clone(),
+            target_scheme: output.target_scheme.clone(),
+            target_host: output.target_host.clone(),
+            target_address,
             target_url,
             branch: self.branch.clone(),
             branch_label: self.branch_label.clone(),
@@ -167,6 +171,9 @@ pub struct RouteContext {
     pub url: String,
     pub hostname: Option<String>,
     pub route_url: Option<String>,
+    pub target_scheme: String,
+    pub target_host: String,
+    pub target_address: String,
     pub target_url: String,
     pub branch: Option<String>,
     pub branch_label: Option<String>,
@@ -282,7 +289,7 @@ pub fn render_output_plan(
     template: &str,
     snapshot: &OutputRouteSnapshot,
 ) -> Result<RenderPlan, RenderError> {
-    if output.context.template == BUILT_IN_JSON_SNAPSHOT_NAME {
+    if is_built_in_snapshot_template(&output.context.template) {
         render_output_snapshot(output, template, snapshot)
     } else {
         render_output_routes(output, template, snapshot)

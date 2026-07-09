@@ -62,10 +62,10 @@ Project maintainers should read:
 - [Running Services](daily-use/running-services.md) for configured service commands,
   command-line port flags, route metadata, and environment bridging.
 - [Monorepos and Worktrees](daily-use/monorepos.md) for multi-service repository layouts.
-- [Templates](integrations/templates.md) for generated integration files such as Traefik
-  file-provider snippets and `.env.local` files.
-- [Proxy Outputs](integrations/proxy-outputs.md) for Traefik, Caddy, container
-  target hosts, and no-proxy usage.
+- [Templates](integrations/templates.md) for generated integration files such as proxy
+  config snippets and `.env.local` files.
+- [Proxy Outputs](integrations/proxy-outputs.md) for Traefik, Caddy, nginx, HAProxy,
+  container target hosts, and no-proxy usage.
 - [Optional Output Patterns](integrations/optional-output-patterns.md) for TCP
   alias candidates, Kubernetes/IngressRoute manifests, container workflows,
   JSON bridge files, and the boundary between generated files and external

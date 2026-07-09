@@ -69,12 +69,13 @@ state rows. The status JSON schema is in `docs/status.schema.json`.
 ## Outputs And Templates
 
 Outputs render text files from the latest registry snapshot. Most templates
-render one file per route; `bindport-json-snapshot` renders one aggregate JSON
-file for the whole route snapshot. Template lookup checks project templates,
-global templates, and built-ins. The built-in templates are
-`bindport-traefik`, `bindport-caddy`, `bindport-json-snapshot`, and
-`bindport-env-local`. Per-route templates receive `snapshot.generated_at`,
-`snapshot.route_count`, `route.*`, `output.*`, and user-provided `vars.*`.
+render one file per route; `bindport-haproxy` and `bindport-json-snapshot`
+render one aggregate file for the whole route snapshot. Template lookup checks
+project templates, global templates, and built-ins. The built-in templates are
+`bindport-traefik`, `bindport-caddy`, `bindport-nginx`, `bindport-haproxy`,
+`bindport-json-snapshot`, and `bindport-env-local`. Per-route templates receive
+`snapshot.generated_at`, `snapshot.route_count`, `route.*`, `output.*`, and
+user-provided `vars.*`.
 
 Output roots must be relative to the config file and must not contain `..`.
 BindPort tracks output ownership in the registry and refuses to overwrite

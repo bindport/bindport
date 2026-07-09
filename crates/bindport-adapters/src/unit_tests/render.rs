@@ -24,7 +24,7 @@ fn render_output_routes_builds_targets_and_context() {
 
     let plan = render_output_routes(
         &output,
-        "target={{ route.target_url }} mode={{ vars.mode }} output={{ output.name }} snapshot={{ snapshot.generated_at }} routes={{ snapshot.route_count }}",
+        "target={{ route.target_url }} address={{ route.target_address }} scheme={{ route.target_scheme }} mode={{ vars.mode }} output={{ output.name }} snapshot={{ snapshot.generated_at }} routes={{ snapshot.route_count }}",
         &snapshot,
     )
     .expect("render plan");
@@ -34,7 +34,7 @@ fn render_output_routes_builds_targets_and_context() {
     assert_eq!(plan.files[0].target, "debug/demo-web-feature-tree.txt");
     assert_eq!(
         plan.files[0].contents,
-        "target=https://host.docker.internal:29100 mode=dev output=debug snapshot=2026-06-29T00:02:00Z routes=1"
+        "target=https://host.docker.internal:29100 address=host.docker.internal:29100 scheme=https mode=dev output=debug snapshot=2026-06-29T00:02:00Z routes=1"
     );
     assert_eq!(
         plan.files[0]
@@ -230,4 +230,47 @@ fn render_output_plan_writes_single_json_snapshot_file() {
     assert_eq!(document["snapshot"]["route_count"], 2);
     assert_eq!(document["routes"][0]["hostname"], "first.demo.localhost");
     assert_eq!(document["routes"][1]["service"], "api");
+}
+
+#[test]
+fn render_output_plan_writes_single_haproxy_file() {
+    let template = TemplateResolver::new(None, None)
+        .resolve("bindport-haproxy", None)
+        .expect("built-in template");
+    let output = OutputRenderConfig::from(&EffectiveOutputConfig {
+        name: String::from("haproxy"),
+        template: String::from("bindport-haproxy"),
+        root: Some(String::from(".bindport/generated")),
+        target: String::from("haproxy/bindport.cfg"),
+        target_host: String::from("host.docker.internal"),
+        target_scheme: String::from("http"),
+        auto_render: true,
+        delete_on: vec![OutputDeleteState::Removed],
+        on_failure: OutputFailurePolicy::Warn,
+        debounce_ms: 250,
+        vars: BTreeMap::new(),
+    });
+    let active = test_route("route-1", "active", Some("first.demo.localhost"));
+    let mut stopped = test_route("route-2", "stopped", Some("second.demo.localhost"));
+    stopped.service = String::from("api");
+    stopped.port = 29_101;
+    let snapshot = test_route_snapshot(vec![active, stopped]);
+
+    let plan = render_output_plan(&output, &template.contents, &snapshot).expect("haproxy plan");
+
+    assert_eq!(plan.files.len(), 1);
+    assert_eq!(plan.files[0].route_key, SNAPSHOT_OUTPUT_ROUTE_KEY);
+    assert_eq!(plan.files[0].target, "haproxy/bindport.cfg");
+    assert!(plan.files[0].contents.contains("frontend bindport_http"));
+    assert!(
+        plan.files[0].contents.contains(
+            "acl host_demo-web-feature-tree-abc12345 hdr(host) -i \"first.demo.localhost\""
+        )
+    );
+    assert!(
+        plan.files[0]
+            .contents
+            .contains("server demo-web-feature-tree-abc12345 \"host.docker.internal:29100\"")
+    );
+    assert!(plan.files[0].contents.contains("route-2 is stopped"));
 }

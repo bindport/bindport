@@ -1,8 +1,8 @@
 # Proxy Output Guides
 
 BindPort integrates with existing local proxies by writing files those tools can
-read. It does not start Traefik, Caddy, nginx, Kubernetes, Docker, Rancher
-Desktop, or any proxy admin API client. The boundary is:
+read. It does not start Traefik, Caddy, nginx, HAProxy, Kubernetes, Docker,
+Rancher Desktop, or any proxy admin API client. The boundary is:
 
 ```text
 BindPort registry snapshot -> generated text files -> your existing tool
@@ -162,6 +162,62 @@ Reload Caddy the way your local setup expects: manually after
 through a locally trusted BindPort hook. Do not commit a hook that reloads Caddy
 and expect it to run automatically on other machines; hook execution remains a
 local trust decision.
+
+## Nginx HTTP Includes
+
+The built-in `bindport-nginx` template renders one nginx HTTP `server` block per
+route. It works best when an existing nginx config imports a generated
+directory.
+
+BindPort output:
+
+```toml
+[[outputs]]
+name = "nginx"
+template = "bindport-nginx"
+target = "nginx/{{ route.slug }}.conf"
+
+[outputs.vars]
+listen = "80"
+```
+
+Nginx include example:
+
+```nginx
+http {
+  include /absolute/path/to/project/.bindport/generated/nginx/*.conf;
+}
+```
+
+The generated server blocks are HTTP reverse-proxy snippets only. BindPort does
+not own nginx entrypoints, TLS, certificate automation, or reload behavior.
+Reload nginx through your normal local workflow or through a locally trusted
+hook when a project explicitly wants that.
+
+## HAProxy HTTP Config
+
+The built-in `bindport-haproxy` template renders one aggregate HAProxy config
+file for the current route snapshot. HAProxy usually needs one frontend and many
+route backends, so this output should use a single fixed target path.
+
+BindPort output:
+
+```toml
+[[outputs]]
+name = "haproxy"
+template = "bindport-haproxy"
+target = "haproxy/bindport.cfg"
+
+[outputs.vars]
+bind = ":80"
+frontend_name = "bindport_http"
+```
+
+The generated file contains an HTTP frontend, host ACLs, `use_backend` rules,
+and backend servers pointing at each route's configured `target_host` plus the
+assigned port. Treat it as generated local HAProxy config that your existing
+HAProxy setup loads or includes. BindPort does not start HAProxy, configure TLS,
+or reload HAProxy.
 
 ## No Proxy
 

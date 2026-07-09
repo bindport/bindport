@@ -22,7 +22,7 @@ Use these capabilities as the boundary for optional integrations:
 | Per-route text files | Available | Most output templates render one file per route. |
 | Aggregate JSON route snapshot | Available | `bindport-json-snapshot` renders one file for all routes. |
 | Project/global/custom templates | Available | Templates live under `.bindport/templates` or the user config template directory. |
-| Built-in Traefik and Caddy file snippets | Available | These are file-provider snippets, not proxy management. |
+| Built-in proxy file snippets | Available | Traefik, Caddy, nginx, and HAProxy outputs generate config files; they do not manage proxies. |
 | Output ownership and safe cleanup | Available | BindPort tracks generated files in SQLite and refuses unsafe overwrites. |
 | `render --dry-run`, `--diff`, and `--repair` | Available | Use these before connecting generated files to another tool. |
 | Trusted lifecycle hooks | Available | Hooks are disabled until locally trusted with the CLI. |
@@ -129,6 +129,9 @@ Custom output templates should stay close to the documented route model:
 - `route.port`
 - `route.hostname`
 - `route.route_url`
+- `route.target_scheme`
+- `route.target_host`
+- `route.target_address`
 - `route.target_url`
 - `route.branch_label`
 - `route.slug`
@@ -380,7 +383,7 @@ the template and keep the generated directory out of hand-edited manifests.
 BindPort should not mutate Docker containers or labels. For container-heavy
 local setups, use one of these safer patterns:
 
-- Generate Traefik or Caddy file-provider config and mount the generated
+- Generate Traefik, Caddy, nginx, or HAProxy config and mount the generated
   directory into the proxy container.
 - Generate a JSON snapshot for a local helper that already owns Docker access.
 - Use `.bindport.local.toml` for container-specific target hosts such as a

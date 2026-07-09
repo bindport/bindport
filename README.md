@@ -68,8 +68,9 @@ The current source tree includes:
 - `bindport doctor outputs` diagnostics for configured output templates, target
   hosts, output roots, ownership rows, and planned render paths without writing
   files.
-- Built-in `bindport-traefik`, `bindport-caddy`, `bindport-json-snapshot`, and
-  `bindport-env-local` output templates through the normal owned-output
+- Built-in `bindport-traefik`, `bindport-caddy`, `bindport-nginx`,
+  `bindport-haproxy`, `bindport-json-snapshot`, and `bindport-env-local` output
+  templates through the normal owned-output
   pipeline, with custom text templates for file-based integrations such as TCP
   forwarder config, local cluster manifests, and JSON bridge inputs.
 - `bindport clean` registry cleanup for stopped and stale entries, with dry-run
@@ -131,6 +132,8 @@ cargo run -p bindport -- doctor outputs
 cargo run -p bindport -- templates list
 cargo run -p bindport -- templates export bindport-traefik
 cargo run -p bindport -- templates export bindport-caddy
+cargo run -p bindport -- templates export bindport-nginx
+cargo run -p bindport -- templates export bindport-haproxy
 cargo run -p bindport -- templates export bindport-json-snapshot
 cargo run -p bindport -- render --dry-run
 cargo run -p bindport -- render --diff
@@ -355,8 +358,8 @@ machine-readable counts. Active services are not removed.
   guidance.
 - [Templates](docs/integrations/templates.md): output template lookup, built-in
   proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
-- [Proxy Outputs](docs/integrations/proxy-outputs.md): Traefik and Caddy file
-  outputs, Docker/Rancher target hosts, and no-proxy usage.
+- [Proxy Outputs](docs/integrations/proxy-outputs.md): Traefik, Caddy, nginx,
+  and HAProxy file outputs, Docker/Rancher target hosts, and no-proxy usage.
 - [Optional Output Patterns](docs/integrations/optional-output-patterns.md):
   custom output boundaries, TCP alias candidates, Kubernetes/IngressRoute
   manifests, container workflows, and JSON bridge patterns.
