@@ -67,7 +67,7 @@ including output summaries, run history, hook visibility, and all service fields
 bindport status --json
 ```
 
-The top-level `schema_version` is currently `0.4`; pre-1.0 releases may extend
+The top-level `schema_version` is currently `0.7`; pre-1.0 releases may extend
 the schema, but existing fields should remain stable within a major version.
 The checked-in JSON Schema for the current payload is
 [status.schema.json](../status.schema.json).

@@ -532,6 +532,44 @@ status/open behavior from a fresh checkout or clean worktree:
     reviewed checksummed release assets.
 19. Run `mise run ci` on the release branch before requesting review.
 
+## v0.7.0 Manual Acceptance
+
+Before merging the v0.7.0 release prep PR, smoke test output integrations and
+diagnostics from a fresh checkout or clean worktree:
+
+1. Build the release binary with `cargo build --release --locked`.
+2. Run `bindport status --json` and confirm `schema_version` is `0.7` and the
+   payload matches [status.schema.json](../status.schema.json).
+3. Start `bindport dashboard serve` and confirm `/api/status` returns the same
+   schema version and payload shape as `bindport status --json`.
+4. Run `bindport templates list` and confirm `bindport-caddy`,
+   `bindport-json-snapshot`, `bindport-traefik`, and `bindport-env-local`
+   appear.
+5. Configure Caddy and JSON snapshot outputs, run `bindport doctor outputs`,
+   and confirm both templates resolve without writing files.
+6. Run a service with route metadata, then run `bindport render --dry-run`,
+   `bindport render --diff`, and `bindport render`; confirm dry-run and diff do
+   not write files, while render writes DB-owned output files.
+7. Run `bindport status --json` and confirm top-level output summaries,
+   per-service output state, and the legacy `proxy` alias for Traefik output
+   are present when relevant.
+8. Run `bindport list` and `bindport list --json`; confirm registry-wide
+   grouping includes services from more than one project or config root when
+   present.
+9. Run `bindport registry export` and confirm output ownership scope fields are
+   present, including output root, scope, config root, and worktree context when
+   available.
+10. Render the same output name from two worktrees or temp config roots into
+    separate generated directories and confirm neither worktree overwrites the
+    other's ownership rows.
+11. Delete or move a generated output root, then run `bindport doctor outputs`
+    and confirm stale or foreign ownership rows are reported as diagnostics
+    without blocking current-scope rendering.
+12. Set `BINDPORT_LOG=debug` before `bindport run <service>` and confirm render
+    diagnostics identify selected outputs, roots, route counts, ownership rows,
+    and lifecycle cleanup without printing child env or hook payloads.
+13. Run `mise run ci` on the release branch before requesting review.
+
 ## Versioning
 
 - `0.0.x`: unreleased bootstrap only.
