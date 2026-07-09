@@ -66,6 +66,10 @@ Project maintainers should read:
   file-provider snippets and `.env.local` files.
 - [Proxy Outputs](integrations/proxy-outputs.md) for Traefik, Caddy, container
   target hosts, and no-proxy usage.
+- [Optional Output Patterns](integrations/optional-output-patterns.md) for TCP
+  alias candidates, Kubernetes/IngressRoute manifests, container workflows,
+  JSON bridge files, and the boundary between generated files and external
+  tools.
 - [Hooks and Trust](integrations/hooks.md) for lifecycle events and local trust decisions.
 
 Operators and agents should read:

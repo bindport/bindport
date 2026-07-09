@@ -158,7 +158,12 @@ env.BINDPORT_SERVICE = "{service}"
 
 Use output templates for files that tools reread after startup, such as
 `.env.local`. Startup-critical values should still be passed through service
-`command`, `args`, `env`, or one-off `--env`.
+`command`, `args`, `env`, or one-off `--env`. If the consumer is a proxy,
+forwarder, local cluster, or another file-watching tool, keep the run command
+focused on starting the service and use an owned output template for the
+consumer-facing file. See
+[Optional Output Patterns](../integrations/optional-output-patterns.md) for
+examples and boundaries.
 
 ## Signals And Exit Codes
 

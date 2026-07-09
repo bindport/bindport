@@ -150,6 +150,12 @@ Traefik or another consumer at the generated project-relative directory instead
 of making BindPort render to an arbitrary absolute path. Output targets are
 relative text file paths under the output root.
 
+Use built-in outputs for the common Traefik, Caddy, JSON snapshot, and env-file
+cases. When a project needs to feed another local tool, keep the same owned-file
+contract and use a custom text template; see
+[Optional Output Patterns](../integrations/optional-output-patterns.md) for TCP
+alias, Kubernetes manifest, Docker/container, and JSON bridge patterns.
+
 Hook settings:
 
 ```toml
@@ -193,6 +199,10 @@ BindPort lifecycle metadata through `BINDPORT_HOOK_EVENTS`,
 `BINDPORT_HOOK_SOURCES`, and `BINDPORT_HOOK_CONTEXT`. Other parent environment
 values are not inherited, and secret values are not copied into hook metadata or
 the registry.
+
+For output integrations, prefer tools that watch generated files. Add hooks only
+when the external tool needs an explicit reload or apply step, and keep that
+command behind local trust.
 
 Unknown top-level keys are reported by `bindport doctor`. Service-level
 `health_url` is stored with each run. Active loopback `http://` health URLs are
