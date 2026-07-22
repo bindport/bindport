@@ -19,10 +19,16 @@ BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
 - `bindport run [service] [-- <command>]` runs a configured service or one-off
   override.
 - `bindport reserve [service]` holds a port for an external process.
+- `bindport reserve --all` idempotently prepares every named service in the
+  discovered project and current worktree without starting children or owning
+  sockets. All new reservations commit together or not at all.
 - `bindport release [service|port]` releases a reserved port.
 - `bindport status [--json]` reads registry state.
 - `bindport list [--json]` groups registry services by project.
 - `bindport open [service]` prints or opens the best URL.
+- `bindport port <service> [--project PROJECT]` prints only the decimal port and
+  newline for one active or reserved service in the current worktree scope.
+  Missing, stopped, stale, and ambiguous matches fail.
 - `bindport clean` removes stopped and stale registry entries.
 - `bindport init` creates project or user fallback config.
 - `bindport config explain` explains config discovery and identity sources.
@@ -60,11 +66,14 @@ Registry states are `active`, `reserved`, `stopped`, and `stale`. The registry
 is local state stored under `$XDG_STATE_HOME/bindport/registry.sqlite` or
 `~/.local/state/bindport/registry.sqlite`.
 
-Agents and scripts should inspect `bindport status --json` for normal registry
-detail or `bindport list --json` for grouped project/service inventory instead
-of parsing human output or hardcoding ports. Use `bindport registry export` for
-debug/backup snapshots that need raw lease, run, output ownership, and render
-state rows. The status JSON schema is in `docs/status.schema.json`.
+Agents and scripts should use `bindport port <service>` for exact decimal port
+output, `bindport status --json` for normal registry detail, or
+`bindport list --json` for grouped project/service inventory instead of parsing
+human output or hardcoding ports. Port lookup considers only active or reserved
+services in the selected project and current worktree. Use
+`bindport registry export` for debug/backup snapshots that need raw lease, run,
+output ownership, and render state rows. The status JSON schema is in
+`docs/status.schema.json`.
 
 ## Outputs And Templates
 
@@ -122,8 +131,10 @@ stopped and stale entries but cannot approve hooks.
 
 ## Agent Safety Rules
 
-Agents should use existing project scripts or `bindport run <service>`, run
-`bindport config validate` after config changes, discover URLs through
+Agents should use existing project scripts or `bindport run <service>`, use
+`bindport reserve --all` when all configured addresses are needed before
+startup, run `bindport config validate` after config changes, discover ports
+through `bindport port <service>`, discover URLs through
 `bindport status --json` or `bindport open <service> --print`, and avoid editing
 machine-local overrides or generated files unless explicitly asked. Agents
 should not run hook trust, deny, reset, or hook commands without user approval.

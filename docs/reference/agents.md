@@ -15,8 +15,11 @@ instruction file:
 - Use existing project scripts or `bindport run <service>` instead of hardcoding
   development ports.
 - Run `bindport config validate` after changing `.bindport.*` config.
-- Use `bindport status --json` or `bindport open <service> --print` to discover
-  active service URLs.
+- Use `bindport reserve --all` to prepare every configured service without
+  starting children.
+- Use `bindport port <service>` for an exact machine-readable active or reserved
+  port, and `bindport status --json` or `bindport open <service> --print` for
+  service details and active URLs.
 - Do not edit `.bindport.local.*`, `bindport.local.*`, generated output files,
   or `.env.local` unless explicitly asked.
 - Do not run `bindport hooks trust`, `bindport hooks deny`, or hook commands
@@ -66,9 +69,17 @@ bindport doctor
 Recommended service flow:
 
 ```sh
+bindport reserve --all
+bindport port web
 bindport run web
 bindport open web --print
 ```
+
+`reserve --all` idempotently prepares the named services in the discovered
+project and current worktree. New reservations commit all-or-nothing; the
+command starts no children and owns no sockets. `port` prints only a decimal
+port and newline for one active or reserved service in that scope; missing,
+stopped, stale, and ambiguous matches fail.
 
 Recommended cleanup flow:
 

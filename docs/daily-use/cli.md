@@ -12,11 +12,13 @@ scripts.
 | `bindport -- <command>` | Run a one-off command with an assigned `PORT`. |
 | `bindport run [service] [-- <command>]` | Run a configured service or override it for one run. |
 | `bindport reserve [service]` | Hold a port for an externally managed process. |
+| `bindport reserve --all` | Prepare ports for every named service in the discovered project config. |
 | `bindport release [service\|port]` | Release a reserved port. |
 | `bindport status [--json]` | Show active, reserved, stopped, and stale registry state. |
 | `bindport list [--json]` | Group registry services by project for inventory views. |
 | `bindport registry export` | Print a full registry debug/backup JSON snapshot. |
 | `bindport open [service]` | Print or open the best URL for an active service. |
+| `bindport port <service> [--project PROJECT]` | Print an active or reserved service port. |
 | `bindport clean` | Remove stopped and stale registry entries. |
 | `bindport init` | Create project or user fallback config. |
 | `bindport config explain` | Show discovered config, local overrides, and identity sources. |
@@ -134,6 +136,31 @@ bindport reserve web
 bindport release web
 bindport release 29123
 ```
+
+Prepare every named service in the discovered project config before starting
+processes:
+
+```sh
+bindport reserve --all
+```
+
+`reserve --all` is scoped to the current project and worktree. It preserves
+matching active services and reservations, allocates every missing configured
+service, and commits all new reservations as one idempotent, all-or-nothing
+registry operation. It starts no children and owns no OS sockets; reservations
+coordinate BindPort registry clients only.
+
+Print one prepared or running service port for scripts:
+
+```sh
+bindport port web
+bindport port web --project example
+```
+
+`port` uses the same current-worktree project and service scope for active and
+reserved services. On success, stdout is exactly the decimal port followed by a
+newline. Missing, stopped, stale, or ambiguous matches fail instead of printing
+a fallback port or selecting another project or worktree.
 
 Clean stopped and stale entries:
 
