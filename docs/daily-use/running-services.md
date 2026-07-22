@@ -63,9 +63,18 @@ Run it with:
 bindport run web
 ```
 
-BindPort changes into the service `path` before spawning the child. The route
-metadata is stored in the registry and becomes available to status, dashboard,
-templates, hooks, and `bindport open`.
+BindPort resolves the service `path` relative to the discovered config and uses
+that directory as the child working directory. A missing path or a path that is
+not a directory fails before the child starts. The actual child directory is
+stored in the registry and becomes available to status, dashboard, templates,
+hooks, and `bindport open`.
+
+For configured paths, BindPort prepends each existing `node_modules/.bin`
+directory from the service directory upward. The nearest directory wins, and
+the ambient `PATH` follows the local entries. Lookup stops at the nearest
+package-workspace root inside the configured project, or at the project config
+directory when no nested workspace is detected. Services without `path` keep
+the invoker's working directory and ambient executable lookup unchanged.
 
 Configured services are the main team workflow. Once a service is in config,
 developers and agents can use the same command:
