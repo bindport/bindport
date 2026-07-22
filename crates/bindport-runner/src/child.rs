@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
+    ffi::OsString,
     io,
+    path::Path,
     process::{Child, Command, ExitStatus, Stdio},
 };
 
@@ -132,6 +134,20 @@ pub fn spawn_child_on_port(
     port: u16,
     extra_env: &[(String, String)],
 ) -> Result<RunningChild, RunnerError> {
+    let extra_env = extra_env
+        .iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect::<Vec<_>>();
+
+    spawn_child_on_port_with_context(command, port, None, &extra_env)
+}
+
+pub fn spawn_child_on_port_with_context(
+    command: &[String],
+    port: u16,
+    cwd: Option<&Path>,
+    extra_env: &[(OsString, OsString)],
+) -> Result<RunningChild, RunnerError> {
     let (program, args) = command.split_first().ok_or(RunnerError::NoCommand)?;
 
     let mut signal_forwarding =
@@ -144,6 +160,9 @@ pub fn spawn_child_on_port(
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    if let Some(cwd) = cwd {
+        process.current_dir(cwd);
+    }
     process.envs(extra_env.iter().map(|(name, value)| (name, value)));
     prepare_child_signal_mask(&mut process, &signal_forwarding);
 

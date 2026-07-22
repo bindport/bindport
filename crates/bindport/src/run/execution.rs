@@ -24,6 +24,10 @@ pub(crate) fn run_wrapped_command(command: &[String], options: RunOptions) -> Ex
             print_config_error(&error);
             ExitCode::FAILURE
         }
+        Err(RunCommandError::ExecutionContext(error)) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
         Err(RunCommandError::Template(error)) => {
             eprintln!("bindport: {error}");
             ExitCode::FAILURE
@@ -35,6 +39,104 @@ pub(crate) fn run_wrapped_command(command: &[String], options: RunOptions) -> Ex
     }
 }
 
+struct ServiceExecutionContext {
+    cwd: PathBuf,
+    local_bin_dirs: Vec<PathBuf>,
+}
+
+fn resolve_service_execution_context(
+    invoker_cwd: &Path,
+    config: &ResolvedConfig,
+    service_name: &str,
+    service_config: Option<&ServiceConfig>,
+) -> Result<ServiceExecutionContext, ServiceExecutionContextError> {
+    let Some(service_path) = service_config.and_then(|service| service.path.as_deref()) else {
+        return Ok(ServiceExecutionContext {
+            cwd: invoker_cwd
+                .canonicalize()
+                .unwrap_or_else(|_| invoker_cwd.to_path_buf()),
+            local_bin_dirs: Vec::new(),
+        });
+    };
+    let config_root = config
+        .loaded
+        .as_ref()
+        .and_then(|loaded| loaded.path.parent())
+        .unwrap_or(invoker_cwd);
+    let config_root = config_root
+        .canonicalize()
+        .unwrap_or_else(|_| config_root.to_path_buf());
+    let configured_path = config_root.join(service_path);
+    let service_root = configured_path.canonicalize().map_err(|source| {
+        ServiceExecutionContextError::InvalidPath {
+            service: service_name.to_string(),
+            path: configured_path.clone(),
+            source,
+        }
+    })?;
+    if !service_root.is_dir() {
+        return Err(ServiceExecutionContextError::NotDirectory {
+            service: service_name.to_string(),
+            path: service_root,
+        });
+    }
+    if !service_root.starts_with(&config_root) {
+        return Err(ServiceExecutionContextError::OutsideProject {
+            service: service_name.to_string(),
+            path: service_root,
+            project_root: config_root,
+        });
+    }
+
+    let boundary = package_workspace_root(&service_root, &config_root).unwrap_or(config_root);
+    let mut local_bin_dirs = Vec::new();
+    for directory in service_root.ancestors() {
+        let bin_dir = directory.join("node_modules").join(".bin");
+        if bin_dir.is_dir() {
+            local_bin_dirs.push(bin_dir);
+        }
+        if directory == boundary {
+            break;
+        }
+    }
+
+    Ok(ServiceExecutionContext {
+        cwd: service_root,
+        local_bin_dirs,
+    })
+}
+
+fn child_environment(
+    configured_env: &[(String, String)],
+    local_bin_dirs: &[PathBuf],
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, ServiceExecutionContextError> {
+    let mut child_env = configured_env
+        .iter()
+        .map(|(name, value)| (name.into(), value.into()))
+        .collect::<Vec<_>>();
+    if local_bin_dirs.is_empty() {
+        return Ok(child_env);
+    }
+
+    let configured_path = configured_env
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| std::ffi::OsString::from(value));
+    let ambient_path = configured_path.or_else(|| env::var_os("PATH"));
+    let path_entries = local_bin_dirs.iter().cloned().chain(
+        ambient_path
+            .as_deref()
+            .into_iter()
+            .flat_map(env::split_paths),
+    );
+    let path = env::join_paths(path_entries)
+        .map_err(|source| ServiceExecutionContextError::InvalidPathEnvironment { source })?;
+    child_env.retain(|(name, _)| name != "PATH");
+    child_env.push(("PATH".into(), path));
+
+    Ok(child_env)
+}
+
 pub(crate) fn run_wrapped_command_result(
     command: &[String],
     options: &RunOptions,
@@ -43,6 +145,8 @@ pub(crate) fn run_wrapped_command_result(
     let config = resolve_config(&cwd)?;
     let identity = resolve_run_identity(&cwd, command, options, &config);
     let service_config = configured_service(&config, &identity);
+    let execution_context =
+        resolve_service_execution_context(&cwd, &config, &identity.service, service_config)?;
     let run_templates = resolve_run_templates(command, options, service_config);
     let requires_output_preflight = has_blocking_auto_outputs(&config)?;
     let mut registry = open_optional_registry();
@@ -97,6 +201,7 @@ pub(crate) fn run_wrapped_command_result(
         let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
         let run_metadata = resolve_run_metadata(&identity, port, &run_templates)?;
         let child_command = resolved_child_command(command, &run_metadata)?;
+        let child_env = child_environment(&run_metadata.env, &execution_context.local_bin_dirs)?;
         let command_display = child_command.join(" ");
         if requires_output_preflight {
             let Some(registry) = registry.as_mut() else {
@@ -105,11 +210,21 @@ pub(crate) fn run_wrapped_command_result(
                 ))
                 .into());
             };
-            let pending_route =
-                pending_route_record(&identity, port, &run_metadata, &command_display, &cwd);
+            let pending_route = pending_route_record(
+                &identity,
+                port,
+                &run_metadata,
+                &command_display,
+                &execution_context.cwd,
+            );
             preflight_blocking_outputs(&cwd, &config, registry, pending_route)?;
         }
-        let mut child = spawn_child_on_port(&child_command, port, &run_metadata.env)?;
+        let mut child = spawn_child_on_port_with_context(
+            &child_command,
+            port,
+            Some(&execution_context.cwd),
+            &child_env,
+        )?;
         let attempt_started_at = Instant::now();
         let run = RunStart {
             project: identity.project.clone(),
@@ -122,7 +237,7 @@ pub(crate) fn run_wrapped_command_result(
             health_url: run_metadata.health_url.clone(),
             pid: child.pid(),
             command: command_display.clone(),
-            cwd: cwd.clone(),
+            cwd: execution_context.cwd.clone(),
         };
 
         let started = if let Some(registry) = registry.as_mut() {

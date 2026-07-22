@@ -25,6 +25,7 @@ pub use identity::*;
 pub(crate) use paths::*;
 pub use ports::*;
 pub use validation::*;
+pub use workspace::package_workspace_root;
 pub(crate) use workspace::*;
 
 #[cfg(test)]

@@ -32,6 +32,12 @@ change process loading or tool configuration, including `PATH`, `LD_PRELOAD`,
 `LD_LIBRARY_PATH`, `DYLD_*`, `NODE_OPTIONS`, `BASH_ENV`, `ENV`, language
 package path variables, shell path variables, and `GIT_CONFIG_*`.
 
+For a configured service path, BindPort constructs the child `PATH` internally.
+It prepends only existing `node_modules/.bin` directories between the service
+and its bounded project or nested package-workspace root, then preserves the
+ambient `PATH`. It never searches above that boundary; this does not allow
+checked-in config to supply an arbitrary `PATH`.
+
 ## Registry State
 
 Registry state lives outside the project by default:
