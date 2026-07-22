@@ -26,6 +26,7 @@ mod lease;
 mod outputs;
 mod process;
 mod schema;
+mod service;
 mod status;
 
 pub use cleanup::*;
@@ -38,6 +39,7 @@ pub(crate) use health::*;
 pub use lease::*;
 pub use outputs::*;
 pub(crate) use process::*;
+pub use service::*;
 pub use status::*;
 
 #[cfg(test)]

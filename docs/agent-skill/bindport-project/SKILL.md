@@ -15,11 +15,19 @@ development ports when BindPort config or scripts already describe the service.
 2. Run `bindport config explain` to confirm which config and service match the
    current directory.
 3. Run `bindport config validate` after editing BindPort config.
-4. Use `bindport run <service>` to run configured services.
-5. Use `bindport status --json`, `bindport list --json`, or
-   `bindport open <service> --print` to find active service URLs.
-6. Use `bindport registry export` only for debug/backup snapshots or output
+4. Use `bindport reserve --all` when every named configured service needs a
+   stable port before any child starts.
+5. Use `bindport run <service>` to run configured services.
+6. Use `bindport port <service>` for an exact active or reserved port, or
+   `bindport status --json`, `bindport list --json`, and
+   `bindport open <service> --print` for broader discovery.
+7. Use `bindport registry export` only for debug/backup snapshots or output
    ownership investigations; prefer `status --json` for normal automation.
+
+`reserve --all` is idempotent and scoped to the discovered project and current
+worktree; new reservations commit all-or-nothing, and it neither starts
+children nor owns sockets. `port` prints only the decimal port and newline, and
+fails for missing, stopped, stale, or ambiguous matches.
 
 ## Config Rules
 
@@ -56,6 +64,8 @@ bindport doctor outputs
 bindport status --json
 bindport list --json
 bindport registry export
+bindport reserve --all
+bindport port <service>
 bindport open <service> --print
 bindport run <service>
 bindport render --dry-run

@@ -14,6 +14,7 @@ mod health;
 mod leases;
 mod outputs;
 mod registry;
+mod service;
 mod status;
 
 static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());

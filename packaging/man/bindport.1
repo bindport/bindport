@@ -37,6 +37,10 @@ Shortcut for wrapping a command with an assigned
 .B reserve [service]
 Hold a BindPort lease without running a child process.
 .TP
+.B reserve --all
+Atomically reserve ports for every named service in the discovered project
+config, scoped to the current worktree.
+.TP
 .B release [service|port]
 Release a reserved lease by service identity or port.
 .TP
@@ -47,6 +51,10 @@ for machine-readable output.
 .TP
 .B open [service]
 Print or open the best URL for a service.
+.TP
+.B port <service> [--project PROJECT]
+Print only the decimal port for one active or reserved service in the current
+project and worktree scope.
 .TP
 .B clean [options]
 Remove stopped and stale registry entries. Stale cleanup requires confirmation
