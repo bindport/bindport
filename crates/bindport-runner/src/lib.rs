@@ -8,7 +8,8 @@ mod signals;
 pub const PORT_ENV_VAR: &str = "PORT";
 
 pub use child::{
-    RunningChild, run_child, spawn_child, spawn_child_on_port, spawn_child_with_hints,
+    RunningChild, run_child, spawn_child, spawn_child_on_port, spawn_child_on_port_with_context,
+    spawn_child_with_hints,
 };
 pub use error::RunnerError;
 pub use ports::{AllocationHints, allocate_port, allocate_port_with_hints, is_port_available};
@@ -29,6 +30,7 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::{
+        ffi::OsString,
         fs,
         sync::{Mutex, MutexGuard},
         thread,
@@ -200,6 +202,35 @@ mod tests {
         let status = run_child(&command, range, &[]).expect("run child");
 
         assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_child_context_sets_working_directory_and_environment() {
+        let _lock = signal_forwarding_test_lock();
+        let cwd = temp_test_path("child-context-cwd");
+        fs::create_dir_all(&cwd).expect("create child cwd");
+        let cwd = cwd.canonicalize().expect("canonical child cwd");
+        let output_path = temp_test_path("child-context-output");
+        let command = vec![
+            String::from("sh"),
+            String::from("-c"),
+            String::from("printf '%s|%s' \"$(pwd -P)\" \"$BINDPORT_TEST_ENV\" > \"$1\""),
+            String::from("bindport-runner-context-test"),
+            output_path.display().to_string(),
+        ];
+        let extra_env = vec![(
+            OsString::from("BINDPORT_TEST_ENV"),
+            OsString::from("context-value"),
+        )];
+        let mut child = spawn_child_on_port_with_context(&command, 29_000, Some(&cwd), &extra_env)
+            .expect("spawn child with context");
+
+        assert!(child.wait().expect("wait for child").success());
+        assert_eq!(
+            fs::read_to_string(output_path).expect("read child output"),
+            format!("{}|context-value", cwd.display())
+        );
     }
 
     #[cfg(unix)]

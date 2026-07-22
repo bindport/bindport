@@ -53,6 +53,10 @@ pub(crate) fn package_inference(cwd: &Path, git: Option<&GitIdentity>) -> Packag
     PackageInference { root, nearest }
 }
 
+pub fn package_workspace_root(cwd: &Path, boundary: &Path) -> Option<PathBuf> {
+    nearest_workspace_root(cwd, Some(boundary)).map(|workspace| workspace.path)
+}
+
 pub(crate) fn nearest_workspace_root(cwd: &Path, boundary: Option<&Path>) -> Option<WorkspaceRoot> {
     let cwd = absolute_path(cwd, cwd.to_path_buf());
 

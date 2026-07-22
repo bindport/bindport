@@ -31,7 +31,8 @@ use bindport_core::{
     HookCommandConfig, HookEvent, IdentitySources, LoadedConfig, OutputConfigError,
     OutputDeleteState, OutputFailurePolicy, PortRange, SERVICE_NAME, ServiceConfig,
     ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
-    is_restricted_service_env_name, normalize_branch_label, resolve_identity,
+    is_restricted_service_env_name, normalize_branch_label, package_workspace_root,
+    resolve_identity,
 };
 use bindport_dashboard::{
     DashboardCleanCallback, DashboardOptions, DashboardServer, DashboardStatusCallback,
@@ -44,7 +45,8 @@ use bindport_registry::{
     status_service_route_key,
 };
 use bindport_runner::{
-    AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
+    AllocationHints, RunnerError, allocate_port_with_hints, is_port_available,
+    spawn_child_on_port_with_context,
 };
 use sha2::{Digest, Sha256};
 
