@@ -37,10 +37,11 @@ use bindport_dashboard::{
     DashboardCleanCallback, DashboardOptions, DashboardServer, DashboardStatusCallback,
 };
 use bindport_registry::{
-    CleanState, CleanSummary, OutputFileRecord, OutputFileScope, OutputFileStatus,
-    REGISTRY_PATH_ENV, Registry, RegistryError, RegistryExportOutputFile, ReserveLease,
-    ReservedLease, RunStart, StartedRun, StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE,
-    default_registry_path, status_service_route_key,
+    BatchReservationError, CleanState, CleanSummary, OutputFileRecord, OutputFileScope,
+    OutputFileStatus, REGISTRY_PATH_ENV, Registry, RegistryError, RegistryExportOutputFile,
+    RegistryService, ReservationCandidate, ReserveLease, ReservedLease, RunStart, StartedRun,
+    StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE, default_registry_path,
+    status_service_route_key,
 };
 use bindport_runner::{
     AllocationHints, RunnerError, allocate_port_with_hints, is_port_available, spawn_child_on_port,
@@ -135,6 +136,7 @@ fn dispatch(args: impl IntoIterator<Item = String>) -> ExitCode {
         Some("list") => run_list_command(&args[1..]),
         Some("registry") => run_registry_command(&args[1..]),
         Some("open") => run_open_command(&args[1..]),
+        Some("port") => run_port_command(&args[1..]),
         Some("reserve") => run_reserve_command(&args[1..]),
         Some("release") => run_release_command(&args[1..]),
         Some("clean") => clean_registry(&args[1..]),

@@ -10,6 +10,7 @@ complete -c bindport -n '__fish_use_subcommand' -a reserve -d 'Hold a port witho
 complete -c bindport -n '__fish_use_subcommand' -a release -d 'Release a reserved port'
 complete -c bindport -n '__fish_use_subcommand' -a status -d 'Show registry status'
 complete -c bindport -n '__fish_use_subcommand' -a open -d 'Print or open the best service URL'
+complete -c bindport -n '__fish_use_subcommand' -a port -d 'Print an active or reserved service port'
 complete -c bindport -n '__fish_use_subcommand' -a clean -d 'Remove stopped and stale registry entries'
 complete -c bindport -n '__fish_use_subcommand' -a config -d 'Explain or validate config'
 complete -c bindport -n '__fish_use_subcommand' -a hooks -d 'Inspect or manage hook trust'
@@ -23,12 +24,14 @@ complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l env -r -d '
 complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l hostname -r -d 'Set route hostname metadata'
 complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l route-url -r -d 'Set route URL metadata'
 complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l health-url -r -d 'Set service health check URL metadata'
+complete -c bindport -n '__fish_seen_subcommand_from reserve' -l all -d 'Reserve every named configured service'
 
 complete -c bindport -n '__fish_seen_subcommand_from status' -l json -d 'Print machine-readable status'
 
 complete -c bindport -n '__fish_seen_subcommand_from open' -l project -r -d 'Disambiguate services with the same name'
 complete -c bindport -n '__fish_seen_subcommand_from open' -l browser -d 'Open the URL with the system browser'
 complete -c bindport -n '__fish_seen_subcommand_from open' -l print -d 'Print without launching a browser'
+complete -c bindport -n '__fish_seen_subcommand_from port' -l project -r -d 'Select the project in the current worktree'
 
 complete -c bindport -n '__fish_seen_subcommand_from clean' -l dry-run -d 'Show what would be removed without deleting entries'
 complete -c bindport -n '__fish_seen_subcommand_from clean' -l stopped -d 'Remove stopped entries only'

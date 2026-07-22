@@ -9,9 +9,10 @@ _bindport()
     local cur prev words cword
     _init_completion -n : || return
 
-    local commands="run reserve release status open clean config hooks doctor dashboard render templates init"
+    local commands="run reserve release status open port clean config hooks doctor dashboard render templates init"
     local global_opts="--help -h --version"
     local run_opts="--env --hostname --route-url --health-url --help -h"
+    local reserve_opts="$run_opts --all"
     local clean_opts="--dry-run --stopped --stale --all --json --yes -y --help -h"
     local dashboard_opts="serve start status stop --host --port --auth --auth-required --no-auth --register-service --no-register-service --token --token-env --allowed-host --static-dir --help -h"
     local hook_commands="status trust deny reset"
@@ -38,7 +39,7 @@ _bindport()
             COMPREPLY=($(compgen -W "$source_values" -- "$cur"))
             return
             ;;
-        --env | --hostname | --route-url | --health-url | --host | --port | --token | --token-env | --allowed-host | --static-dir)
+        --env | --hostname | --route-url | --health-url | --project | --host | --port | --token | --token-env | --allowed-host | --static-dir)
             return
             ;;
     esac
@@ -48,8 +49,11 @@ _bindport()
         "" | -*)
             COMPREPLY=($(compgen -W "$commands $global_opts" -- "$cur"))
             ;;
-        run | reserve)
+        run)
             COMPREPLY=($(compgen -W "$run_opts" -- "$cur"))
+            ;;
+        reserve)
+            COMPREPLY=($(compgen -W "$reserve_opts" -- "$cur"))
             ;;
         release)
             COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
@@ -88,6 +92,9 @@ _bindport()
             ;;
         status | open)
             COMPREPLY=($(compgen -W "--json --project --browser --print --help -h" -- "$cur"))
+            ;;
+        port)
+            COMPREPLY=($(compgen -W "--project --help -h" -- "$cur"))
             ;;
         *)
             COMPREPLY=($(compgen -W "$commands $global_opts" -- "$cur"))

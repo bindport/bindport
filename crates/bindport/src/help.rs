@@ -6,12 +6,14 @@ pub(crate) fn print_help() {
     println!("  bindport run [service] [options] [-- <command>]");
     println!("                                  Run a command or configured service command");
     println!("  bindport reserve [service]     Hold a port without running a child process");
+    println!("  bindport reserve --all         Hold ports for all configured services");
     println!("  bindport release [service|port]");
     println!("                                  Release a reserved port");
     println!("  bindport status [--json]     Show registry status");
     println!("  bindport list [--json]       List projects and services in the registry");
     println!("  bindport registry export     Export registry debug JSON");
     println!("  bindport open [service]      Print or open the best service URL");
+    println!("  bindport port <service>      Print the scoped active or reserved port");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport config explain      Explain resolved config and identity sources");
     println!("  bindport config validate     Validate config structure");
@@ -41,6 +43,7 @@ pub(crate) fn print_reserve_help() {
     println!();
     println!("Usage:");
     println!("  bindport reserve [service] [options]");
+    println!("  bindport reserve --all");
     println!("  bindport release [service|port]");
     println!();
     println!("Reserve options:");
@@ -70,6 +73,16 @@ pub(crate) fn print_open_help() {
     println!("  --project <project>    Disambiguate services with the same name");
     println!("  --browser              Open the URL with the system browser and print it");
     println!("  --print                Print the URL without launching a browser (default)");
+}
+
+pub(crate) fn print_port_help() {
+    println!("BindPort service port lookup");
+    println!();
+    println!("Usage:");
+    println!("  bindport port <service> [--project PROJECT]");
+    println!();
+    println!("Options:");
+    println!("  --project <project>    Select the project in the current worktree");
 }
 
 pub(crate) fn print_list_help() {

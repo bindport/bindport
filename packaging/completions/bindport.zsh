@@ -7,6 +7,7 @@ commands=(
   'release:release a reserved port'
   'status:show registry status'
   'open:print or open the best service URL'
+  'port:print an active or reserved service port'
   'clean:remove stopped and stale registry entries'
   'config:explain or validate configuration'
   'hooks:inspect or manage hook trust'
@@ -59,8 +60,11 @@ case "$state" in
     ;;
   args)
     case "$words[2]" in
-      run|reserve)
+      run)
         _arguments $run_opts
+        ;;
+      reserve)
+        _arguments $run_opts '--all[reserve every named configured service]'
         ;;
       release)
         _arguments '1:service or port:'
@@ -70,6 +74,9 @@ case "$state" in
         ;;
       open)
         _arguments '--project[disambiguate project]:project:' '--browser[open the URL with the system browser]' '--print[print without launching a browser]' '1:service:'
+        ;;
+      port)
+        _arguments '--project[select the project in the current worktree]:project:' '1:service:'
         ;;
       clean)
         _arguments $clean_opts

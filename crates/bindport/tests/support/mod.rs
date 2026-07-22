@@ -15,9 +15,9 @@ pub use std::{
 
 pub use bindport_core::{
     BINDPORT_PROJECT_ENV, BINDPORT_SERVICE_ENV, DEFAULT_PORT_RANGE, DEFAULT_SKIP_PORTS,
-    FALLBACK_CONFIG_FILE, SERVICE_NAME, ServiceIdentity,
+    FALLBACK_CONFIG_FILE, IdentitySources, SERVICE_NAME, ServiceIdentity, resolve_identity,
 };
-pub use bindport_registry::{REGISTRY_PATH_ENV, Registry, RunStart};
+pub use bindport_registry::{REGISTRY_PATH_ENV, Registry, ReserveLease, RunStart};
 pub use serde_json::Value;
 
 mod command;

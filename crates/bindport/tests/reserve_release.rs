@@ -129,6 +129,115 @@ fn reserve_prunes_oldest_stale_leases_under_range_pressure() {
 }
 
 #[test]
+fn reserve_all_records_every_named_service_idempotently_with_route_metadata() {
+    let registry_path = temp_registry_path("reserve-all");
+    let root = temp_test_dir("reserve-all-root");
+    let range_start = free_loopback_port().clamp(20_000, 65_520);
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"all-project\"\ndefault_range = \"{range_start}-{}\"\nskip_ports = []\n\n[[services]]\nname = \"web\"\nhostname = \"{{service}}.localhost\"\nroute_url = \"http://{{hostname}}:{{port}}\"\nhealth_url = \"{{route_url}}/health\"\n\n[[services]]\nname = \"api\"\nhostname = \"{{service}}.localhost\"\nroute_url = \"http://{{hostname}}:{{port}}\"\nhealth_url = \"{{route_url}}/health\"\n",
+            range_start + 7
+        ),
+    )
+    .expect("write project config");
+    let root = fs::canonicalize(root).expect("canonical root");
+
+    let first = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve", "--all"])
+        .output()
+        .expect("reserve all");
+    assert!(
+        first.status.success(),
+        "reserve all failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve", "--all"])
+        .output()
+        .expect("reserve all again");
+    assert!(second.status.success());
+    assert_eq!(second.stdout, first.stdout);
+
+    let status_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["status", "--json"])
+        .output()
+        .expect("status");
+    let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
+    let services = status["services"].as_array().expect("services");
+    assert_eq!(services.len(), 2);
+    assert!(status["runs"].as_array().expect("runs").is_empty());
+    for service in services {
+        assert_eq!(service["project"], "all-project");
+        assert_eq!(service["state"], "reserved");
+        let name = service["service"].as_str().expect("service name");
+        assert_eq!(service["hostname"], format!("{name}.localhost"));
+        assert_eq!(
+            service["health_url"],
+            format!(
+                "http://{name}.localhost:{}/health",
+                service["port"].as_u64().expect("port")
+            )
+        );
+    }
+
+    let export_output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["registry", "export"])
+        .output()
+        .expect("registry export");
+    let export = serde_json::from_slice::<Value>(&export_output.stdout).expect("export json");
+    assert_eq!(export["leases"].as_array().expect("leases").len(), 2);
+}
+
+#[test]
+fn reserve_all_keeps_same_service_names_isolated_across_worktrees() {
+    let registry_path = temp_registry_path("reserve-all-worktrees");
+    let first_root = temp_test_dir("reserve-all-first-root");
+    let second_root = temp_test_dir("reserve-all-second-root");
+    let range_start = free_loopback_port().clamp(20_000, 65_520);
+    let config = format!(
+        "project = \"worktree-project\"\ndefault_range = \"{range_start}-{}\"\nskip_ports = []\n\n[[services]]\nname = \"web\"\n",
+        range_start + 7
+    );
+    fs::write(first_root.join(".bindport.toml"), &config).expect("first config");
+    fs::write(second_root.join(".bindport.toml"), config).expect("second config");
+    let first_root = fs::canonicalize(first_root).expect("canonical first root");
+    let second_root = fs::canonicalize(second_root).expect("canonical second root");
+
+    for root in [&first_root, &second_root] {
+        let output = bindport_with_registry(&registry_path)
+            .current_dir(root)
+            .args(["reserve", "--all"])
+            .output()
+            .expect("reserve all");
+        assert!(
+            output.status.success(),
+            "reserve all failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let lookup = |root: &Path| {
+        let output = bindport_with_registry(&registry_path)
+            .current_dir(root)
+            .args(["port", "web"])
+            .output()
+            .expect("port lookup");
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .expect("port stdout")
+            .trim()
+            .parse::<u16>()
+            .expect("decimal port")
+    };
+
+    assert_ne!(lookup(&first_root), lookup(&second_root));
+}
+
+#[test]
 fn release_frees_reserved_service_for_future_runs() {
     let registry_path = temp_registry_path("release-service");
     let root = temp_test_dir("release-service-root");
