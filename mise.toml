@@ -5,15 +5,15 @@ lockfile = true
 # `default` rustup profile is NOT used; mise installs minimal. rustfmt and
 # clippy are needed by local checks and CI.
 rust = { version = "1.96.0", components = "rustfmt,clippy" }
-node = "26.3.0"
+node = "26.5.0"
 "cargo:cargo-audit" = "0.22.2"
-"cargo:cargo-edit" = "0.13.11"
-"cargo:cargo-llvm-cov" = "0.8.7"
-"cargo:git-cliff" = "2.13.0"
-"cargo:mdbook" = "0.5.3"
+"cargo:cargo-edit" = "0.13.13"
+"aqua:taiki-e/cargo-llvm-cov" = "0.8.7"
+"aqua:orhun/git-cliff" = "2.13.1"
+"github:rust-lang/mdBook" = "0.5.4"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
-trivy = "0.71.0"
+trivy = "0.72.0"
 watchexec = "2.5.1"
 # actionlint shells out to shellcheck for `run:` blocks. Pin it so local
 # workflow linting matches CI.
@@ -48,9 +48,18 @@ description = "Build the release binary"
 run = "cargo build --release --locked"
 
 [tasks.startup-budget]
-description = "Check release wrapper startup overhead against the local budget"
+description = "Check release wrapper startup overhead against the local or hosted-CI budget"
 depends = ["build"]
-run = "target/release/xtask startup-budget"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${CI:-}" == "true" ]]; then
+  target/release/xtask startup-budget --ci
+else
+  target/release/xtask startup-budget
+fi
+'''
 
 [tasks.binstall-metadata]
 description = "Validate cargo-binstall release asset metadata"
@@ -207,7 +216,7 @@ arg "<version>" help="Release version to validate, for example 0.1.0 or v0.1.0"
 flag "--npm-package-name <name>" help="Expected npm package name" default="bindport"
 flag "--skip-ci" help="Skip the full local CI gate"
 flag "--allow-dirty" help="Allow release-prep version bump changes"
-flag "--publish-ready" help="Run full crates.io publish dry-runs"
+flag "--publish-ready" help="Dry-run crates whose workspace dependencies are on crates.io"
 '''
 run = '''
 #!/usr/bin/env bash

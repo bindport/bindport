@@ -9,6 +9,8 @@ updates:
       time: "05:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "ci"
     groups:
@@ -24,6 +26,8 @@ updates:
       time: "05:15"
       timezone: "America/New_York"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps"
     ignore:
@@ -43,6 +47,8 @@ updates:
       time: "05:30"
       timezone: "America/New_York"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps"
     groups:
