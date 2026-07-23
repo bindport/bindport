@@ -26,6 +26,8 @@ trap 'rm -rf "$tmp"' EXIT
 scripts/stage-cli-assets.sh "$tmp"
 
 expected=(
+  LICENSE
+  LICENSE.sha256
   bindport-completions.tar.gz
   bindport-completions.tar.gz.sha256
   bindport-manpage.tar.gz
@@ -38,6 +40,7 @@ for file in "${expected[@]}"; do
     exit 1
   fi
 done
+cmp LICENSE "$tmp/LICENSE"
 
 tar -tzf "$tmp/bindport-completions.tar.gz" | sort > "$tmp/completions.list"
 tar -tzf "$tmp/bindport-manpage.tar.gz" | sort > "$tmp/manpage.list"

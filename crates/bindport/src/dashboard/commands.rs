@@ -47,6 +47,7 @@ pub(crate) fn run_dashboard_result(args: &[String]) -> Result<(), DashboardComma
 pub(crate) fn serve_dashboard(options: &DashboardCliOptions) -> Result<(), DashboardCommandError> {
     let cwd = env::current_dir().unwrap_or_else(|_| Path::new(".").into());
     let config = resolve_config(&cwd)?;
+    let identity_scope = project_identity_scope(&cwd, &config).to_path_buf();
     let mut skip_ports = config.skip_ports.clone();
 
     if let Some(mut registry) = open_optional_registry() {
@@ -62,7 +63,8 @@ pub(crate) fn serve_dashboard(options: &DashboardCliOptions) -> Result<(), Dashb
     dashboard.status_callback = Some(dashboard_status_callback(cwd.clone()));
     let host = dashboard.host.to_string();
     let server = DashboardServer::bind(dashboard)?;
-    let _registration = register_dashboard_service(register_service, &server, &host, &cwd);
+    let _registration =
+        register_dashboard_service(register_service, &server, &host, &cwd, &identity_scope);
     println!("dashboard: {}", server.url());
     io::stdout().flush().ok();
     server.serve()?;

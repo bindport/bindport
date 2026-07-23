@@ -20,7 +20,7 @@ function fail(message) {
 
 const metadataResult = spawnSync(
   "cargo",
-  ["metadata", "--no-deps", "--format-version", "1"],
+  ["metadata", "--locked", "--no-deps", "--format-version", "1"],
   { encoding: "utf8" },
 );
 

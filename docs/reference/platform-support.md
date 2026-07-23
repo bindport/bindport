@@ -11,11 +11,9 @@ installed explicitly by macOS CI, and used for all release artifact builds.
 Release and compatibility changes must continue to compile and test on 1.96.0
 until an announced MSRV increase.
 
-The workspace currently uses Rust edition 2024 but does not set Cargo's
-`package.rust-version`; `cargo metadata` therefore reports no enforced
-`rust_version`. Cargo may attempt a build with an older compiler, but such a
-build is outside the support contract even if it happens to succeed. This page
-and the pinned CI/release toolchains are the current policy authority.
+The workspace uses Rust edition 2024 and declares `rust-version = "1.96"` for
+every published crate. Cargo metadata, local tooling, CI, and release builds
+therefore enforce the same documented floor.
 
 ## Operating Systems, Architectures, And Distributions
 
@@ -142,8 +140,8 @@ staged release smoke. That smoke reuses the npm, CLI asset, binstall, and
 Homebrew formula checks, then executes the host-compatible staged npm package
 through the v0.8 reservation, wiring, render, dashboard, and cleanup flow. The
 other three targets are metadata-mapped; only a separately authorized live
-release-candidate exercise verifies public channels. The release matrix builds
-and packages all four prebuilt targets listed above with Rust 1.96.0.
+installation verifies a public channel. The release matrix builds and packages
+all four prebuilt targets listed above with Rust 1.96.0.
 
 The platform-cfg guard catches Linux-only conditional-compilation shapes that a
 Linux clippy run can miss but macOS would report as unused. There is no Windows,

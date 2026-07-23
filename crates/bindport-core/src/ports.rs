@@ -31,6 +31,7 @@ pub fn is_default_skip_port(port: u16) -> bool {
 pub enum PortRangeParseError {
     MissingSeparator,
     InvalidStart(String),
+    StartBelowMinimum { start: u16, minimum: u16 },
     InvalidEnd(String),
     Empty(PortRange),
 }
@@ -40,6 +41,9 @@ impl fmt::Display for PortRangeParseError {
         match self {
             Self::MissingSeparator => write!(f, "expected START-END"),
             Self::InvalidStart(value) => write!(f, "invalid range start `{value}`"),
+            Self::StartBelowMinimum { start, minimum } => {
+                write!(f, "range start {start} must be at least {minimum}")
+            }
             Self::InvalidEnd(value) => write!(f, "invalid range end `{value}`"),
             Self::Empty(range) => write!(
                 f,
@@ -73,6 +77,9 @@ pub fn parse_port_range(value: &str) -> Result<PortRange, PortRangeParseError> {
         .trim()
         .parse::<u16>()
         .map_err(|_| PortRangeParseError::InvalidEnd(end.trim().to_owned()))?;
+    if start == 0 {
+        return Err(PortRangeParseError::StartBelowMinimum { start, minimum: 1 });
+    }
     let range = PortRange { start, end };
 
     if range.is_empty() {

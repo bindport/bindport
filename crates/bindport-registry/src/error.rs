@@ -30,6 +30,14 @@ pub enum RegistryError {
     ReservationNotFound {
         lease_id: i64,
     },
+    ReservationRestoreConflict {
+        lease_id: i64,
+        port: u16,
+    },
+    ConcurrentReservation {
+        project: String,
+        service: String,
+    },
     Open {
         path: PathBuf,
         source: rusqlite::Error,
@@ -70,15 +78,23 @@ impl fmt::Display for RegistryError {
             }
             Self::ServiceNotFound { project, service } => write!(
                 f,
-                "no active or reserved service matched `{project}/{service}` in the current worktree"
+                "no active or reserved service matched `{project}/{service}` in the current project scope (Git worktree and branch when available)"
             ),
             Self::AmbiguousService { project, service } => write!(
                 f,
-                "multiple active or reserved services matched `{project}/{service}` in the current worktree"
+                "multiple active or reserved services matched `{project}/{service}` in the current project scope (Git worktree and branch when available)"
             ),
             Self::ReservationNotFound { lease_id } => {
                 write!(f, "reserved lease {lease_id} is no longer available")
             }
+            Self::ReservationRestoreConflict { lease_id, port } => write!(
+                f,
+                "reserved lease {lease_id} could not be restored because port {port} is now owned by another active or reserved service; the failed lease was stopped"
+            ),
+            Self::ConcurrentReservation { project, service } => write!(
+                f,
+                "reservation for `{project}/{service}` changed repeatedly during allocation; retry the command"
+            ),
             Self::Open { path, source } => {
                 write!(f, "failed to open registry `{}`: {source}", path.display())
             }
@@ -98,7 +114,9 @@ impl std::error::Error for RegistryError {
             | Self::PortConflict { .. }
             | Self::ServiceNotFound { .. }
             | Self::AmbiguousService { .. }
-            | Self::ReservationNotFound { .. } => None,
+            | Self::ReservationNotFound { .. }
+            | Self::ReservationRestoreConflict { .. }
+            | Self::ConcurrentReservation { .. } => None,
         }
     }
 }

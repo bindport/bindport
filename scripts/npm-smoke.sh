@@ -109,8 +109,12 @@ assert_output() {
   "$@" | grep -F "$expected" >/dev/null
 }
 
+wrapper_tmp="$tmp/bindport"
+mkdir -p "$wrapper_tmp"
+cp -R "$root/npm/bindport"/. "$wrapper_tmp"/
+cp "$root/LICENSE" "$wrapper_tmp/LICENSE"
 (
-  cd "$root/npm/bindport"
+  cd "$wrapper_tmp"
   npm pack --pack-destination "$pack_dir" >/dev/null
 )
 
@@ -121,11 +125,15 @@ platform_source="$root/npm/$package_dir"
 platform_tmp="$tmp/$package_dir"
 mkdir -p "$platform_tmp"
 cp -R "$platform_source"/. "$platform_tmp"/
+cp "$root/LICENSE" "$platform_tmp/LICENSE"
 write_fake_binary "$platform_tmp/bin/bindport" "$platform"
 (
   cd "$platform_tmp"
   npm pack --pack-destination "$pack_dir" >/dev/null
 )
+for package in "$pack_dir/bindport-$version.tgz" "$pack_dir/bindport-$platform-$version.tgz"; do
+  tar -tzf "$package" | grep -qx 'package/LICENSE'
+done
 
 forwarding_expected="bindport npm smoke $platform -- /bin/sh -c printf \"PORT=%s\\n\" \"\$PORT\""
 

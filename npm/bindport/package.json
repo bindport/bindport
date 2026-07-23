@@ -15,9 +15,14 @@
   "bin": {
     "bindport": "bin/bindport"
   },
+  "os": [
+    "darwin",
+    "linux"
+  ],
   "files": [
     "bin",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "optionalDependencies": {
     "@bindport/darwin-arm64": "0.7.0",

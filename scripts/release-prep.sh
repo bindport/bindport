@@ -84,30 +84,7 @@ update_npm_version() {
 }
 
 update_workspace_dependency_versions() {
-  local version="$1"
-  # shellcheck disable=SC2016
-  node -e '
-    const fs = require("fs");
-    const path = "Cargo.toml";
-    const version = process.argv[1];
-    const crates = [
-      "bindport-adapters",
-      "bindport-core",
-      "bindport-dashboard",
-      "bindport-registry",
-      "bindport-runner",
-    ];
-    const lines = fs.readFileSync(path, "utf8").split("\n").map((line) => {
-      for (const crate of crates) {
-        const prefix = `${crate} = { path = "crates/${crate}"`;
-        if (line.startsWith(prefix)) {
-          return `${prefix}, version = "${version}" }`;
-        }
-      }
-      return line;
-    });
-    fs.writeFileSync(path, lines.join("\n"));
-  ' "$version"
+  node scripts/npm-package-utils.js update-workspace-dependencies "$1"
 }
 
 confirm() {

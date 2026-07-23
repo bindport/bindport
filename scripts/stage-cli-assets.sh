@@ -18,6 +18,7 @@ tar -C "$tmp" -czf "$dest/bindport-completions.tar.gz" completions
 mkdir -p "$tmp/man/man1"
 cp packaging/man/bindport.1 "$tmp/man/man1/bindport.1"
 tar -C "$tmp" -czf "$dest/bindport-manpage.tar.gz" man
+cp LICENSE "$dest/LICENSE"
 
 checksum() {
   local file="$1"
@@ -32,3 +33,4 @@ checksum() {
 
 checksum "$dest/bindport-completions.tar.gz"
 checksum "$dest/bindport-manpage.tar.gz"
+checksum "$dest/LICENSE"

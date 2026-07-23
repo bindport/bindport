@@ -39,6 +39,47 @@ fn runner_preserves_child_exit_code() {
     assert_eq!(runs[0]["exit_code"], 37);
 }
 #[test]
+fn fast_child_finalization_records_child_pid_command_cwd_and_exit() {
+    let registry_path = temp_registry_path("fast-child-finalization-registry");
+    let root = temp_test_dir("fast-child-finalization-root")
+        .canonicalize()
+        .expect("canonical root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"fast-child-finalization\"\nservice = \"noop\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n"
+        ),
+    )
+    .expect("write config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["--", "sh", "-c", "printf '%s|%s' $$ \"$(pwd -P)\"; exit 23"])
+        .output()
+        .expect("run fast child");
+
+    assert_eq!(output.status.code(), Some(23));
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let (pid, cwd) = stdout.split_once('|').expect("pid and cwd");
+    let child_pid = pid.parse::<u32>().expect("child pid");
+    assert_eq!(cwd, root.display().to_string());
+
+    let snapshot = Registry::open(&registry_path)
+        .expect("registry")
+        .export_snapshot()
+        .expect("export");
+    assert_eq!(snapshot.leases.len(), 1);
+    assert_eq!(snapshot.leases[0].state, "stopped");
+    assert_eq!(snapshot.runs.len(), 1);
+    assert_eq!(snapshot.runs[0].pid, child_pid);
+    assert!(snapshot.runs[0].command.contains("printf '%s|%s'"));
+    assert_eq!(snapshot.runs[0].cwd, root.display().to_string());
+    assert_eq!(snapshot.runs[0].exit_code, Some(23));
+    assert!(snapshot.runs[0].exited_at.is_some());
+}
+
+#[test]
 fn run_subcommand_accepts_dash_dash_separator() {
     let registry_path = temp_registry_path("run-subcommand");
     let output = bindport_with_registry(&registry_path)

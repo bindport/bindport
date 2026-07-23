@@ -40,18 +40,18 @@ Then run the CLI directly or from project scripts:
 
 ```sh
 bindport --help
-bindport -- doctor
+bindport doctor
 bindport dashboard serve
 bindport -- sh -c 'echo "$PORT"'
 ```
 
 The current source tree includes:
 
-- Rust Cargo workspace with `bindport` plus core, registry, runner, and adapter
-  crates.
+- Rust Cargo workspace with `bindport` plus core, dashboard, registry, runner,
+  and adapter crates.
 - CLI support for `--help`, `--version`, `status`, `open`, `config explain`,
-  `config validate`, `doctor`, `clean`, `dashboard`, `reserve`, `release`, and
-  one-shot `bindport -- <command>` command wrapping.
+  `config validate`, `doctor`, `clean`, `dashboard`, `port`, `reserve`,
+  `release`, and one-shot `bindport -- <command>` command wrapping.
 - Optional config discovery from `.bindport.toml`, `.bindport.json`, or
   `.bindport.yaml`, with a fallback user config in the XDG config directory.
 - Basic project/service identity resolution from environment, config,
@@ -60,8 +60,8 @@ The current source tree includes:
   when available.
 - Service command, argument, and env templates through `[[services]].command`,
   `[[services]].args`, `[[services]].env`, and `bindport run --env`, including
-  scoped active/reserved sibling references in configured templates and route
-  hostname metadata when configured.
+  scoped active/reserved sibling references in configured command, argument,
+  and env templates plus own-service route metadata.
 - Basic SQLite-backed lease/run/output recording with `bindport status --json`
   and grouped inventory through `bindport list --json`, including reserved
   leases for processes BindPort does not wrap.
@@ -130,6 +130,7 @@ cargo run -p bindport -- status --json
 cargo run -p bindport -- list --json
 cargo run -p bindport -- registry export
 cargo run -p bindport -- open web --print
+cargo run -p bindport -- port web
 cargo run -p bindport -- clean --dry-run
 cargo run -p bindport -- reserve web
 cargo run -p bindport -- release web
@@ -225,9 +226,13 @@ Use `bindport render --verbose` for manual render diagnostics, or set
 rendering and hook dispatch without printing secret environment values.
 `bindport reserve [service]` allocates and holds a port without running a child
 process, which is useful for compose-managed or otherwise external services.
-`bindport release [service|port]` releases a reserved lease and marks it
-stopped so normal cleanup can remove it.
-Dashboard defaults
+If the exact scoped service is already active or reserved, the command reuses
+that service instead of creating a second lease. `reserve` does not accept
+`--env`, because it never spawns a child. `bindport port <service>` prints the
+port of the exact active or reserved service in the current project scope,
+including the worktree and branch when Git metadata is available. `bindport
+release [service|port]` releases a reserved lease and marks it stopped so normal
+cleanup can remove it. Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
 binds require auth and a token. Set `dashboard.register_service = true` or pass
 `bindport dashboard --register-service` when you want the dashboard itself to
@@ -309,7 +314,8 @@ Supported own-service placeholders are `{port}`, `{host}`, `{url}`, `{project}`,
 `{services.<name>.<field>}` for `port`, `host`, `url`, `hostname`, `route_url`,
 and `health_url`. Run `bindport reserve --all` first when sibling addresses must
 exist before startup. References use one active/reserved registry snapshot in
-the current project and worktree; assignment does not imply process readiness.
+the current project and worktree; outside Git, the discovered project config
+root supplies the shared scope. Assignment does not imply process readiness.
 Use `{{` and `}}` when a template value needs literal braces, for example a
 JSON-valued environment variable.
 `bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, `--route-url TEMPLATE`,
@@ -323,6 +329,7 @@ process:
 
 ```sh
 bindport reserve web
+bindport port web
 bindport release web
 ```
 

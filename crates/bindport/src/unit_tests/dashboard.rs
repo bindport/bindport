@@ -274,7 +274,14 @@ fn dashboard_registration_records_and_finishes_dashboard_service() {
         })
         .expect("dashboard server");
         let cwd = temp_test_dir("dashboard-registration-cwd");
-        let registration = register_dashboard_service(true, &server, "127.0.0.1", &cwd);
+        let config = resolve_config(&cwd).expect("config");
+        let registration = register_dashboard_service(
+            true,
+            &server,
+            "127.0.0.1",
+            &cwd,
+            project_identity_scope(&cwd, &config),
+        );
 
         assert!(registration.registry.is_some());
         assert!(registration.started.is_some());
@@ -297,6 +304,61 @@ fn dashboard_registration_records_and_finishes_dashboard_service() {
 }
 
 #[test]
+fn dashboard_registration_uses_non_git_project_config_root_scope() {
+    let registry_path = temp_registry_path("dashboard-project-scope");
+    let root = temp_test_dir("dashboard-project-scope-root");
+    let nested = root.join("apps/dashboard");
+    fs::create_dir_all(&nested).expect("nested directory");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"configured-project\"\n",
+    )
+    .expect("project config");
+
+    with_default_registry_path(&registry_path, || {
+        let server = DashboardServer::bind(DashboardOptions {
+            preferred_port: 0,
+            ..DashboardOptions::default()
+        })
+        .expect("dashboard server");
+        let config = resolve_config(&nested).expect("config");
+        let registration = register_dashboard_service(
+            true,
+            &server,
+            "127.0.0.1",
+            &nested,
+            project_identity_scope(&nested, &config),
+        );
+        assert!(registration.started.is_some());
+        drop(registration);
+
+        let registry = Registry::open(&registry_path).expect("registry");
+        let export = registry.export_snapshot().expect("export");
+        let lease = export.leases.first().expect("dashboard lease");
+        let expected = resolve_identity_in_scope(
+            IdentitySources {
+                cwd: &nested,
+                command: &[],
+                cli_project: Some(SERVICE_NAME),
+                cli_service: Some("dashboard"),
+                env_project: None,
+                env_service: None,
+                config_project: None,
+                config_service: None,
+            },
+            &root,
+        );
+
+        assert_eq!(lease.project, SERVICE_NAME);
+        assert_eq!(lease.service, "dashboard");
+        assert_eq!(
+            lease.identity_key.as_deref(),
+            Some(expected.identity_key.as_str())
+        );
+    });
+}
+
+#[test]
 fn dashboard_registration_can_be_inactive_or_registry_disabled() {
     let server = DashboardServer::bind(DashboardOptions {
         preferred_port: 0,
@@ -304,7 +366,9 @@ fn dashboard_registration_can_be_inactive_or_registry_disabled() {
     })
     .expect("dashboard server");
     let cwd = temp_test_dir("dashboard-registration-inactive-cwd");
-    let inactive = register_dashboard_service(false, &server, "127.0.0.1", &cwd);
+    let config = resolve_config(&cwd).expect("config");
+    let identity_scope = project_identity_scope(&cwd, &config);
+    let inactive = register_dashboard_service(false, &server, "127.0.0.1", &cwd, identity_scope);
 
     assert!(inactive.registry.is_none());
     assert!(inactive.started.is_none());
@@ -313,7 +377,8 @@ fn dashboard_registration_can_be_inactive_or_registry_disabled() {
     fs::write(&blocked_parent, "not a directory").expect("blocked parent");
     let registry_path = blocked_parent.join("registry.sqlite");
     with_default_registry_path(&registry_path, || {
-        let registration = register_dashboard_service(true, &server, "127.0.0.1", &cwd);
+        let registration =
+            register_dashboard_service(true, &server, "127.0.0.1", &cwd, identity_scope);
 
         assert!(registration.registry.is_none());
         assert!(registration.started.is_none());

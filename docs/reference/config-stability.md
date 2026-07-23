@@ -11,9 +11,11 @@ overrides. TOML remains the reference syntax; JSON and YAML deserialize into the
 same hand-written Rust model. YAML keeps its existing 256 KiB limit and rejects
 anchors and aliases.
 
-`default_range` is the only supported port-range config key. Unknown top-level
-keys are ignored and reported by config diagnostics. Unknown nested keys retain
-their current behavior of being ignored. The schema permits additional
+`default_range` is the only supported port-range config key. It is an inclusive
+`START-END` range whose start must be at least 1; port 0 is not a usable
+assignment. Unknown top-level keys are ignored and reported by config
+diagnostics. Unknown nested keys retain their current behavior of being
+ignored. The schema permits additional
 properties to represent that loader behavior; its named properties are the
 stable-candidate public shape.
 

@@ -8,6 +8,13 @@ fn registry_defaults_are_named_for_bindport() {
     assert_eq!(DEFAULT_REGISTRY_FILE, "registry.sqlite");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_process_start_time_identifies_the_current_process() {
+    assert!(process_start_time(std::process::id()).is_some());
+    assert!(process_start_time(u32::MAX).is_none());
+}
+
 #[test]
 fn default_registry_path_honors_env_precedence() {
     let root = env::temp_dir().join(format!("bindport-registry-env-{}", std::process::id()));
@@ -120,6 +127,51 @@ fn registry_open_reports_parent_and_database_open_errors() {
     let registry_path = root.join("ok.sqlite");
     let registry = Registry::open(&registry_path).expect("registry");
     assert_eq!(registry.path(), registry_path.as_path());
+}
+
+#[test]
+fn wal_retry_uses_one_bounded_deadline_and_restores_normal_busy_timeout() {
+    let path = temp_registry_path("wal-retry-deadline");
+    let blocker = Connection::open(&path).expect("blocking connection");
+    blocker
+        .execute_batch("CREATE TABLE lock_test (id INTEGER); BEGIN EXCLUSIVE;")
+        .expect("exclusive transaction");
+    let candidate = Connection::open(&path).expect("candidate connection");
+    candidate
+        .busy_timeout(REGISTRY_BUSY_TIMEOUT)
+        .expect("normal busy timeout");
+
+    let started = std::time::Instant::now();
+    let error = crate::connection::enable_wal_with_timeout(&candidate, Duration::from_millis(50))
+        .expect_err("WAL negotiation must time out while exclusively locked");
+    let elapsed = started.elapsed();
+
+    assert!(matches!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    ));
+    assert!(elapsed >= Duration::from_millis(40), "elapsed={elapsed:?}");
+    assert!(elapsed < Duration::from_millis(500), "elapsed={elapsed:?}");
+    let busy_timeout = candidate
+        .pragma_query_value(None, "busy_timeout", |row| row.get::<_, i64>(0))
+        .expect("restored busy timeout");
+    assert_eq!(busy_timeout, REGISTRY_BUSY_TIMEOUT.as_millis() as i64);
+    blocker.execute_batch("ROLLBACK").expect("release lock");
+}
+
+#[test]
+fn opening_current_schema_does_not_request_the_sqlite_write_lock() {
+    let path = temp_registry_path("current-schema-read-only-open");
+    drop(Registry::open(&path).expect("initialize registry"));
+    let blocker = Connection::open(&path).expect("blocking connection");
+    blocker
+        .execute_batch("BEGIN IMMEDIATE")
+        .expect("hold write transaction");
+
+    let opened = Registry::open(&path).expect("open current schema while writer is active");
+    assert_eq!(opened.path(), path.as_path());
+
+    blocker.execute_batch("ROLLBACK").expect("release lock");
 }
 
 #[test]

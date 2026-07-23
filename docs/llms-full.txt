@@ -20,7 +20,9 @@ BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
 - `bindport -- <command>` runs a one-off command with an assigned `PORT`.
 - `bindport run [service] [-- <command>]` runs a configured service or one-off
   override.
-- `bindport reserve [service]` holds a port for an external process.
+- `bindport reserve [service]` holds a port for an external process, or reuses
+  the exact scoped service when it is already active or reserved. It rejects
+  `--env` because no child is spawned.
 - `bindport reserve --all` idempotently prepares every named service in the
   discovered project and current worktree without starting children or owning
   sockets. All new reservations commit together or not at all.
@@ -58,7 +60,8 @@ workspace roots, git worktree, and command name.
 
 The complete known v1-candidate shape is in `docs/config.schema.json` and its
 stability policy is in `docs/reference/config-stability.md`. `default_range` is
-the only supported port-range key. Unknown top-level keys are reported as
+the only supported port-range key, and its start must be at least 1. Unknown
+top-level keys are reported as
 unknown. No config keys are currently deprecated, so `config validate` emits no
 deprecation warnings.
 
@@ -72,8 +75,9 @@ Configured service `env`, `command`, and `args` additionally support exactly
 `{services.<name>.<field>}` for `port`, `host`, `url`, `hostname`, `route_url`,
 and `health_url`. References resolve one active/reserved registry snapshot in
 the current project and exact worktree and fail before spawn for missing,
-stopped, stale, ambiguous, or unavailable metadata. They do not apply to CLI,
-route metadata, outputs, or hooks. Port assignment does not imply readiness;
+stopped, stale, ambiguous, or unavailable metadata. Outside Git, the discovered
+project config root supplies the equivalent shared scope. They do not apply to
+CLI, route metadata, outputs, or hooks. Port assignment does not imply readiness;
 BindPort does not start, order, supervise, or wait for dependencies.
 
 ## CLI Contract
@@ -107,6 +111,7 @@ output, `bindport status --json` for normal registry detail, or
 human output or hardcoding ports. Status and list are registry-wide; select by
 identity or exact worktree rather than array position. Port lookup considers
 only active or reserved services in the selected project and current worktree.
+Outside Git, a discovered project config root supplies the shared scope.
 `open --project` is registry-wide and can remain ambiguous across worktrees; use
 status identity fields for an exact current-worktree URL. Use
 `bindport registry export` for debug/backup snapshots that need raw lease, run,
@@ -220,8 +225,8 @@ checksummed completion/man assets, a generated formula, and the real host npm
 tarball through the v0.8 reservation, wiring, render, dashboard, and cleanup
 flow in isolated temporary state. Foreign targets are metadata checks only. A
 pass does not prove a version exists on GitHub Releases, crates.io, npm, the
-external Homebrew tap, or mise/ubi. The separately authorized
-`v1.0.0-rc.1` checklist is in `docs/project/release.md`; agents must not tag,
+external Homebrew tap, or mise/ubi. Prerelease automation and live-channel
+exercise are deferred to the future v0.9 planning cycle. Agents must not tag,
 publish, install globally, or mutate the tap without explicit authorization.
 
 ## Important Docs

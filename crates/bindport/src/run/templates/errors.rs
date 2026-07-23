@@ -14,6 +14,10 @@ pub(crate) enum TemplateError {
         service: String,
         field: String,
     },
+    UnsupportedSiblingLocation {
+        placeholder: String,
+        location: &'static str,
+    },
 }
 
 impl std::fmt::Display for TemplateError {
@@ -37,6 +41,13 @@ impl std::fmt::Display for TemplateError {
             Self::UnavailableSiblingField { service, field } => write!(
                 f,
                 "sibling service `{service}` has no configured `{field}` value in the startup registry snapshot"
+            ),
+            Self::UnsupportedSiblingLocation {
+                placeholder,
+                location,
+            } => write!(
+                f,
+                "sibling reference `{{{placeholder}}}` is not supported in {location}; sibling references are only supported in configured service command, args, and env"
             ),
         }
     }

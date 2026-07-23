@@ -61,7 +61,7 @@ exact-worktree active or reserved siblings through `{services.<name>.<field>}`.
 An explicit child command overrides the configured command for one run:
 
 ```sh
-bindport run web -- next dev --hostname 0.0.0.0 --port "$PORT"
+bindport run web -- sh -c 'next dev --hostname 0.0.0.0 --port "$PORT"'
 ```
 
 Use route metadata options when a one-off run needs values normally provided by
@@ -151,6 +151,10 @@ bindport release web
 bindport release 29123
 ```
 
+A single-service reservation reuses an exact scoped active or reserved service
+instead of creating a second lease. `reserve` does not accept `--env`, because
+no child process receives environment variables.
+
 Prepare every named service in the discovered project config before starting
 processes:
 
@@ -174,7 +178,8 @@ bindport port web --project example
 ```
 
 `port` uses the same current-worktree project and service scope for active and
-reserved services. On success, stdout is exactly the decimal port followed by a
+reserved services. Outside Git, a discovered project config root supplies the
+shared scope. On success, stdout is exactly the decimal port followed by a
 newline. Missing, stopped, stale, or ambiguous matches fail instead of printing
 a fallback port or selecting another project or worktree.
 

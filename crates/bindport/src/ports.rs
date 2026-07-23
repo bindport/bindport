@@ -60,16 +60,19 @@ fn run_port_command_result(args: &[String]) -> Result<(), PortCommandError> {
         .loaded
         .as_ref()
         .and_then(|loaded| loaded.config.project.as_deref());
-    let identity = resolve_identity(IdentitySources {
-        cwd: &cwd,
-        command: &[],
-        cli_project: options.project.as_deref(),
-        cli_service: Some(service),
-        env_project: env_project.as_deref(),
-        env_service: None,
-        config_project,
-        config_service: None,
-    });
+    let identity = resolve_identity_in_scope(
+        IdentitySources {
+            cwd: &cwd,
+            command: &[],
+            cli_project: options.project.as_deref(),
+            cli_service: Some(service),
+            env_project: env_project.as_deref(),
+            env_service: None,
+            config_project,
+            config_service: None,
+        },
+        project_identity_scope(&cwd, &config),
+    );
     let selected = Registry::open_default()?.select_service(&identity)?;
 
     println!("{}", selected.port);

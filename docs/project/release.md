@@ -8,10 +8,10 @@ Cargo and npm package publishing are manual. The GitHub Release workflow builds
 native binaries and npm tarballs; separate publish workflows/scripts push those
 reviewed artifacts to crates.io and npm.
 
-GitHub Releases also include `bindport-completions.tar.gz` and
-`bindport-manpage.tar.gz`. These are static release assets sourced from
-`packaging/`, validated by `scripts/check-cli-assets.sh`, and intended for
-package-manager formulas such as the Homebrew tap.
+GitHub Releases also include `LICENSE`, `bindport-completions.tar.gz`, and
+`bindport-manpage.tar.gz`, each with a checksum. These static release assets are
+validated by `scripts/check-cli-assets.sh`; the completion and manpage archives
+are intended for package-manager formulas such as the Homebrew tap.
 
 Install-channel user guidance lives in [Install BindPort](../getting-started/install.md). Keep it
 in sync when changing release assets, package names, the Homebrew tap formula,
@@ -200,11 +200,11 @@ merged.
 
 Release checks are intentionally non-publishing by default. They validate the
 version, verify that `CHANGELOG.md` is current, run the local CI gate, dry-run
-Cargo package contents, validate all npm package versions and optional
-dependencies, and dry-run wrapper/platform npm package tarballs. Full crates.io
-publish dry-runs are reserved for the
-`--publish-ready` gate because Cargo publishing remains a separate manual
-action.
+all six Cargo package source shapes, validate every npm package version and
+optional dependency, and dry-run wrapper/platform npm package tarballs.
+Crates.io publish dry-runs for packages whose same-version workspace
+dependencies are already available are reserved for the `--publish-ready` gate,
+because Cargo publishing remains a separate manual action.
 
 Run it locally after a release-prep branch updates versions and package
 artifacts:
@@ -299,6 +299,8 @@ Release artifacts are uploaded to the GitHub Release:
 - `bindport-darwin-arm64-X.Y.Z.tgz.sha256`
 - `bindport-X.Y.Z.tgz`
 - `bindport-X.Y.Z.tgz.sha256`
+- `LICENSE`
+- `LICENSE.sha256`
 - `bindport-completions.tar.gz`
 - `bindport-completions.tar.gz.sha256`
 - `bindport-manpage.tar.gz`
@@ -361,8 +363,10 @@ version to match the requested release. From a dirty release-prep branch, pass
 `--allow-dirty`; real publishing rejects dirty worktrees. Because
 `cargo publish --dry-run` resolves dependencies from the current crates.io
 index, a new release may not be able to dry-run every crate before its internal
-dependencies are published. The helper reports those skipped dry-runs instead
-of failing the whole preflight.
+dependencies are published. The helper queries exact crate versions through the
+crates.io API, skips only packages with an unavailable same-version workspace
+dependency, and reports that reduced boundary. `release-check` still validates
+all six package source shapes with `cargo package --locked --list`.
 
 After the GitHub Release has been created from `main`, publish to crates.io
 directly with:
@@ -379,11 +383,12 @@ Real publishing additionally requires:
 - interactive confirmation unless `--yes` is provided. `release-finish` already
   performs its own confirmation and calls the Cargo publish helper with `--yes`.
 
-The script waits between package publishes so the crates.io index can observe
-new internal crates before dependent crates are uploaded. Override the wait with
-`--wait-seconds N` when needed. If a publish is interrupted, rerun the same
-command after the failure is corrected; already-published crate versions are
-skipped and the remaining crates continue in order.
+The script polls Cargo's crates.io index between package publishes so dependent
+crates are not uploaded before a new internal crate is resolvable. The default
+propagation deadline is 60 seconds; override it with `--wait-seconds N` when
+needed. If a publish is interrupted, rerun the same command after the failure
+is corrected; already-published crate versions are skipped and the remaining
+crates continue in order.
 
 The manual `Cargo Publish` GitHub Actions workflow exposes the same flow:
 
@@ -432,6 +437,8 @@ Once the tap PR merges, verify the public install path:
 ```sh
 brew install bindport/tap/bindport
 ```
+
+Homebrew core submission is deferred until after v1.0.
 
 ## v0.2.0 Manual Acceptance
 
@@ -620,71 +627,16 @@ state, fixed-port assumptions, or incomplete temporary cleanup. A pass verifies
 local source/package shape and host-compatible staged artifacts only. It is not
 evidence that any public channel contains the version.
 
-## Authorized `v1.0.0-rc.1` Live-Channel Checklist
+## Prerelease Automation Deferred
 
-Do **not** run this checklist without separate explicit authorization. Tags,
-GitHub Releases, crates.io versions, and npm versions are external mutations;
-crate/package versions cannot safely be reused after publication. The Homebrew
-tap is another repository and must be changed only from its own reviewed
-checkout.
+The v0.8 release process supports stable `X.Y.Z` versions only. It creates a
+normal GitHub Release, publishes npm without a prerelease dist tag, and updates
+the stable Homebrew formula. Do not pass a prerelease version to these scripts.
 
-The current release automation intentionally accepts stable `X.Y.Z` only,
-creates a normal GitHub Release, publishes npm without a dist-tag override, and
-updates only the stable Homebrew formula. Therefore `v1.0.0-rc.1` must not be
-passed to the current scripts as if it were a stable release. Before the live
-exercise, land a separate reviewed change that:
-
-- accepts SemVer prereleases consistently in release-prep, release-check,
-  release-publish, release-finish, Cargo/npm publish helpers, and workflows;
-- creates `v1.0.0-rc.1` as a GitHub prerelease;
-- publishes all five npm packages with `--tag next`, never `latest`; and
-- defines an owner-approved RC tap strategy without replacing the stable
-  `bindport` formula (for example, a reviewed temporary `bindport-rc` formula).
-
-After that prerequisite is merged, the authorized operator performs and records
-these steps in order:
-
-1. Confirm the clean, synced `main` checkout contains the reviewed
-   `1.0.0-rc.1` Cargo/npm metadata and changelog, and confirm all six Cargo
-   crate names plus all five npm package names are intended to receive this
-   irreversible version.
-2. Run `mise run release-smoke` twice on Linux and twice on macOS, then run
-   `mise run ci`, `mise run docs-build`, and `git diff --check`.
-3. Dispatch `release.yml` with `version=1.0.0-rc.1` and `dry_run=true`. Confirm
-   all four native build jobs pass and the assembled dry-run artifacts match
-   the documented binary, npm, completion, manpage, and checksum names.
-4. With a second approval, dispatch the real workflow. Confirm tag
-   `v1.0.0-rc.1` points at the reviewed commit, the GitHub Release is marked as
-   a prerelease, every `.sha256` verifies, and downloaded Linux/macOS binaries
-   report exactly `1.0.0-rc.1`. Exercise x64 and arm64 artifacts on matching
-   runners where available.
-5. Run the Cargo publish dry-run, then publish the six crates in dependency
-   order. In a temporary `CARGO_HOME` and install root, run
-   `cargo install bindport --version '=1.0.0-rc.1' --locked` and execute the
-   complete v0.8 flow with that installed binary. Separately run
-   `cargo binstall bindport --version 1.0.0-rc.1` in an isolated root and repeat
-   version/help plus the flow.
-6. Run the npm publish workflow dry-run from the reviewed GitHub tarballs.
-   Publish the four native packages and wrapper with the `next` tag, verify
-   `npm view bindport@next version` is `1.0.0-rc.1`, then install
-   `bindport@next` in an empty temporary project on Linux and macOS. Confirm the
-   wrapper selects the host native package and run the complete flow.
-7. Generate the RC Homebrew formula from the published checksums in a separate
-   tap checkout. Review all four URLs and hashes, install the owner-approved RC
-   formula on macOS (and Linuxbrew if claimed for the RC), verify completions
-   and `man 1 bindport`, and run the complete flow. Do not merge an RC over the
-   stable `bindport` formula.
-8. In an isolated mise config/data/cache directory, pin
-   `"ubi:bindport/bindport" = "1.0.0-rc.1"`, run `mise install`, verify the
-   selected GitHub asset and version, and repeat the flow. This is the first
-   point at which mise/ubi may be called live-channel verified.
-9. For every installed channel, record OS, architecture, exact command/version,
-   artifact checksum, and results for version/help, wrapper execution where
-   applicable, `reserve --all`, exact `port`, web-before-api startup, sibling
-   env wiring, render, dashboard start/status/stop, and stopped/stale cleanup.
-10. Announce a channel as verified only after its live install and flow pass.
-    Record failures without retagging or attempting to reuse a published Cargo
-    or npm version.
+Prerelease design, automation, and live-channel exercise are explicitly
+deferred to the future v0.9 planning cycle. They require a separate reviewed
+implementation and explicit authorization; no prerelease checklist is part of
+v0.8 readiness or stable release operation.
 
 ## Versioning
 
@@ -773,26 +725,6 @@ mise run npm-publish "${VERSION}" --dist dist/npm --execute
 Publish order matters: native platform packages are published first, then the
 `bindport` wrapper. The `npm-publish` script enforces that order.
 
-## Homebrew Tap
-
-The Homebrew tap formula should source only reviewed GitHub Release artifacts.
-After the `Release` workflow has created the GitHub Release for a stable tag:
-
-1. Update `bindport/homebrew-tap` with the new version and checksums.
-2. Point the formula at the matching platform binary artifact.
-3. Install shell completions from `bindport-completions.tar.gz`.
-4. Install the man page from `bindport-manpage.tar.gz`.
-5. Run the tap smoke test:
-
-```sh
-brew update
-brew install bindport/tap/bindport
-bindport --version
-bindport doctor
-```
-
-Homebrew core submission is deferred until after v1.0.
-
 ## Bun / bunx Workflow
 
 `bunx` runs npm package executables declared in `package.json`'s `bin` field.
@@ -810,7 +742,7 @@ the unscoped package can be run as:
 
 ```sh
 bunx bindport --help
-bunx bindport -- doctor
+bunx bindport doctor
 bunx bindport -- next dev
 ```
 

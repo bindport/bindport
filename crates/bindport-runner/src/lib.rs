@@ -282,6 +282,7 @@ mod tests {
 
         let mut first = spawn_child(&command, range, &[]).expect("first child");
         assert!((range.start..=range.end).contains(&first.port()));
+        assert!(first.try_wait().expect("poll running child").is_none());
         let error = match spawn_child(&command, range, &[]) {
             Ok(mut second) => {
                 let _ = second.kill();
@@ -302,6 +303,48 @@ mod tests {
         assert_signal_action_matches(libc::SIGTERM, &before_term);
         assert_signal_mask_matches(libc::SIGINT, &before_mask);
         assert_signal_mask_matches(libc::SIGTERM, &before_mask);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn try_wait_restores_signal_forwarding_before_reaping_an_exited_child() {
+        let _lock = signal_forwarding_test_lock();
+        let before_int = current_signal_action(libc::SIGINT);
+        let before_term = current_signal_action(libc::SIGTERM);
+        let before_mask = current_signal_mask();
+        let command = vec![
+            String::from("sh"),
+            String::from("-c"),
+            String::from("exit 23"),
+        ];
+        let mut child =
+            spawn_child_on_port(&command, 29_000, &[]).expect("spawn short-lived child");
+
+        let status = (0..100)
+            .find_map(
+                |_| match child.try_wait().expect("poll short-lived child") {
+                    Some(status) => Some(status),
+                    None => {
+                        thread::sleep(Duration::from_millis(10));
+                        None
+                    }
+                },
+            )
+            .expect("short-lived child exits");
+
+        assert_eq!(status.code(), Some(23));
+        assert_signal_action_matches(libc::SIGINT, &before_int);
+        assert_signal_action_matches(libc::SIGTERM, &before_term);
+        assert_signal_mask_matches(libc::SIGINT, &before_mask);
+        assert_signal_mask_matches(libc::SIGTERM, &before_mask);
+
+        let mut next = spawn_child_on_port(
+            &[String::from("sh"), String::from("-c"), String::from("true")],
+            29_000,
+            &[],
+        )
+        .expect("signal forwarding is available to the next child");
+        assert!(next.wait().expect("wait for next child").success());
     }
 
     #[cfg(unix)]

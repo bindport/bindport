@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use std::env;
+
 use crate::support::*;
 
 #[cfg(unix)]
@@ -37,6 +39,46 @@ fn forwards_sigterm_to_wrapped_child_and_records_exit() {
         .trim()
         .parse::<u32>()
         .expect("child pid");
+    let active_deadline = Instant::now() + Duration::from_secs(5);
+    let active = loop {
+        let active_output = bindport_with_registry(&registry_path)
+            .args(["status", "--json"])
+            .output()
+            .expect("active status");
+        assert!(active_output.status.success());
+        let active =
+            serde_json::from_slice::<Value>(&active_output.stdout).expect("active status json");
+        if active["services"][0]["pid"] == child_pid {
+            break active;
+        }
+        if let Some(status) = bindport.try_wait().expect("poll bindport") {
+            panic!("bindport exited before adopting child pid {child_pid}: {status}; {active}");
+        }
+        if Instant::now() >= active_deadline {
+            send_signal(child_pid, libc::SIGKILL);
+            let _ = bindport.kill();
+            let _ = bindport.wait();
+            panic!("bindport did not adopt child pid {child_pid}: {active}");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let expected_cwd = env::current_dir()
+        .expect("current directory")
+        .canonicalize()
+        .expect("canonical current directory");
+    assert_eq!(active["services"][0]["state"], "active");
+    assert_eq!(active["services"][0]["pid"], child_pid);
+    assert!(
+        active["services"][0]["command"]
+            .as_str()
+            .expect("active command")
+            .contains("while :")
+    );
+    assert_eq!(
+        active["services"][0]["cwd"],
+        expected_cwd.display().to_string()
+    );
+    assert_eq!(active["runs"][0]["pid"], child_pid);
 
     send_signal(bindport.id(), libc::SIGTERM);
 

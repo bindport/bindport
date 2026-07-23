@@ -32,7 +32,7 @@ use bindport_core::{
     OutputDeleteState, OutputFailurePolicy, PortRange, SERVICE_NAME, ServiceConfig,
     ServiceIdentity, default_fallback_config, detect_git_identity, discover_config,
     is_restricted_service_env_name, normalize_branch_label, package_workspace_root,
-    resolve_identity,
+    resolve_identity_in_scope,
 };
 use bindport_dashboard::{
     DashboardCleanCallback, DashboardOptions, DashboardServer, DashboardStatusCallback,
@@ -40,8 +40,8 @@ use bindport_dashboard::{
 use bindport_registry::{
     BatchReservationError, CleanState, CleanSummary, OutputFileRecord, OutputFileScope,
     OutputFileStatus, REGISTRY_PATH_ENV, Registry, RegistryError, RegistryExportOutputFile,
-    RegistryService, ReservationCandidate, ReserveLease, ReservedLease, ReservedRunStart, RunStart,
-    StartedRun, StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE, default_registry_path,
+    RegistryService, ReservationCandidate, ReservedLease, ReservedRunStart, RunStart, StartedRun,
+    StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE, default_registry_path,
     status_service_route_key,
 };
 use bindport_runner::{
@@ -53,7 +53,7 @@ use sha2::{Digest, Sha256};
 const DOCTOR_PORT_DISPLAY_LIMIT: usize = 10;
 const DOCTOR_MAX_LISTENER_PROBES: u32 = 1024;
 const ALLOCATION_RETRY_WINDOW: Duration = Duration::from_secs(2);
-const MAX_ALLOCATION_RETRIES: usize = 1;
+const MAX_ALLOCATION_RETRIES: usize = 3;
 const DASHBOARD_HOST_ENV: &str = "BINDPORT_DASHBOARD_HOST";
 const DASHBOARD_PORT_ENV: &str = "BINDPORT_DASHBOARD_PORT";
 const DASHBOARD_AUTH_REQUIRED_ENV: &str = "BINDPORT_DASHBOARD_AUTH_REQUIRED";

@@ -17,7 +17,35 @@ pub(crate) fn process_start_time(pid: u32) -> Option<i64> {
     fields.split_whitespace().nth(19)?.parse::<i64>().ok()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub(crate) fn process_start_time(pid: u32) -> Option<i64> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>();
+    let size = libc::c_int::try_from(size).ok()?;
+    // SAFETY: `info` points to writable storage for `size` bytes of
+    // `proc_bsdinfo`, and the value is read only after a complete write.
+    let read = unsafe {
+        libc::proc_pidinfo(
+            libc::pid_t::try_from(pid).ok()?,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if read != size {
+        return None;
+    }
+    // SAFETY: `proc_pidinfo` reported that it initialized the full structure.
+    let info = unsafe { info.assume_init() };
+    let micros = info
+        .pbi_start_tvsec
+        .checked_mul(1_000_000)?
+        .checked_add(info.pbi_start_tvusec)?;
+    i64::try_from(micros).ok()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub(crate) fn process_start_time(_pid: u32) -> Option<i64> {
     None
 }

@@ -36,6 +36,14 @@ fn checked_in_schema_names_every_supported_key_and_enum_value() {
         "BindPort configuration v1 stable candidate"
     );
     assert_eq!(schema["additionalProperties"], true);
+    let range_schema = &schema["properties"]["default_range"];
+    let range_description = range_schema["description"]
+        .as_str()
+        .expect("default_range description");
+    assert!(range_description.contains("START must be at least 1"));
+    assert!(range_description.contains("Whitespace around each value"));
+    assert!(range_description.contains("leading zeroes"));
+    assert!(range_schema.get("pattern").is_none());
     assert_eq!(
         APPLIED_CONFIG_KEYS,
         [

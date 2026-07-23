@@ -87,9 +87,12 @@ bindport open web --print
 ```
 
 `reserve --all` idempotently prepares the named services in the discovered
-project and current worktree. New reservations commit all-or-nothing; the
-command starts no children and owns no sockets. Configured sibling references
-resolve active or reserved services once at child startup in that exact scope;
+project and current worktree. A single-service `reserve` likewise reuses an
+exact scoped active or reserved service; reservation does not accept `--env`
+because it starts no child. New `--all` reservations commit all-or-nothing, and
+reservations own no sockets. Outside Git, the discovered project config root
+supplies the equivalent shared scope. Configured sibling references resolve
+active or reserved services once at child startup in that exact scope;
 they do not imply readiness or create an ordered dependency graph. `port` prints
 only a decimal port and newline for one active or reserved service in that
 scope; missing, stopped, stale, and ambiguous matches fail. `open --project`

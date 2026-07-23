@@ -45,14 +45,26 @@ esac
 
 [[ -f "$binary" ]] || die "binary not found: $binary"
 [[ -d "$package_dir" ]] || die "package directory not found: $package_dir"
-export npm_config_cache="${npm_config_cache:-${TMPDIR:-/tmp}/bindport-npm-cache}"
+[[ -f LICENSE ]] || die "repository LICENSE not found"
 
 tmp_root="$(mktemp -d)"
-trap 'rm -rf "$tmp_root"' EXIT
+npm_cache_root=""
+if [[ -z "${npm_config_cache:-${NPM_CONFIG_CACHE:-}}" ]]; then
+  npm_cache_root="$(mktemp -d)"
+  export npm_config_cache="$npm_cache_root/cache"
+fi
+cleanup() {
+  rm -rf "$tmp_root"
+  if [[ -n "$npm_cache_root" ]]; then
+    rm -rf "$npm_cache_root"
+  fi
+}
+trap cleanup EXIT
 
 tmp_package="$tmp_root/$(basename "$package_dir")"
 mkdir -p "$tmp_package"
 cp -R "$package_dir"/. "$tmp_package"/
+cp LICENSE "$tmp_package/LICENSE"
 mkdir -p "$tmp_package/bin"
 cp "$binary" "$tmp_package/bin/bindport"
 chmod 755 "$tmp_package/bin/bindport"

@@ -34,6 +34,10 @@ fn parses_port_range() {
         }
     );
     assert_eq!(
+        parse_port_range(" 00001 - 00002 ").expect("whitespace and leading zeroes"),
+        PortRange { start: 1, end: 2 }
+    );
+    assert_eq!(
         parse_port_range("29100")
             .expect_err("missing separator")
             .to_string(),
@@ -44,6 +48,12 @@ fn parses_port_range() {
             .expect_err("invalid start")
             .to_string(),
         "invalid range start `start`"
+    );
+    assert_eq!(
+        parse_port_range("0-29199")
+            .expect_err("zero start")
+            .to_string(),
+        "range start 0 must be at least 1"
     );
     assert_eq!(
         parse_port_range("29100-end")

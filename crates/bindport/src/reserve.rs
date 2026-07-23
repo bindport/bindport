@@ -1,5 +1,7 @@
 use super::*;
 
+const SINGLE_RESERVATION_RETRIES: usize = 3;
+
 pub(crate) fn run_reserve_command(args: &[String]) -> ExitCode {
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         print_reserve_help();
@@ -29,9 +31,12 @@ pub(crate) fn run_reserve_command(args: &[String]) -> ExitCode {
     }
 
     match reserve_command(args) {
-        Ok(lease) => {
-            println!("reserved {}\t{}:{}", lease.service, lease.host, lease.port);
-            if let Some(route_url) = lease.route_url {
+        Ok(service) => {
+            println!(
+                "{} {}\t{}:{}",
+                service.state, service.service, service.host, service.port
+            );
+            if let Some(route_url) = service.route_url {
                 println!("{route_url}");
             }
             ExitCode::SUCCESS
@@ -69,12 +74,17 @@ pub(crate) fn run_release_command(args: &[String]) -> ExitCode {
     }
 }
 
-fn reserve_command(args: &[String]) -> Result<ReservedLease, ReserveCommandError> {
+fn reserve_command(args: &[String]) -> Result<RegistryService, ReserveCommandError> {
     let (options, command) =
         parse_run_options(args).map_err(ReserveCommandError::InvalidArgument)?;
     if !command.is_empty() {
         return Err(ReserveCommandError::InvalidArgument(String::from(
             "reserve does not accept a wrapped command",
+        )));
+    }
+    if !options.env.is_empty() {
+        return Err(ReserveCommandError::InvalidArgument(String::from(
+            "reserve does not accept --env because it does not spawn a child",
         )));
     }
 
@@ -85,8 +95,10 @@ fn reserve_command(args: &[String]) -> Result<ReservedLease, ReserveCommandError
     let templates = resolve_run_templates(&[], &options, service_config);
     let mut registry = Registry::open_default()?;
 
-    if let Some(existing) = registry.reserved_identity_lease(&identity.identity_key)? {
-        return Ok(existing);
+    match registry.select_service(&identity) {
+        Ok(existing) => return Ok(existing),
+        Err(RegistryError::ServiceNotFound { .. }) => {}
+        Err(error) => return Err(error.into()),
     }
 
     match prune_stale_leases_for_range(&cwd, &config, &mut registry) {
@@ -100,39 +112,71 @@ fn reserve_command(args: &[String]) -> Result<ReservedLease, ReserveCommandError
         Err(error) => print_registry_warning("failed to prune stale registry leases", &error),
     }
 
-    let mut skip_ports = config.skip_ports.clone();
-    skip_ports.extend(registry.active_ports()?);
-    let previous_port = registry.previous_identity_port(&identity.identity_key)?;
-    let allocation_hints = AllocationHints {
-        preferred_port: previous_port,
-        scan_start: identity.port_scan_start(config.port_range),
-    };
-    let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
-    let metadata = resolve_reservation_metadata(&identity, port, &templates)?;
+    for _ in 0..=SINGLE_RESERVATION_RETRIES {
+        match registry.select_service(&identity) {
+            Ok(existing) => return Ok(existing),
+            Err(RegistryError::ServiceNotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
 
-    if has_blocking_auto_outputs(&config)? {
-        let pending_route = pending_route_record(&identity, port, &metadata, "reserved", &cwd);
-        preflight_blocking_outputs(&cwd, &config, &mut registry, pending_route)?;
+        let mut skip_ports = config.skip_ports.clone();
+        skip_ports.extend(registry.active_ports()?);
+        let previous_port = registry.previous_identity_port(&identity.identity_key)?;
+        let allocation_hints = AllocationHints {
+            preferred_port: previous_port,
+            scan_start: identity.port_scan_start(config.port_range),
+        };
+        let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
+        let metadata = resolve_reservation_metadata(&identity, port, &templates)?;
+
+        if has_blocking_auto_outputs(&config)? {
+            let pending_route = pending_route_record(&identity, port, &metadata, "reserved", &cwd);
+            preflight_blocking_outputs(&cwd, &config, &mut registry, pending_route)?;
+        }
+
+        let candidate = ReservationCandidate {
+            host: String::from("127.0.0.1"),
+            port,
+            hostname: metadata.hostname,
+            route_url: metadata.route_url,
+            health_url: metadata.health_url,
+        };
+        let service =
+            registry.reserve_service(&identity, |_, occupied_ports, current_previous_port| {
+                if occupied_ports.contains(&candidate.port)
+                    || current_previous_port != previous_port
+                {
+                    return Err(ReserveCommandError::RetryReservation);
+                }
+                Ok(candidate.clone())
+            });
+        let (service, newly_reserved) = match service {
+            Ok(service) => service,
+            Err(BatchReservationError::Plan(ReserveCommandError::RetryReservation)) => continue,
+            Err(BatchReservationError::Registry(error)) => return Err(error.into()),
+            Err(BatchReservationError::Plan(error)) => return Err(error),
+        };
+
+        if newly_reserved {
+            let events = RouteEventCollector::single(
+                RouteEventSource::CliReserve,
+                RouteEventKind::RouteStarted,
+            );
+            if let Err(error) =
+                auto_render_outputs_for_events(&cwd, &config, &mut registry, &events)
+            {
+                print_auto_render_warning(&events.warning_context(), &error);
+            }
+        }
+
+        return Ok(service);
     }
 
-    let lease = registry.record_reserved_lease(&ReserveLease {
-        project: identity.project.clone(),
-        service: identity.service.clone(),
-        identity: Some(identity),
-        host: String::from("127.0.0.1"),
-        port,
-        hostname: metadata.hostname,
-        route_url: metadata.route_url,
-        health_url: metadata.health_url,
-    })?;
-
-    let events =
-        RouteEventCollector::single(RouteEventSource::CliReserve, RouteEventKind::RouteStarted);
-    if let Err(error) = auto_render_outputs_for_events(&cwd, &config, &mut registry, &events) {
-        print_auto_render_warning(&events.warning_context(), &error);
+    Err(RegistryError::ConcurrentReservation {
+        project: identity.project,
+        service: identity.service,
     }
-
-    Ok(lease)
+    .into())
 }
 
 fn reserve_all_command(args: &[String]) -> Result<Vec<RegistryService>, ReserveCommandError> {
@@ -309,6 +353,7 @@ enum ReserveCommandError {
     Template(TemplateError),
     Render(RenderCommandError),
     InvalidArgument(String),
+    RetryReservation,
 }
 
 impl std::fmt::Display for ReserveCommandError {
@@ -320,6 +365,7 @@ impl std::fmt::Display for ReserveCommandError {
             Self::Template(error) => write!(formatter, "{error}"),
             Self::Render(error) => write!(formatter, "{error}"),
             Self::InvalidArgument(error) => formatter.write_str(error),
+            Self::RetryReservation => formatter.write_str("reservation changed during allocation"),
         }
     }
 }

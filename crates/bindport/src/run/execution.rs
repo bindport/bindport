@@ -46,6 +46,12 @@ pub(crate) fn run_wrapped_command(command: &[String], options: RunOptions) -> Ex
             );
             ExitCode::FAILURE
         }
+        Err(RunCommandError::ReservedClaim { port, source }) => {
+            eprintln!(
+                "bindport: failed to claim the reservation for port {port}; no child was spawned: {source}"
+            );
+            ExitCode::FAILURE
+        }
         Err(RunCommandError::ReservedPromotion { port, source }) => {
             eprintln!(
                 "bindport: failed to promote the reservation for port {port}; the child was terminated: {source}"
@@ -58,6 +64,28 @@ pub(crate) fn run_wrapped_command(command: &[String], options: RunOptions) -> Ex
 struct ServiceExecutionContext {
     cwd: PathBuf,
     local_bin_dirs: Vec<PathBuf>,
+}
+
+fn current_process_command() -> String {
+    env::args_os()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn rollback_registry_run_claim(
+    registry: &mut Registry,
+    run: StartedRun,
+    restore_reservation: bool,
+) {
+    let result = if restore_reservation {
+        registry.restore_reserved_run_claim(run)
+    } else {
+        registry.discard_run_claim(run)
+    };
+    if let Err(error) = result {
+        print_registry_warning("failed to roll back run port claim", &error);
+    }
 }
 
 fn resolve_service_execution_context(
@@ -230,6 +258,15 @@ pub(crate) fn run_wrapped_command_result(
     }
 
     let requires_output_preflight = has_blocking_auto_outputs(&config)?;
+    let route_start_observed = configured_outputs(&config)
+        .map_err(RenderCommandError::from)?
+        .into_iter()
+        .any(|output| output.auto_render)
+        || configured_hook_plan(&cwd, &config).is_some_and(|plan| {
+            plan.hooks
+                .iter()
+                .any(|hook| hook.events.contains(&HookEvent::RouteStarted))
+        });
     let mut retries = 0;
 
     loop {
@@ -268,14 +305,8 @@ pub(crate) fn run_wrapped_command_result(
             );
             preflight_blocking_outputs(&cwd, &config, registry, pending_route)?;
         }
-        let mut child = spawn_child_on_port_with_context(
-            &child_command,
-            port,
-            Some(&execution_context.cwd),
-            &child_env,
-        )?;
-        let attempt_started_at = Instant::now();
-        let run = RunStart {
+        let claim_command = current_process_command();
+        let claim = RunStart {
             project: identity.project.clone(),
             service: identity.service.clone(),
             identity: Some(identity.clone()),
@@ -284,39 +315,26 @@ pub(crate) fn run_wrapped_command_result(
             hostname: run_metadata.hostname.clone(),
             route_url: run_metadata.route_url.clone(),
             health_url: run_metadata.health_url.clone(),
-            pid: child.pid(),
-            command: command_display.clone(),
+            pid: std::process::id(),
+            command: claim_command.clone(),
             cwd: execution_context.cwd.clone(),
         };
-
-        let started = if let Some(registry) = registry.as_mut() {
-            let record_result = if let Some(reserved) = reserved_lease.as_ref() {
+        let mut disable_registry_after_claim = false;
+        let started_claim = if let Some(registry) = registry.as_mut() {
+            let claim_result = if let Some(reserved) = reserved_lease.as_ref() {
                 registry.promote_reserved_lease(&ReservedRunStart {
                     lease_id: reserved.lease_id,
-                    pid: child.pid(),
-                    command: command_display.clone(),
+                    pid: std::process::id(),
+                    command: claim_command,
                     cwd: execution_context.cwd.clone(),
                 })
             } else {
-                registry.record_run_started(&run)
+                registry.record_run_started(&claim)
             };
-            match record_result {
-                Ok(started) => {
-                    let events = RouteEventCollector::single(
-                        RouteEventSource::CliRunner,
-                        RouteEventKind::RouteStarted,
-                    );
-                    if let Err(error) =
-                        auto_render_outputs_for_events(&cwd, &config, registry, &events)
-                    {
-                        print_auto_render_warning(&events.warning_context(), &error);
-                    }
-                    Some(started)
-                }
+            match claim_result {
+                Ok(started) => Some(started),
                 Err(error) if reserved_lease.is_some() => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(RunCommandError::ReservedPromotion {
+                    return Err(RunCommandError::ReservedClaim {
                         port,
                         source: error,
                     });
@@ -326,11 +344,9 @@ pub(crate) fn run_wrapped_command_result(
                         port: conflict_port,
                     },
                 ) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
                     if retries < MAX_ALLOCATION_RETRIES {
                         eprintln!(
-                            "bindport: warning: assigned port {conflict_port} was already recorded active; retrying with another port"
+                            "bindport: warning: assigned port {conflict_port} was concurrently claimed; retrying with another port"
                         );
                         skip_ports.push(conflict_port);
                         retries += 1;
@@ -339,23 +355,114 @@ pub(crate) fn run_wrapped_command_result(
                     return Err(RenderCommandError::Registry(error).into());
                 }
                 Err(error) => {
-                    print_registry_warning("failed to record run start", &error);
+                    print_registry_warning("failed to claim run port", &error);
                     registry_disabled_warning();
+                    disable_registry_after_claim = true;
                     None
                 }
             }
         } else {
             None
         };
+        if disable_registry_after_claim {
+            registry = None;
+        }
 
-        let status = child.wait()?;
+        let mut child = match spawn_child_on_port_with_context(
+            &child_command,
+            port,
+            Some(&execution_context.cwd),
+            &child_env,
+        ) {
+            Ok(child) => child,
+            Err(error) => {
+                if let (Some(registry), Some(started)) = (registry.as_mut(), started_claim) {
+                    rollback_registry_run_claim(registry, started, reserved_lease.is_some());
+                }
+                return Err(error.into());
+            }
+        };
+        let attempt_started_at = Instant::now();
+        let fast_status = if reserved_lease.is_none() && !route_start_observed {
+            match child.try_wait() {
+                Ok(status) => status,
+                Err(error) => {
+                    if let (Some(registry), Some(started)) = (registry.as_mut(), started_claim) {
+                        rollback_registry_run_claim(registry, started, false);
+                    }
+                    return Err(error.into());
+                }
+            }
+        } else {
+            None
+        };
+        let mut fast_claim_finalized = false;
+
+        let started = if let (Some(registry), Some(started)) = (registry.as_mut(), started_claim) {
+            let result = if let Some(status) = fast_status.as_ref() {
+                registry.finalize_run_claim(
+                    started,
+                    child.pid(),
+                    &command_display,
+                    &execution_context.cwd,
+                    status_registry_exit_code(status),
+                )
+            } else {
+                registry.adopt_run_claim(
+                    started,
+                    child.pid(),
+                    &command_display,
+                    &execution_context.cwd,
+                )
+            };
+            match result {
+                Ok(()) => {
+                    if fast_status.is_some() {
+                        fast_claim_finalized = true;
+                    } else {
+                        let events = RouteEventCollector::single(
+                            RouteEventSource::CliRunner,
+                            RouteEventKind::RouteStarted,
+                        );
+                        if let Err(error) =
+                            auto_render_outputs_for_events(&cwd, &config, registry, &events)
+                        {
+                            print_auto_render_warning(&events.warning_context(), &error);
+                        }
+                    }
+                    Some(started)
+                }
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    rollback_registry_run_claim(registry, started, reserved_lease.is_some());
+                    if reserved_lease.is_some() {
+                        return Err(RunCommandError::ReservedPromotion {
+                            port,
+                            source: error,
+                        });
+                    }
+                    return Err(RenderCommandError::Registry(error).into());
+                }
+            }
+        } else {
+            None
+        };
+
+        let status = match fast_status {
+            Some(status) => status,
+            None => child.wait()?,
+        };
         let attempt_elapsed = attempt_started_at.elapsed();
         let exit_code = status_registry_exit_code(&status);
         let reserved_startup_conflict =
             reserved_lease.is_some() && should_retry_allocation(&status, attempt_elapsed, port);
 
+        let mut reservation_restore_conflict = false;
         if let (Some(registry), Some(started)) = (registry.as_mut(), started) {
-            let finish_result = if reserved_startup_conflict {
+            let finish_result = if fast_claim_finalized {
+                Ok(())
+            } else if reserved_startup_conflict {
                 registry.record_reserved_run_failed(started, exit_code)
             } else {
                 registry.record_run_finished(started, exit_code)
@@ -372,11 +479,28 @@ pub(crate) fn run_wrapped_command_result(
                         print_auto_render_warning(&events.warning_context(), &error);
                     }
                 }
+                Err(error @ RegistryError::ReservationRestoreConflict { .. }) => {
+                    reservation_restore_conflict = true;
+                    print_registry_warning("failed to restore reservation after startup", &error);
+                    let events = RouteEventCollector::single(
+                        RouteEventSource::CliRunner,
+                        RouteEventKind::RouteFinished,
+                    );
+                    if let Err(error) =
+                        auto_render_outputs_for_events(&cwd, &config, registry, &events)
+                    {
+                        print_auto_render_warning(&events.warning_context(), &error);
+                    }
+                }
                 Err(error) => print_registry_warning("failed to record run finish", &error),
             }
         }
 
-        if reserved_startup_conflict {
+        if reservation_restore_conflict {
+            eprintln!(
+                "bindport: reserved port {port} became unavailable during startup and was reassigned; the failed lease was stopped and no alternate port was assigned"
+            );
+        } else if reserved_startup_conflict {
             eprintln!(
                 "bindport: reserved port {port} became unavailable during startup; the reservation was kept and no alternate port was assigned"
             );

@@ -20,7 +20,8 @@
   ],
   "files": [
     "bin/bindport",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
