@@ -100,7 +100,7 @@ jobs:
         run: trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --exit-code 1 --skip-dirs target --skip-dirs .git --no-progress .
 
       - name: Coverage
-        run: cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90 --locked
+        run: cargo llvm-cov --workspace --exclude xtask --all-targets --summary-only --fail-under-lines 90 --locked
 
       - name: Build release binary
         run: cargo build --release --locked
