@@ -17,8 +17,10 @@ Usage: mise run cargo-publish [--execute] [--allow-dirty] [--wait-seconds N] [vX
 
 Publishes BindPort crates to crates.io in dependency order.
 
-Defaults to a cargo publish dry-run for every package that can be verified
-against the current crates.io index. Real publishing requires --execute and an
+Defaults to a cargo publish dry-run for every package whose same-version
+workspace dependencies are already present on crates.io. Packages behind an
+unpublished workspace dependency are reported explicitly and their source shape
+is validated by release-check. Real publishing requires --execute and an
 interactive confirmation unless --yes is also provided. Already-published crate
 versions are skipped so interrupted publishes can be resumed.
 
@@ -30,7 +32,8 @@ Options:
   --execute, --publish   Actually publish to crates.io.
   --allow-dirty          Pass --allow-dirty to dry-run cargo publish commands.
                          Rejected for real publishing.
-  --wait-seconds <n>     Seconds to wait between real publishes. Defaults to 20.
+  --wait-seconds <n>     Maximum seconds to poll for index propagation between
+                         real publishes. Defaults to 60.
   --yes                  Skip the interactive confirmation. Intended for CI.
   -h, --help            Show this help.
 USAGE
@@ -102,18 +105,59 @@ is_already_published_error() {
   grep -Eiq "(crate version .+ is already (uploaded|published)|previously[[:space:]]+uploaded)" "$output_file"
 }
 
-is_unpublished_workspace_dependency_error() {
-  local output_file="$1"
-  local dependency
+workspace_dependencies() {
+  local package="$1"
+  printf '%s' "$workspace_metadata" | node -e '
+    const fs = require("fs");
+    const metadata = JSON.parse(fs.readFileSync(0, "utf8"));
+    const packageName = process.argv[1];
+    const workspaceNames = new Set(metadata.packages.map(item => item.name));
+    const item = metadata.packages.find(candidate => candidate.name === packageName);
+    if (!item) process.exit(2);
+    for (const dependency of item.dependencies) {
+      if (dependency.path && workspaceNames.has(dependency.name)) {
+        console.log(dependency.name);
+      }
+    }
+  ' "$package"
+}
 
-  for dependency in "${packages[@]}"; do
-    if grep -Fq 'no matching package named `'"$dependency"'` found' "$output_file" ||
-      grep -Fq 'failed to select a version for the requirement `'"$dependency"' = "^'"$version"'"`' "$output_file"; then
+crate_version_is_published() {
+  local package="$1"
+  local status
+  status="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -A "bindport-release/$version (https://github.com/bindport/bindport)" \
+    "https://crates.io/api/v1/crates/$package/$version")" ||
+    die "failed to query crates.io for $package v$version"
+  case "$status" in
+    200)
       return 0
+      ;;
+    404)
+      return 1
+      ;;
+    *)
+      die "crates.io returned HTTP $status for $package v$version"
+      ;;
+  esac
+}
+
+wait_for_crate_index() {
+  local package="$1"
+  local deadline=$((SECONDS + wait_seconds))
+  local remaining
+
+  while ! cargo info --registry crates-io "$package@$version" >/dev/null 2>&1; do
+    remaining=$((deadline - SECONDS))
+    if ((remaining <= 0)); then
+      die "$package v$version was not visible in the crates.io index within ${wait_seconds}s"
+    fi
+    if ((remaining < 5)); then
+      sleep "$remaining"
+    else
+      sleep 5
     fi
   done
-
-  return 1
 }
 
 run_cargo_publish() {
@@ -140,13 +184,6 @@ run_cargo_publish() {
     return 0
   fi
 
-  if [[ "$mode" == "dry-run" ]] && is_unpublished_workspace_dependency_error "$output_file"; then
-    echo "Skipping $package publish dry-run because crates.io does not have one of its v$version workspace dependencies yet."
-    rm -f "$output_file"
-    publish_result="skipped-unpublished-dependency"
-    return 0
-  fi
-
   rm -f "$output_file"
   return "$status"
 }
@@ -155,7 +192,7 @@ release_version="${RELEASE_VERSION:-}"
 mode="dry-run"
 allow_dirty=false
 yes=false
-wait_seconds="${CARGO_PUBLISH_WAIT_SECONDS:-20}"
+wait_seconds="${CARGO_PUBLISH_WAIT_SECONDS:-60}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -202,7 +239,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for command in cargo git node; do
+for command in cargo curl git node; do
   command -v "$command" >/dev/null 2>&1 || die "$command is required"
 done
 
@@ -235,11 +272,26 @@ elif [[ -n "$(git status --porcelain)" && "$allow_dirty" != "true" ]]; then
   die "worktree is dirty; pass --allow-dirty for dry-runs or clean it"
 fi
 
+workspace_metadata="$(cargo metadata --locked --format-version 1 --no-deps)"
 skipped_existing=()
 skipped_dry_runs=()
 
 for index in "${!packages[@]}"; do
   package="${packages[$index]}"
+  if [[ "$mode" == "dry-run" ]]; then
+    unpublished_dependencies=()
+    while IFS= read -r dependency; do
+      if [[ -n "$dependency" ]] && ! crate_version_is_published "$dependency"; then
+        unpublished_dependencies+=("$dependency")
+      fi
+    done < <(workspace_dependencies "$package")
+    if [[ "${#unpublished_dependencies[@]}" -gt 0 ]]; then
+      echo "Skipping $package publish dry-run; unpublished v$version workspace dependencies: ${unpublished_dependencies[*]}."
+      skipped_dry_runs+=("$package")
+      continue
+    fi
+  fi
+
   args=(publish -p "$package" --locked)
   if [[ "$mode" == "dry-run" ]]; then
     args+=(--dry-run)
@@ -252,18 +304,13 @@ for index in "${!packages[@]}"; do
   publish_result=""
   run_cargo_publish "$package" "${args[@]}"
 
-  case "$publish_result" in
-    skipped-existing)
-      skipped_existing+=("$package")
-      ;;
-    skipped-unpublished-dependency)
-      skipped_dry_runs+=("$package")
-      ;;
-  esac
+  if [[ "$publish_result" == "skipped-existing" ]]; then
+    skipped_existing+=("$package")
+  fi
 
   if [[ "$mode" == "publish" && "$publish_result" == "published" && "$index" -lt "$((${#packages[@]} - 1))" && "$wait_seconds" -gt 0 ]]; then
-    echo "Waiting ${wait_seconds}s for crates.io index propagation..."
-    sleep "$wait_seconds"
+    echo "Polling up to ${wait_seconds}s for $package v$version crates.io index propagation..."
+    wait_for_crate_index "$package"
   fi
 done
 

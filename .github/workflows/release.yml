@@ -54,7 +54,7 @@ jobs:
             asset_name: bindport-macos-arm64
             npm_platform: darwin-arm64
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -119,7 +119,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -127,8 +127,8 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
         with:
-          version: 2026.6.6
-          sha256: b8c25ad5e1c178bb7ba1e0fca9066153f8ef1b28bf5a8456c20a8acd2522e556
+          version: 2026.7.12
+          sha256: dad54e0b843908324282b8673f9c0ebc3a4da0c49ad2da309a49bfbc918ba180
           install: true
           install_args: --locked --jobs=1
           cache: true
@@ -243,10 +243,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (
-            cd npm/bindport
-            npm pack --pack-destination "$GITHUB_WORKSPACE/dist"
-          )
+          node scripts/npm-package-utils.js pack-wrapper --destination "$GITHUB_WORKSPACE/dist"
           expected=(
             "bindport-darwin-arm64-${RELEASE_VERSION}.tgz"
             "bindport-darwin-x64-${RELEASE_VERSION}.tgz"
@@ -257,6 +254,10 @@ jobs:
           for package in "${expected[@]}"; do
             if [[ ! -f "dist/$package" ]]; then
               echo "missing npm package tarball: dist/$package" >&2
+              exit 1
+            fi
+            if ! tar -tzf "dist/$package" | grep -qx 'package/LICENSE'; then
+              echo "npm package tarball is missing LICENSE: dist/$package" >&2
               exit 1
             fi
           done

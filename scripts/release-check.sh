@@ -17,7 +17,8 @@ Options:
   --skip-ci                 Skip mise run ci. Also set RUN_CI=false.
   --allow-dirty             Allow Cargo package dry-runs with uncommitted
                              release-prep version bump changes.
-  --publish-ready           Run full crates.io publish dry-runs. Also set
+  --publish-ready           Dry-run every crate whose same-version workspace
+                             dependencies are available on crates.io. Also set
                              PUBLISH_READY=true.
   -h, --help                Show this help.
 USAGE
@@ -155,7 +156,17 @@ if [[ "$allow_dirty" == "true" ]]; then
   cargo_dirty_flags+=(--allow-dirty)
 fi
 
-cargo package -p bindport "${cargo_dirty_flags[@]}" --list
+packages=(
+  bindport-core
+  bindport-adapters
+  bindport-runner
+  bindport-registry
+  bindport-dashboard
+  bindport
+)
+for package in "${packages[@]}"; do
+  cargo package --locked -p "$package" "${cargo_dirty_flags[@]}" --list
+done
 if [[ "$publish_ready" == "true" ]]; then
   cargo_publish_args=(--version "$version" --dry-run)
   if [[ "$allow_dirty" == "true" ]]; then

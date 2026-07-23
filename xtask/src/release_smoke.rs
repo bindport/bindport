@@ -15,7 +15,15 @@ use sha2::{Digest, Sha256};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const PACKAGE_TIMEOUT: Duration = Duration::from_secs(180);
-const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(5);
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(20);
+const PUBLISHED_PACKAGES: [&str; 6] = [
+    "bindport-core",
+    "bindport-adapters",
+    "bindport-runner",
+    "bindport-registry",
+    "bindport-dashboard",
+    "bindport",
+];
 
 struct CargoToolchainEnv {
     cargo_home: Option<PathBuf>,
@@ -198,6 +206,7 @@ fn workspace_version(
     let output = checked_output(command, "cargo metadata", PACKAGE_TIMEOUT)?;
     let metadata: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("parse cargo metadata: {error}"))?;
+    validate_published_package_metadata(root, &metadata)?;
     let packages = metadata["packages"]
         .as_array()
         .ok_or_else(|| String::from("cargo metadata has no packages array"))?;
@@ -211,35 +220,89 @@ fn workspace_version(
         .ok_or_else(|| String::from("cargo metadata bindport package has no version"))
 }
 
+fn validate_published_package_metadata(root: &Path, metadata: &Value) -> Result<(), String> {
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| String::from("cargo metadata has no packages array"))?;
+    let canonical_license = fs::canonicalize(root.join("LICENSE"))
+        .map_err(|error| format!("canonicalize workspace LICENSE: {error}"))?;
+
+    for name in PUBLISHED_PACKAGES {
+        let package = packages
+            .iter()
+            .find(|package| package["name"] == name)
+            .ok_or_else(|| format!("cargo metadata is missing published package `{name}`"))?;
+        if package["license"].as_str() != Some("MIT") {
+            return Err(format!(
+                "cargo metadata package `{name}` must report SPDX license `MIT`"
+            ));
+        }
+        let manifest_path = package["manifest_path"]
+            .as_str()
+            .ok_or_else(|| format!("cargo metadata package `{name}` has no manifest_path"))?;
+        let package_license = Path::new(manifest_path)
+            .parent()
+            .ok_or_else(|| format!("cargo metadata package `{name}` manifest has no parent"))?
+            .join("LICENSE");
+        let package_license = fs::canonicalize(&package_license).map_err(|error| {
+            format!(
+                "canonicalize package LICENSE for `{name}` at {}: {error}",
+                package_license.display()
+            )
+        })?;
+        if package_license != canonical_license {
+            return Err(format!(
+                "package `{name}` LICENSE resolves to {}, expected {}",
+                package_license.display(),
+                canonical_license.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_cargo_source_shape(
     root: &Path,
     temp: &SmokeTemp,
     cargo_env: &CargoToolchainEnv,
 ) -> Result<(), String> {
-    let mut command = Command::new("cargo");
-    command.current_dir(root).args([
-        "package",
-        "-p",
-        "bindport",
-        "--locked",
-        "--allow-dirty",
-        "--list",
-    ]);
-    isolated_cargo_env(&mut command, temp, cargo_env);
-    let output = checked_output(command, "cargo package --list", PACKAGE_TIMEOUT)?;
-    let files = String::from_utf8(output.stdout)
-        .map_err(|error| format!("cargo package file list is not UTF-8: {error}"))?;
-    for required in ["Cargo.toml", "Cargo.lock", "README.md", "src/main.rs"] {
-        if !files.lines().any(|file| file == required) {
+    for package in PUBLISHED_PACKAGES {
+        let mut command = Command::new("cargo");
+        command.current_dir(root).args([
+            "package",
+            "-p",
+            package,
+            "--locked",
+            "--allow-dirty",
+            "--list",
+        ]);
+        isolated_cargo_env(&mut command, temp, cargo_env);
+        let output = checked_output(command, "cargo package --list", PACKAGE_TIMEOUT)?;
+        let files = String::from_utf8(output.stdout)
+            .map_err(|error| format!("cargo package file list is not UTF-8: {error}"))?;
+        let source_entry = if package == "bindport" {
+            "src/main.rs"
+        } else {
+            "src/lib.rs"
+        };
+        for required in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "LICENSE",
+            "README.md",
+            source_entry,
+        ] {
+            if !files.lines().any(|file| file == required) {
+                return Err(format!(
+                    "{package} source package is missing `{required}`; package contents were:\n{files}"
+                ));
+            }
+        }
+        if files.lines().any(|file| file.starts_with("target/")) {
             return Err(format!(
-                "cargo install source package is missing `{required}`; package contents were:\n{files}"
+                "{package} source package unexpectedly contains target/ output"
             ));
         }
-    }
-    if files.lines().any(|file| file.starts_with("target/")) {
-        return Err(String::from(
-            "cargo install source package unexpectedly contains target/ output",
-        ));
     }
     Ok(())
 }
@@ -252,6 +315,17 @@ fn validate_release_mapping(root: &Path, version: &str) -> Result<(), String> {
         return Err(String::from(
             "npm wrapper bin.bindport must map to bin/bindport",
         ));
+    }
+    if wrapper["os"] != serde_json::json!(["darwin", "linux"]) {
+        return Err(String::from(
+            "npm wrapper os must restrict installation to darwin and linux",
+        ));
+    }
+    if !wrapper["files"]
+        .as_array()
+        .is_some_and(|files| files.iter().any(|file| file == "LICENSE"))
+    {
+        return Err(String::from("npm wrapper files must include LICENSE"));
     }
     let optional = wrapper["optionalDependencies"]
         .as_object()
@@ -274,11 +348,13 @@ fn validate_release_mapping(root: &Path, version: &str) -> Result<(), String> {
         let files = package["files"]
             .as_array()
             .ok_or_else(|| format!("{} has no files array", target.npm_name))?;
-        if !files.iter().any(|value| value == "bin/bindport") {
-            return Err(format!(
-                "{} package files must contain bin/bindport",
-                target.npm_name
-            ));
+        for required in ["bin/bindport", "LICENSE"] {
+            if !files.iter().any(|value| value == required) {
+                return Err(format!(
+                    "{} package files must contain {required}",
+                    target.npm_name
+                ));
+            }
         }
 
         let block = workflow_matrix_block(&workflow, target.matrix_name)?;
@@ -293,12 +369,10 @@ fn validate_release_mapping(root: &Path, version: &str) -> Result<(), String> {
             &format!("release workflow {} matrix row", target.matrix_name),
         )?;
     }
-    for required in [
-        "scripts/stage-cli-assets.sh dist",
-        "sha256sum -c ./*.sha256",
-    ] {
-        require_contains(&workflow, required, "release workflow artifact assembly")?;
-    }
+    let cli_assets = workflow_named_block(&workflow, "Stage CLI completion and manpage artifacts")?;
+    require_active_workflow_command(cli_assets, "scripts/stage-cli-assets.sh dist")?;
+    let checksum = workflow_named_block(&workflow, "Verify release artifact checksums")?;
+    require_active_workflow_command(checksum, "sha256sum -c ./*.sha256")?;
     Ok(())
 }
 
@@ -308,7 +382,7 @@ fn run_existing_package_checks(
     cargo_env: &CargoToolchainEnv,
     version: &str,
 ) -> Result<(), String> {
-    let checks: [(&str, &str, &[&str], bool); 5] = [
+    let checks: [(&str, &str, &[&str], bool); 6] = [
         (
             "npm package metadata",
             "node",
@@ -320,6 +394,15 @@ fn run_existing_package_checks(
             "node",
             &["scripts/check-binstall-metadata.js"],
             true,
+        ),
+        (
+            "workspace dependency version rewrite",
+            "node",
+            &[
+                "scripts/npm-package-utils.js",
+                "test-workspace-dependency-rewrite",
+            ],
+            false,
         ),
         ("CLI assets", "scripts/check-cli-assets.sh", &[], false),
         (
@@ -395,10 +478,11 @@ fn stage_artifacts(
     let output = checked_output(native_package, "stage host npm package", PACKAGE_TIMEOUT)?;
     print_check_output(&output)?;
 
-    let mut wrapper_package = Command::new("npm");
+    let mut wrapper_package = Command::new("node");
     wrapper_package
-        .current_dir(root.join("npm/bindport"))
-        .args(["pack", "--pack-destination"])
+        .current_dir(root)
+        .arg(root.join("scripts/npm-package-utils.js"))
+        .args(["pack-wrapper", "--destination"])
         .arg(&dist);
     isolated_env(&mut wrapper_package, temp);
     let output = checked_output(wrapper_package, "stage npm wrapper", PACKAGE_TIMEOUT)?;
@@ -410,14 +494,27 @@ fn stage_artifacts(
         if !tarball.is_file() {
             return Err(format!("missing staged npm tarball: {}", tarball.display()));
         }
+        verify_tar_entry(tarball, "package/LICENSE")?;
         write_checksum(tarball)?;
     }
 
     for target in TARGETS {
         verify_checksum(&dist.join(target.raw_asset))?;
     }
-    for asset in ["bindport-completions.tar.gz", "bindport-manpage.tar.gz"] {
+    for asset in [
+        "LICENSE",
+        "bindport-completions.tar.gz",
+        "bindport-manpage.tar.gz",
+    ] {
         verify_checksum(&dist.join(asset))?;
+    }
+    if fs::read(dist.join("LICENSE")).map_err(|error| format!("read staged LICENSE: {error}"))?
+        != fs::read(root.join("LICENSE"))
+            .map_err(|error| format!("read source LICENSE: {error}"))?
+    {
+        return Err(String::from(
+            "staged release LICENSE differs from source LICENSE",
+        ));
     }
     verify_checksum(&wrapper_tarball)?;
     verify_checksum(&native_tarball)?;
@@ -517,7 +614,7 @@ fn exercise_user_flow(temp: &SmokeTemp, wrapper: &Path, version: &str) -> Result
         .map_err(|error| format!("canonicalize smoke project: {error}"))?;
     write_service_scripts(&project)?;
 
-    let (range_start, range_end, port_guards) = guarded_port_range(12)?;
+    let (range_start, range_end, mut port_guards) = guarded_port_range(12)?;
     let config = format!(
         r#"project = "release-smoke"
 default_range = "{range_start}-{range_end}"
@@ -579,6 +676,7 @@ delete_on = ["removed"]
         require_contains(help, expected, "staged binary help")?;
     }
 
+    let _retained_port_guards = port_guards.split_off(port_guards.len() - 2);
     drop(port_guards);
     let first_reserve = bindport_output(
         wrapper,
@@ -741,14 +839,6 @@ fn assert_rendered_service_state(
 }
 
 fn exercise_dashboard(wrapper: &Path, project: &Path, temp: &SmokeTemp) -> Result<(), String> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|error| format!("reserve dashboard smoke port: {error}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|error| format!("read dashboard smoke port: {error}"))?
-        .port();
-    drop(listener);
-    let port_arg = port.to_string();
     let start = bindport_output(
         wrapper,
         project,
@@ -757,7 +847,7 @@ fn exercise_dashboard(wrapper: &Path, project: &Path, temp: &SmokeTemp) -> Resul
             "dashboard",
             "start",
             "--port",
-            &port_arg,
+            "0",
             "--auth",
             "disabled",
             "--no-register-service",
@@ -774,6 +864,7 @@ fn exercise_dashboard(wrapper: &Path, project: &Path, temp: &SmokeTemp) -> Resul
         .parse::<u32>()
         .map_err(|error| format!("dashboard start pid is not numeric: {error}"))?;
     let mut guard = BackgroundGuard::new(pid);
+    let port = dashboard_port_from_start_output(start_stdout)?;
     wait_for_dashboard_health(port)?;
 
     let status = bindport_output(
@@ -806,6 +897,20 @@ fn exercise_dashboard(wrapper: &Path, project: &Path, temp: &SmokeTemp) -> Resul
     wait_for_process_exit(pid, BACKGROUND_TIMEOUT)?;
     guard.disarm();
     Ok(())
+}
+
+fn dashboard_port_from_start_output(output: &str) -> Result<u16, String> {
+    let url = output
+        .trim()
+        .strip_prefix("dashboard started: ")
+        .and_then(|value| value.split_once(" pid ").map(|(url, _)| url))
+        .ok_or_else(|| format!("dashboard start output has unexpected shape: {output}"))?;
+    let address = url
+        .strip_prefix("http://")
+        .ok_or_else(|| format!("dashboard start URL is not HTTP: {url}"))?
+        .parse::<SocketAddr>()
+        .map_err(|error| format!("dashboard start URL has invalid address `{url}`: {error}"))?;
+    Ok(address.port())
 }
 
 fn exercise_cleanup(wrapper: &Path, project: &Path, temp: &SmokeTemp) -> Result<(), String> {
@@ -1024,13 +1129,59 @@ fn host_target() -> Result<ReleaseTarget, String> {
 }
 
 fn workflow_matrix_block<'a>(workflow: &'a str, name: &str) -> Result<&'a str, String> {
-    let marker = format!("          - name: {name}\n");
-    let start = workflow
-        .find(&marker)
-        .ok_or_else(|| format!("release workflow is missing matrix row `{name}`"))?;
-    let rest = &workflow[start + marker.len()..];
-    let end = rest.find("\n          - name: ").unwrap_or(rest.len());
-    Ok(&rest[..end])
+    workflow_named_block(workflow, name)
+        .map_err(|_| format!("release workflow is missing matrix row `{name}`"))
+}
+
+fn workflow_named_block<'a>(workflow: &'a str, name: &str) -> Result<&'a str, String> {
+    let marker = format!("- name: {name}");
+    let mut offset = 0;
+    let mut block_start = None;
+    let mut marker_indent = 0;
+    for line in workflow.split_inclusive('\n') {
+        if line.trim() == marker {
+            marker_indent = line.len() - line.trim_start().len();
+            block_start = Some(offset + line.len());
+            break;
+        }
+        offset += line.len();
+    }
+    let start = block_start.ok_or_else(|| format!("release workflow is missing `{name}`"))?;
+    let mut end = start;
+    for line in workflow[start..].split_inclusive('\n') {
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        if !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && (indent < marker_indent
+                || (indent == marker_indent && trimmed.starts_with("- name: ")))
+        {
+            break;
+        }
+        end += line.len();
+    }
+    Ok(&workflow[start..end])
+}
+
+fn require_active_workflow_command(block: &str, expected: &str) -> Result<(), String> {
+    let disabled = block.lines().any(|line| {
+        matches!(
+            line.trim(),
+            "if: false" | "if: ${{ false }}" | "if: ${{false}}"
+        )
+    });
+    if !disabled
+        && block.lines().any(|line| {
+            let line = line.trim();
+            !line.starts_with('#') && (line == expected || line == format!("run: {expected}"))
+        })
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "release workflow step is missing active command `{expected}`"
+        ))
+    }
 }
 
 fn expect_json_string(
@@ -1099,38 +1250,61 @@ fn write_checksum(path: &Path) -> Result<(), String> {
     .map_err(|error| format!("write checksum for {}: {error}", path.display()))
 }
 
+fn verify_tar_entry(path: &Path, expected: &str) -> Result<(), String> {
+    let mut command = Command::new("tar");
+    command.args(["-tzf"]).arg(path);
+    let output = checked_output(command, "tar archive listing", COMMAND_TIMEOUT)?;
+    let listing = String::from_utf8(output.stdout)
+        .map_err(|error| format!("tar archive listing is not UTF-8: {error}"))?;
+    if listing.lines().any(|entry| entry == expected) {
+        Ok(())
+    } else {
+        Err(format!("{} is missing `{expected}`", path.display()))
+    }
+}
+
 fn verify_checksum(path: &Path) -> Result<(), String> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("artifact name is not UTF-8: {}", path.display()))?;
-    let sidecar = path.with_file_name(format!("{name}.sha256"));
-    let expected = fs::read_to_string(&sidecar)
-        .map_err(|error| format!("read {}: {error}", sidecar.display()))?;
-    let mut fields = expected.split_whitespace();
-    let expected_hash = fields
-        .next()
-        .ok_or_else(|| format!("{} has no checksum", sidecar.display()))?;
-    let expected_name = fields
-        .next()
-        .ok_or_else(|| format!("{} has no artifact name", sidecar.display()))?;
-    if expected_name != name || fields.next().is_some() {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("artifact has no parent: {}", path.display()))?;
+    let sidecar_name = format!("{name}.sha256");
+    let sidecar = parent.join(&sidecar_name);
+    if !sidecar.is_file() {
         return Err(format!(
-            "{} must contain exactly `<sha256>  {name}`",
+            "checksum sidecar is missing: {}",
             sidecar.display()
         ));
     }
-    let bytes = fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    let actual = Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    if actual != expected_hash {
-        return Err(format!(
-            "checksum mismatch for {name}: expected {expected_hash}, got {actual}"
+
+    let mut command = if command_available("sha256sum") {
+        let mut command = Command::new("sha256sum");
+        command.args(["-c", &sidecar_name]);
+        command
+    } else if command_available("shasum") {
+        let mut command = Command::new("shasum");
+        command.args(["-a", "256", "-c", &sidecar_name]);
+        command
+    } else {
+        return Err(String::from(
+            "release smoke requires sha256sum or shasum for checksum interoperability",
         ));
-    }
+    };
+    command.current_dir(parent);
+    checked_output(command, "external checksum verification", COMMAND_TIMEOUT)?;
     Ok(())
+}
+
+fn command_available(command: &str) -> bool {
+    Command::new(command)
+        .arg("--help")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[cfg(unix)]
@@ -1395,7 +1569,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nested_cargo_metadata_uses_active_toolchain_with_isolated_home() {
+    fn nested_cargo_metadata_validates_published_licenses_with_isolated_home() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("repository root");
@@ -1443,6 +1617,29 @@ mod tests {
     }
 
     #[test]
+    fn checksum_sidecars_interoperate_with_host_checksum_tool() {
+        let temp = SmokeTemp::new().expect("checksum temp");
+        let artifact = temp.path().join("artifact.tgz");
+        fs::write(&artifact, b"artifact").expect("artifact");
+        write_checksum(&artifact).expect("checksum sidecar");
+        verify_checksum(&artifact).expect("external checksum verification");
+        fs::write(&artifact, b"changed").expect("changed artifact");
+        assert!(verify_checksum(&artifact).is_err());
+    }
+
+    #[test]
+    fn dashboard_start_output_reports_actual_ephemeral_port() {
+        assert_eq!(
+            dashboard_port_from_start_output(
+                "dashboard started: http://127.0.0.1:43127 pid 1234\n"
+            )
+            .expect("dashboard port"),
+            43_127
+        );
+        assert!(dashboard_port_from_start_output("dashboard started: malformed").is_err());
+    }
+
+    #[test]
     fn target_mappings_are_unique_and_complete() {
         let mut raw = std::collections::BTreeMap::new();
         let mut npm = std::collections::BTreeMap::new();
@@ -1452,6 +1649,46 @@ mod tests {
         }
         assert_eq!(raw.len(), 4);
         assert_eq!(npm.len(), 4);
+    }
+
+    #[test]
+    fn workflow_checks_ignore_comments_and_do_not_depend_on_fixed_indentation() {
+        let workflow = r#"
+  # - name: linux-x64
+  #   asset_name: wrong
+      - name: linux-x64
+        asset_name: bindport-linux-x64
+        npm_platform: linux-x64
+      - name: next
+        run: true
+"#;
+        let block = workflow_matrix_block(workflow, "linux-x64").expect("matrix row");
+        assert!(block.contains("asset_name: bindport-linux-x64"));
+        assert!(!block.contains("name: next"));
+        assert!(require_active_workflow_command("# command\n  command\n", "command").is_ok());
+        assert!(require_active_workflow_command("# command\n", "command").is_err());
+        assert!(require_active_workflow_command("if: false\nrun: command\n", "command").is_err());
+    }
+
+    #[test]
+    fn release_scripts_keep_locked_shapes_and_structured_publish_checks() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        let release_check = fs::read_to_string(root.join("scripts/release-check.sh"))
+            .expect("release check script");
+        assert!(release_check.contains("cargo package --locked -p \"$package\""));
+        for package in PUBLISHED_PACKAGES {
+            assert!(release_check.contains(&format!("  {package}\n")));
+        }
+
+        let cargo_publish = fs::read_to_string(root.join("scripts/cargo-publish.sh"))
+            .expect("cargo publish script");
+        assert!(cargo_publish.contains("cargo metadata --locked"));
+        assert!(cargo_publish.contains("https://crates.io/api/v1/crates/$package/$version"));
+        assert!(cargo_publish.contains("cargo info --registry crates-io"));
+        assert!(!cargo_publish.contains("no matching package named"));
+        assert!(cargo_publish.contains("CARGO_PUBLISH_WAIT_SECONDS:-60"));
     }
 
     #[test]
