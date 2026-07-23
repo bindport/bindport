@@ -407,6 +407,37 @@ impl Registry {
         Ok(())
     }
 
+    pub fn record_reserved_run_failed(
+        &mut self,
+        run: StartedRun,
+        exit_code: Option<i32>,
+    ) -> Result<(), RegistryError> {
+        let now = utc_now(&self.connection)?;
+        let transaction = self.connection.transaction()?;
+
+        let updated_run = transaction.execute(
+            "UPDATE runs
+             SET exited_at = ?1, exit_code = ?2
+             WHERE id = ?3 AND lease_id = ?4",
+            params![now, exit_code, run.run_id, run.lease_id],
+        )?;
+        let updated_lease = transaction.execute(
+            "UPDATE leases
+             SET state = 'reserved', last_seen_at = ?1, released_at = NULL
+             WHERE id = ?2 AND state IN ('active', 'stale')",
+            params![now, run.lease_id],
+        )?;
+        if updated_run == 0 || updated_lease == 0 {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+
+        transaction.commit()?;
+
+        Ok(())
+    }
+
     fn active_runs(&self) -> Result<Vec<ActiveRun>, RegistryError> {
         let mut statement = self.connection.prepare(
             "SELECT leases.id, runs.id, runs.pid, runs.process_start_time, runs.command

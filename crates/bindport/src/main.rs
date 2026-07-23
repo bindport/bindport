@@ -40,8 +40,8 @@ use bindport_dashboard::{
 use bindport_registry::{
     BatchReservationError, CleanState, CleanSummary, OutputFileRecord, OutputFileScope,
     OutputFileStatus, REGISTRY_PATH_ENV, Registry, RegistryError, RegistryExportOutputFile,
-    RegistryService, ReservationCandidate, ReserveLease, ReservedLease, RunStart, StartedRun,
-    StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE, default_registry_path,
+    RegistryService, ReservationCandidate, ReserveLease, ReservedLease, ReservedRunStart, RunStart,
+    StartedRun, StatusService, StatusSnapshot, UNSCOPED_OUTPUT_SCOPE, default_registry_path,
     status_service_route_key,
 };
 use bindport_runner::{

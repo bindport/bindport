@@ -10,6 +10,8 @@ mod basic;
 mod configured;
 #[path = "run/package.rs"]
 mod package;
+#[path = "run/reserved.rs"]
+mod reserved;
 #[path = "run/signals.rs"]
 mod signals;
 #[path = "run/templates.rs"]
