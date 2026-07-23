@@ -24,7 +24,7 @@ fn status_json_starts_empty() {
             "services",
         ])
     );
-    assert_eq!(status["schema_version"], "0.7");
+    assert_eq!(status["schema_version"], "1.0");
     assert!(
         status["generated_at"]
             .as_str()

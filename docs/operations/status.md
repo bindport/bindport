@@ -67,33 +67,122 @@ including output summaries, run history, hook visibility, and all service fields
 bindport status --json
 ```
 
-The top-level `schema_version` is currently `0.7`; pre-1.0 releases may extend
-the schema, but existing fields should remain stable within a major version.
-The checked-in JSON Schema for the current payload is
-[status.schema.json](../status.schema.json).
+The payload is frozen as status schema `1.0`. The checked-in machine-readable
+contract is [status.schema.json](../status.schema.json). This version belongs to
+`status --json`; it is not the SQLite `user_version`, registry export version,
+`list --json` version, or config schema version. The dashboard currently mirrors
+the status payload at `/api/status`, but this does not create a separate
+dashboard schema version.
 
-Top-level fields:
+### v1 Compatibility Policy
 
-- `schema_version`: status schema version.
-- `generated_at`: registry read timestamp.
-- `outputs`: aggregate output-file counts grouped by output name.
-- `services`: latest service records grouped by BindPort identity.
-- `runs`: run history, newest first.
-- `hooks`: configured hook trust visibility for the current directory.
+Through BindPort v1 releases:
 
-Service fields most useful to agents:
+- existing fields remain present with compatible names, JSON kinds,
+  nullability, and meanings;
+- existing required fields do not become optional, and a required nullable
+  field continues to appear even when its value is `null`;
+- object fields may be added. Consumers must ignore fields they do not
+  recognize; the JSON Schema therefore permits additional object properties;
+- the documented state, health, output status, hook status/trust, hook event,
+  proxy adapter, and hook target enum values are closed for v1. Adding an enum
+  value is not treated as a harmless additive object field; and
+- object member order and array order are not compatibility guarantees. Select
+  records by identity/name/ID and sort explicitly when order matters.
 
-- `project`, `service`, `identity_key`: stable service identity.
-- `state`: `active`, `reserved`, `stopped`, or `stale`.
-- `host`, `port`, `url`: direct loopback URL for the wrapped process.
-- `hostname`, `route_url`, `health_url`: configured route metadata when present.
-- `health`: `unknown`, `pending`, `healthy`, or `failing`.
-- `branch`, `branch_label`, `worktree_path`, `commit`: git context when known.
-- `outputs`, `proxy`: generated output files and proxy-oriented summary.
+Removing or renaming a field, changing its meaning, narrowing its JSON kind or
+nullability, or changing an enum set requires a future incompatible schema.
+
+All current properties below are emitted on every matching object except
+`hooks.error`, which appears only when current-directory config cannot be
+resolved. Nullable properties are required properties with a JSON `null` value,
+not omitted properties.
+
+### Top-Level Object
+
+| Field | JSON kind | Meaning |
+|---|---|---|
+| `schema_version` | string, exactly `"1.0"` | Status contract version. |
+| `generated_at` | string | UTC registry-read timestamp. |
+| `outputs` | array of output summaries | Aggregate owned-output counts by output name. |
+| `services` | array of services | Latest lease/run view for each registry identity. |
+| `runs` | array of runs | Retained run history. |
+| `hooks` | object | Hook configuration and trust visibility for the current directory. |
+
+### Output Summary
+
+Each top-level `outputs[]` object contains:
+
+| Field | JSON kind | Meaning |
+|---|---|---|
+| `name` | string | Configured output name. |
+| `pending` | non-negative integer | Owned rows in `pending` state. |
+| `rendered` | non-negative integer | Owned rows in `rendered` state. |
+| `removed` | non-negative integer | Owned rows in `removed` state. |
+| `error` | non-negative integer | Owned rows in `error` state. |
+
+### Service Object
+
+Each `services[]` object contains all of these fields:
+
+| Field | JSON kind | Meaning |
+|---|---|---|
+| `project`, `service` | string | Resolved project and service names. |
+| `state` | enum string | `active`, `reserved`, `stopped`, or `stale`. |
+| `port` | integer, 0-65535 | Recorded service port. |
+| `host`, `url` | string | Recorded host and direct `http://host:port` URL. |
+| `hostname`, `route_url`, `health_url` | string or `null` | Configured route/health metadata when available. |
+| `worktree_path`, `worktree_hash`, `git_common_dir` | string or `null` | Git checkout identity when available. |
+| `branch`, `branch_label`, `commit` | string or `null` | Git revision metadata when available. |
+| `identity_key` | string or `null` | BindPort identity key; old records can predate it. |
+| `pid` | non-negative integer or `null` | Latest run PID; reservations have `null`. |
+| `command`, `cwd` | string | Latest run command and working directory. A reservation uses `"reserved"` and an empty cwd until promoted. |
+| `started_at` | string | Latest run start, or reservation allocation, UTC timestamp. |
+| `exited_at` | string or `null` | Recorded exit/stale-observation timestamp, or `null` while no exit is recorded. |
+| `exit_code` | 32-bit integer or `null` | Child exit code when known; running, reserved, stale, or signaled records can be `null`. |
+| `health` | enum string | `unknown`, `pending`, `healthy`, or `failing`. |
+| `outputs` | array of service outputs | Owned output rows associated with this route identity. |
+| `proxy` | proxy object or `null` | Compatibility alias for an associated Traefik output. |
+
+A service `outputs[]` object always has string `name`, enum-string `status`
+(`pending`, `rendered`, `removed`, or `error`), nullable-string `reason`, and
+string `path`.
+
+A non-null `proxy` object always has `adapter` equal to `"traefik"`, boolean
+`rendered`, and string `target`. Services without that alias emit `proxy: null`.
+
+### Run Object
+
+Each `runs[]` object contains integer `id` and `lease_id`, a non-negative integer
+`pid`, string `command`, `cwd`, and `started_at`, nullable-string `exited_at`,
+and a nullable 32-bit integer `exit_code`. Registry-generated timestamps use UTC
+RFC 3339-style values at second precision. Consumers should still treat the
+contracted JSON kind as string rather than relying on presentation ordering.
+
+### Hooks Object
+
+`hooks.items` is always an array. A hook item contains:
+
+| Field | JSON kind | Meaning |
+|---|---|---|
+| `name` | string | Effective hook name. |
+| `status` | enum string | `approved`, `denied`, `changed`, or `pending`. |
+| `trust` | enum string | `approved (worktree)`, `approved (repo)`, `denied (worktree)`, `denied (repo)`, `changed`, or `pending`. |
+| `source` | string | Human-readable config source; it can include a local path. |
+| `events` | array of enum strings | `route_started`, `route_finished`, `routes_removed`, `routes_marked_stale`, `render_requested`, or `output_rendered`. |
+| `command` | array of strings | Structured hook argv. |
+| `command_display` | string | Human-readable command rendering. |
+| `timeout_ms` | non-negative integer | Effective timeout in milliseconds. |
+| `hook_hash` | string | Effective hook-definition fingerprint. |
+| `target` | object | Target `kind`, `display`, and `hash`. |
+
+Hook target `kind` is `local_file`, `missing_file`, or `opaque`; `display` and
+`hash` are strings. When config resolution fails, `hooks` additionally contains
+a string `error` and `items` remains present (normally empty).
 
 Agents and scripts should prefer `status --json` or `list --json` over parsing
-human output. Use `status --json` for full registry detail and `list --json`
-for grouped project/service inventory.
+human output. Use `status --json` for the complete v1 status contract and
+`list --json` for grouped project/service inventory.
 
 ## Registry Export
 

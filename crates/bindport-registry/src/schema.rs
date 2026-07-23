@@ -2,10 +2,22 @@ use super::*;
 
 impl Registry {
     pub(crate) fn ensure_schema(&mut self) -> Result<(), RegistryError> {
-        self.connection.execute_batch(
+        self.connection.pragma_update(None, "foreign_keys", true)?;
+        let path = self.path.clone();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let user_version =
+            transaction.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+        if user_version > REGISTRY_USER_VERSION {
+            return Err(RegistryError::UnsupportedRegistryVersion {
+                path,
+                found: user_version,
+                supported: REGISTRY_USER_VERSION,
+            });
+        }
+        transaction.execute_batch(
             "
-            PRAGMA foreign_keys = ON;
-
             CREATE TABLE IF NOT EXISTS leases (
                 id INTEGER PRIMARY KEY,
                 project TEXT NOT NULL,
@@ -48,9 +60,9 @@ impl Registry {
 
             ",
         )?;
-        self.ensure_lease_identity_columns()?;
-        self.ensure_run_process_columns()?;
-        self.connection.execute_batch(
+        Self::ensure_lease_identity_columns(&transaction)?;
+        Self::ensure_run_process_columns(&transaction)?;
+        transaction.execute_batch(
             "
             CREATE INDEX IF NOT EXISTS leases_identity_key_idx
             ON leases(identity_key);
@@ -77,8 +89,8 @@ impl Registry {
             );
             ",
         )?;
-        self.ensure_output_file_scope_columns()?;
-        self.connection.execute_batch(
+        Self::ensure_output_file_scope_columns(&transaction)?;
+        transaction.execute_batch(
             "
 
             CREATE INDEX IF NOT EXISTS output_files_output_path_idx
@@ -91,16 +103,16 @@ impl Registry {
                 output_name TEXT PRIMARY KEY,
                 last_render_at_ms INTEGER NOT NULL
             );
-
-            PRAGMA user_version = 9;
             ",
         )?;
+        transaction.pragma_update(None, "user_version", REGISTRY_USER_VERSION)?;
+        transaction.commit()?;
 
         Ok(())
     }
 
-    fn ensure_lease_identity_columns(&self) -> Result<(), RegistryError> {
-        let existing = self.lease_columns()?;
+    fn ensure_lease_identity_columns(connection: &Connection) -> Result<(), RegistryError> {
+        let existing = Self::table_columns(connection, "leases")?;
 
         for (column, definition) in [
             ("worktree_path", "TEXT"),
@@ -115,7 +127,7 @@ impl Registry {
             ("health_url", "TEXT"),
         ] {
             if !existing.iter().any(|existing| existing == column) {
-                self.connection.execute(
+                connection.execute(
                     &format!("ALTER TABLE leases ADD COLUMN {column} {definition}"),
                     [],
                 )?;
@@ -125,45 +137,27 @@ impl Registry {
         Ok(())
     }
 
-    fn lease_columns(&self) -> Result<Vec<String>, RegistryError> {
-        let mut statement = self.connection.prepare("PRAGMA table_info(leases)")?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn ensure_run_process_columns(&self) -> Result<(), RegistryError> {
-        let existing = self.run_columns()?;
+    fn ensure_run_process_columns(connection: &Connection) -> Result<(), RegistryError> {
+        let existing = Self::table_columns(connection, "runs")?;
 
         if !existing
             .iter()
             .any(|existing| existing == "process_start_time")
         {
-            self.connection
-                .execute("ALTER TABLE runs ADD COLUMN process_start_time INTEGER", [])?;
+            connection.execute("ALTER TABLE runs ADD COLUMN process_start_time INTEGER", [])?;
         }
 
         Ok(())
     }
 
-    fn run_columns(&self) -> Result<Vec<String>, RegistryError> {
-        let mut statement = self.connection.prepare("PRAGMA table_info(runs)")?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn ensure_output_file_scope_columns(&mut self) -> Result<(), RegistryError> {
-        let existing = self.output_file_columns()?;
+    fn ensure_output_file_scope_columns(connection: &Connection) -> Result<(), RegistryError> {
+        let existing = Self::table_columns(connection, "output_files")?;
 
         if existing.iter().any(|existing| existing == "output_scope") {
             return Ok(());
         }
 
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
+        connection.execute_batch(
             "
             ALTER TABLE output_files RENAME TO output_files_scope_migration;
 
@@ -203,13 +197,11 @@ impl Registry {
             DROP TABLE output_files_scope_migration;
             ",
         )?;
-        transaction.commit()?;
-
         Ok(())
     }
 
-    fn output_file_columns(&self) -> Result<Vec<String>, RegistryError> {
-        let mut statement = self.connection.prepare("PRAGMA table_info(output_files)")?;
+    fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, RegistryError> {
+        let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
         let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

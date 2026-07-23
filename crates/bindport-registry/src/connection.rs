@@ -104,6 +104,15 @@ impl Registry {
             source,
         })?;
         connection.busy_timeout(REGISTRY_BUSY_TIMEOUT)?;
+        let user_version =
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+        if user_version > REGISTRY_USER_VERSION {
+            return Err(RegistryError::UnsupportedRegistryVersion {
+                path,
+                found: user_version,
+                supported: REGISTRY_USER_VERSION,
+            });
+        }
         connection.pragma_update(None, "journal_mode", "WAL")?;
         harden_registry_file(&path).map_err(|source| RegistryError::CreateDirectory {
             path: path.clone(),
