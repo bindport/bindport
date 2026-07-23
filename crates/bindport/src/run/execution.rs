@@ -36,6 +36,18 @@ pub(crate) fn run_wrapped_command(command: &[String], options: RunOptions) -> Ex
             eprintln!("bindport: {error}");
             ExitCode::FAILURE
         }
+        Err(RunCommandError::ReservedPortUnavailable { port }) => {
+            eprintln!(
+                "bindport: reserved port {port} is occupied; the reservation was kept and no child was spawned"
+            );
+            ExitCode::FAILURE
+        }
+        Err(RunCommandError::ReservedPromotion { port, source }) => {
+            eprintln!(
+                "bindport: failed to promote the reservation for port {port}; the child was terminated: {source}"
+            );
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -150,6 +162,7 @@ pub(crate) fn run_wrapped_command_result(
     let run_templates = resolve_run_templates(command, options, service_config);
     let requires_output_preflight = has_blocking_auto_outputs(&config)?;
     let mut registry = open_optional_registry();
+    let mut reserved_lease = None;
     let mut skip_ports = config.skip_ports.clone();
     let mut previous_port = None;
 
@@ -168,16 +181,27 @@ pub(crate) fn run_wrapped_command_result(
             }
         }
 
-        match registry.active_ports() {
-            Ok(active_ports) => skip_ports.extend(active_ports),
+        match registry.reserved_identity_lease(&identity.identity_key) {
+            Ok(lease) => reserved_lease = lease,
             Err(error) => {
-                print_registry_warning("failed to read active registry ports", &error);
+                print_registry_warning("failed to read reserved registry lease", &error);
                 registry_disabled_warning();
                 disable_registry = true;
             }
         }
 
-        if !disable_registry {
+        if !disable_registry && reserved_lease.is_none() {
+            match registry.active_ports() {
+                Ok(active_ports) => skip_ports.extend(active_ports),
+                Err(error) => {
+                    print_registry_warning("failed to read active registry ports", &error);
+                    registry_disabled_warning();
+                    disable_registry = true;
+                }
+            }
+        }
+
+        if !disable_registry && reserved_lease.is_none() {
             match registry.previous_identity_port(&identity.identity_key) {
                 Ok(port) => previous_port = port,
                 Err(error) => {
@@ -194,11 +218,20 @@ pub(crate) fn run_wrapped_command_result(
     let mut retries = 0;
 
     loop {
-        let allocation_hints = AllocationHints {
-            preferred_port: previous_port,
-            scan_start: identity.port_scan_start(config.port_range),
+        let port = if let Some(reserved) = reserved_lease.as_ref() {
+            if !is_port_available(reserved.port) {
+                return Err(RunCommandError::ReservedPortUnavailable {
+                    port: reserved.port,
+                });
+            }
+            reserved.port
+        } else {
+            let allocation_hints = AllocationHints {
+                preferred_port: previous_port,
+                scan_start: identity.port_scan_start(config.port_range),
+            };
+            allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?
         };
-        let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
         let run_metadata = resolve_run_metadata(&identity, port, &run_templates)?;
         let child_command = resolved_child_command(command, &run_metadata)?;
         let child_env = child_environment(&run_metadata.env, &execution_context.local_bin_dirs)?;
@@ -241,7 +274,17 @@ pub(crate) fn run_wrapped_command_result(
         };
 
         let started = if let Some(registry) = registry.as_mut() {
-            match registry.record_run_started(&run) {
+            let record_result = if let Some(reserved) = reserved_lease.as_ref() {
+                registry.promote_reserved_lease(&ReservedRunStart {
+                    lease_id: reserved.lease_id,
+                    pid: child.pid(),
+                    command: command_display.clone(),
+                    cwd: execution_context.cwd.clone(),
+                })
+            } else {
+                registry.record_run_started(&run)
+            };
+            match record_result {
                 Ok(started) => {
                     let events = RouteEventCollector::single(
                         RouteEventSource::CliRunner,
@@ -253,6 +296,14 @@ pub(crate) fn run_wrapped_command_result(
                         print_auto_render_warning(&events.warning_context(), &error);
                     }
                     Some(started)
+                }
+                Err(error) if reserved_lease.is_some() => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(RunCommandError::ReservedPromotion {
+                        port,
+                        source: error,
+                    });
                 }
                 Err(
                     error @ RegistryError::PortConflict {
@@ -284,9 +335,16 @@ pub(crate) fn run_wrapped_command_result(
         let status = child.wait()?;
         let attempt_elapsed = attempt_started_at.elapsed();
         let exit_code = status_registry_exit_code(&status);
+        let reserved_startup_conflict =
+            reserved_lease.is_some() && should_retry_allocation(&status, attempt_elapsed, port);
 
         if let (Some(registry), Some(started)) = (registry.as_mut(), started) {
-            match registry.record_run_finished(started, exit_code) {
+            let finish_result = if reserved_startup_conflict {
+                registry.record_reserved_run_failed(started, exit_code)
+            } else {
+                registry.record_run_finished(started, exit_code)
+            };
+            match finish_result {
                 Ok(()) => {
                     let events = RouteEventCollector::single(
                         RouteEventSource::CliRunner,
@@ -302,7 +360,11 @@ pub(crate) fn run_wrapped_command_result(
             }
         }
 
-        if retries < MAX_ALLOCATION_RETRIES
+        if reserved_startup_conflict {
+            eprintln!(
+                "bindport: reserved port {port} became unavailable during startup; the reservation was kept and no alternate port was assigned"
+            );
+        } else if retries < MAX_ALLOCATION_RETRIES
             && should_retry_allocation(&status, attempt_elapsed, port)
         {
             eprintln!(
