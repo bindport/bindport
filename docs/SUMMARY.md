@@ -33,6 +33,7 @@
 
 # Reference
 
+- [Configuration Stability](reference/config-stability.md)
 - [Platform Support](reference/platform-support.md)
 - [Agent and LLM Setup](reference/agents.md)
 

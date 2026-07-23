@@ -41,7 +41,7 @@ fi
 "$mdbook" build "${mdbook_args[@]}"
 
 mkdir -p "$out_dir"
-cp docs/llms.txt docs/llms-full.txt docs/robots.txt docs/status.schema.json "$out_dir"/
+cp docs/llms.txt docs/llms-full.txt docs/robots.txt docs/config.schema.json docs/status.schema.json "$out_dir"/
 rm -f "$out_dir/sitemap.xml"
 cargo run -p xtask -- docs-postprocess "$out_dir"
 

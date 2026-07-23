@@ -75,6 +75,12 @@ discovered.
 
 ## Supported Fields
 
+The complete machine-readable v1-candidate shape is
+[`config.schema.json`](../config.schema.json). See
+[Configuration Stability](../reference/config-stability.md) for the freeze and
+deprecation policy. This is the candidate contract for v1, not a claim that the
+v1 freeze has already happened.
+
 Current top-level fields:
 
 ```toml
@@ -119,7 +125,11 @@ allowed_hosts = ["localhost", "127.0.0.1"]
 [dashboard.auth]
 required = false
 token_env = "BINDPORT_DASHBOARD_TOKEN"
+# token = "machine-local-token" # accepted, but prefer token_env
 ```
+
+If `token` is used, keep it in an untracked machine-local override. Prefer
+`token_env` so the credential does not live in config.
 
 Output settings:
 
@@ -134,9 +144,17 @@ on_failure = "warn"
 debounce_ms = 250
 
 [[outputs]]
+enabled = true
 name = "traefik"
 template = "bindport-traefik"
+root = ".bindport/generated"
 target = "traefik/{{ route.slug }}.yml"
+target_host = "127.0.0.1"
+target_scheme = "http"
+auto_render = true
+delete_on = ["removed"]
+on_failure = "warn"
+debounce_ms = 250
 
 [outputs.vars]
 entrypoints = ["web"]
@@ -163,6 +181,7 @@ Hook settings:
 timeout_ms = 5000
 
 [[hooks.commands]]
+enabled = true
 name = "reload-proxy"
 events = ["route_started", "route_finished", "routes_removed", "output_rendered"]
 command = ["docker", "kill", "-s", "HUP", "traefik"]
@@ -204,8 +223,11 @@ For output integrations, prefer tools that watch generated files. Add hooks only
 when the external tool needs an explicit reload or apply step, and keep that
 command behind local trust.
 
-Unknown top-level keys are reported by `bindport doctor`. Service-level
-`health_url` is stored with each run. Active loopback `http://` health URLs are
+Unknown top-level keys are reported by `bindport config validate`, `bindport
+config explain`, and `bindport doctor`; unknown nested keys are currently
+ignored. `default_range` is the only supported port-range key. No config keys
+are currently deprecated, so `config validate` has no deprecation warnings to
+emit. Service-level `health_url` is stored with each run. Active loopback `http://` health URLs are
 probed by `status`; non-loopback and unsupported destinations stay `unknown`.
 Literal loopback IPs, `localhost`, and `*.localhost` names are treated as local
 targets without DNS resolution. `hostname`, `route_url`, and `health_url`

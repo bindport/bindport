@@ -1,0 +1,82 @@
+project: contract-project
+service: web
+default_range: 29000-29999
+skip_ports:
+  - 29000
+  - 29070
+services:
+  - name: web
+    path: apps/web
+    command:
+      - storybook
+      - dev
+    args:
+      - --port
+      - "{port}"
+    env:
+      PORT: "{port}"
+      SAFE_FLAG: enabled
+    hostname: "{service}.localhost"
+    route_url: "https://{hostname}"
+    health_url: "{route_url}/health"
+dashboard:
+  host: 127.0.0.1
+  port: 27080
+  register_service: true
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+  auth:
+    required: true
+    token: local-test-token
+    token_env: BINDPORT_DASHBOARD_TOKEN
+output_defaults:
+  root: .bindport/generated
+  target_host: 127.0.0.1
+  target_scheme: http
+  auto_render: true
+  delete_on:
+    - stopped
+    - stale
+    - removed
+  on_failure: warn
+  debounce_ms: 250
+outputs:
+  - enabled: true
+    name: contract
+    template: contract-template
+    root: .bindport/contract
+    target: routes.json
+    target_host: host.docker.internal
+    target_scheme: https
+    auto_render: false
+    delete_on:
+      - removed
+    on_failure: block
+    debounce_ms: 500
+    vars:
+      string: value
+      boolean: true
+      integer: 7
+      float: 1.5
+      array:
+        - one
+        - two
+      object:
+        nested: value
+hooks:
+  timeout_ms: 5000
+  commands:
+    - enabled: true
+      name: contract-hook
+      events:
+        - route_started
+        - route_finished
+        - routes_removed
+        - routes_marked_stale
+        - render_requested
+        - output_rendered
+      command:
+        - bindport
+        - render
+      timeout_ms: 2000

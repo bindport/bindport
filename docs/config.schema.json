@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bindport.dev/schemas/config.schema.json",
+  "title": "BindPort configuration v1 stable candidate",
+  "description": "Known BindPort project, fallback, and local override configuration fields. All fields are optional. Unknown top-level fields are accepted but reported; unknown nested fields are currently ignored.",
+  "type": "object",
+  "properties": {
+    "project": {"$ref": "#/$defs/nullableString"},
+    "service": {"$ref": "#/$defs/nullableString"},
+    "default_range": {"$ref": "#/$defs/nullableString"},
+    "skip_ports": {
+      "type": ["array", "null"],
+      "items": {"$ref": "#/$defs/port"}
+    },
+    "services": {
+      "type": ["array", "null"],
+      "items": {"$ref": "#/$defs/service"}
+    },
+    "dashboard": {
+      "anyOf": [
+        {"$ref": "#/$defs/dashboard"},
+        {"type": "null"}
+      ]
+    },
+    "output_defaults": {
+      "anyOf": [
+        {"$ref": "#/$defs/outputDefaults"},
+        {"type": "null"}
+      ]
+    },
+    "outputs": {
+      "type": ["array", "null"],
+      "items": {"$ref": "#/$defs/output"}
+    },
+    "hooks": {
+      "anyOf": [
+        {"$ref": "#/$defs/hooks"},
+        {"type": "null"}
+      ]
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "nullableBoolean": {
+      "type": ["boolean", "null"]
+    },
+    "nullableU64": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "nullablePort": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "nullableStringArray": {
+      "type": ["array", "null"],
+      "items": {"type": "string"}
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "name": {"$ref": "#/$defs/nullableString"},
+        "path": {"$ref": "#/$defs/nullableString"},
+        "command": {"$ref": "#/$defs/nullableStringArray"},
+        "args": {"$ref": "#/$defs/nullableStringArray"},
+        "env": {
+          "type": ["object", "null"],
+          "additionalProperties": {"type": "string"}
+        },
+        "hostname": {"$ref": "#/$defs/nullableString"},
+        "route_url": {"$ref": "#/$defs/nullableString"},
+        "health_url": {"$ref": "#/$defs/nullableString"}
+      },
+      "additionalProperties": true
+    },
+    "dashboard": {
+      "type": "object",
+      "properties": {
+        "host": {"$ref": "#/$defs/nullableString"},
+        "port": {"$ref": "#/$defs/nullablePort"},
+        "register_service": {"$ref": "#/$defs/nullableBoolean"},
+        "allowed_hosts": {"$ref": "#/$defs/nullableStringArray"},
+        "auth": {
+          "anyOf": [
+            {"$ref": "#/$defs/dashboardAuth"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "dashboardAuth": {
+      "type": "object",
+      "properties": {
+        "required": {"$ref": "#/$defs/nullableBoolean"},
+        "token": {"$ref": "#/$defs/nullableString"},
+        "token_env": {"$ref": "#/$defs/nullableString"}
+      },
+      "additionalProperties": true
+    },
+    "outputDefaults": {
+      "type": "object",
+      "properties": {
+        "root": {"$ref": "#/$defs/nullableString"},
+        "target_host": {"$ref": "#/$defs/nullableString"},
+        "target_scheme": {"$ref": "#/$defs/nullableString"},
+        "auto_render": {"$ref": "#/$defs/nullableBoolean"},
+        "delete_on": {"$ref": "#/$defs/nullableDeleteStates"},
+        "on_failure": {"$ref": "#/$defs/nullableFailurePolicy"},
+        "debounce_ms": {"$ref": "#/$defs/nullableU64"}
+      },
+      "additionalProperties": true
+    },
+    "nullableDeleteStates": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string",
+        "enum": ["stopped", "stale", "removed"]
+      }
+    },
+    "nullableFailurePolicy": {
+      "type": ["string", "null"],
+      "enum": ["warn", "block", null]
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "enabled": {"$ref": "#/$defs/nullableBoolean"},
+        "name": {"$ref": "#/$defs/nullableString"},
+        "template": {"$ref": "#/$defs/nullableString"},
+        "root": {"$ref": "#/$defs/nullableString"},
+        "target": {"$ref": "#/$defs/nullableString"},
+        "target_host": {"$ref": "#/$defs/nullableString"},
+        "target_scheme": {"$ref": "#/$defs/nullableString"},
+        "auto_render": {"$ref": "#/$defs/nullableBoolean"},
+        "delete_on": {"$ref": "#/$defs/nullableDeleteStates"},
+        "on_failure": {"$ref": "#/$defs/nullableFailurePolicy"},
+        "debounce_ms": {"$ref": "#/$defs/nullableU64"},
+        "vars": {
+          "type": ["object", "null"],
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "hooks": {
+      "type": "object",
+      "properties": {
+        "timeout_ms": {"$ref": "#/$defs/nullableU64"},
+        "commands": {
+          "type": ["array", "null"],
+          "items": {"$ref": "#/$defs/hookCommand"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "hookCommand": {
+      "type": "object",
+      "properties": {
+        "enabled": {"$ref": "#/$defs/nullableBoolean"},
+        "name": {"$ref": "#/$defs/nullableString"},
+        "events": {
+          "type": ["array", "null"],
+          "items": {"$ref": "#/$defs/hookEvent"}
+        },
+        "command": {"$ref": "#/$defs/nullableStringArray"},
+        "timeout_ms": {"$ref": "#/$defs/nullableU64"}
+      },
+      "additionalProperties": true
+    },
+    "hookEvent": {
+      "type": "string",
+      "enum": [
+        "route_started",
+        "route_finished",
+        "routes_removed",
+        "routes_marked_stale",
+        "render_requested",
+        "output_rendered"
+      ]
+    }
+  }
+}

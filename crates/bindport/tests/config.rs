@@ -2,6 +2,8 @@
 
 mod support;
 
+#[path = "config/contract.rs"]
+mod contract;
 #[path = "config/discovery.rs"]
 mod discovery;
 #[path = "config/examples.rs"]
