@@ -34,9 +34,10 @@ default.
 
 ## Reference
 
-- [Security Model](https://github.com/bindport/bindport/blob/main/docs/operations/security.md): Local-first defaults, config safety, output ownership, dashboard auth, and hook trust.
+- [CLI Stability Contract](https://github.com/bindport/bindport/blob/main/docs/reference/cli-stability.md): v1-candidate names, BindPort-owned failures versus child passthrough, machine-output guarantees, and compatibility policy.
+- [Security and Privacy](https://github.com/bindport/bindport/blob/main/docs/operations/security.md): Trust boundaries, local data, subprocess and network behavior, output ownership, dashboard auth, and hook trust.
 - [Health and Troubleshooting](https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md): Diagnostics, common failures, and recovery commands.
-- [Platform Support](https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md): Supported OS/package targets, paths, process behavior, and CI gates.
+- [Platform and MSRV Support](https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md): Rust 1.96.0 policy, OS/architecture/distribution boundaries, paths, process behavior, and CI gates.
 - [Config JSON Schema](https://github.com/bindport/bindport/blob/main/docs/config.schema.json): Machine-readable v1-candidate configuration shape and accepted value kinds.
 - [Configuration Stability](https://github.com/bindport/bindport/blob/main/docs/reference/config-stability.md): Config freeze boundary and deprecation policy; no keys are currently deprecated.
 - [Status JSON Schema](https://github.com/bindport/bindport/blob/main/docs/status.schema.json): Machine-readable `bindport status --json` schema 1.0; consumers ignore additive object fields but must handle the documented closed enums.

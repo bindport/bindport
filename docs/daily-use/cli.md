@@ -3,7 +3,9 @@
 BindPort is one CLI with a few related jobs: run a process with an assigned
 port, inspect the registry, render integration files, and manage local trust for
 hooks. Commands are designed to work both directly in a shell and inside project
-scripts.
+scripts. The canonical v1-candidate name, compatibility, exit-status, and
+machine-output policy is the [CLI Stability Contract](../reference/cli-stability.md).
+Human help and table formatting are not machine interfaces.
 
 ## Command Groups
 
@@ -40,8 +42,10 @@ bindport -- sh -c 'printf "PORT=%s\n" "$PORT"'
 ```
 
 BindPort allocates a port, injects `PORT=<assigned>`, records a run in the
-registry, forwards Unix SIGINT/SIGTERM to the child, and exits with the child
-process status code.
+registry, forwards Unix SIGINT/SIGTERM to the child, and returns normal child
+exit codes unchanged. A signaled Unix child is represented as `128 + signal`.
+BindPort-owned failures use `1`; that number is not reserved from children. See
+the [exit contract](../reference/cli-stability.md#exit-status).
 
 For configured services, prefer `bindport run <service>`:
 
@@ -116,20 +120,28 @@ bindport list --json
 bindport registry export
 ```
 
-`status --json` is the normal machine-readable current-state API. `list --json`
-is a grouped inventory view. `registry export` is a fuller debug/backup payload
-with raw lease, run, output ownership, and output render scheduling rows.
+`status --json` is the normal machine-readable current-state API and alone uses
+the frozen status schema `1.0`. `list --json` is a grouped inventory view with
+its own current schema `0.1`. `registry export` is a fuller debug/backup payload
+with its own schema `0.1`, SQLite `user_version`, and raw lease, run, output
+ownership, and output render scheduling rows. Neither is status schema 1.0, and
+`clean --json` is currently unversioned. No JSON array ordering is guaranteed.
 It can contain sensitive local data, including full command lines that may
 include tokens or passwords passed as arguments, plus filesystem paths. Review
 and redact it before sharing in a bug report.
 
-Resolve the best service URL:
+Resolve the best active service URL from the registry-wide snapshot:
 
 ```sh
 bindport open web --print
 bindport open web --browser
 bindport open web --project example
 ```
+
+`--project` does not select a worktree. If duplicate worktrees can be active,
+filter `status --json` by `identity_key` or exact worktree fields instead of
+assuming `open` selects the current checkout. Use `--print`, not `--browser`,
+for non-interactive automation.
 
 Reserve and release a port for an external process:
 
@@ -174,6 +186,11 @@ bindport clean --stopped
 bindport clean --stale --yes
 bindport clean --json --yes
 ```
+
+`clean --json` is unversioned. Destructive cleanup can run approved lifecycle
+hooks, and a hook that writes to inherited stdout can contaminate the JSON
+stream. `clean --json --dry-run` executes no hooks and is the safe parse-only
+preview.
 
 ## Dashboard Commands
 

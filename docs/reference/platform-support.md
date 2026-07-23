@@ -1,83 +1,146 @@
-# Platform Support
+# Platform And MSRV Support
 
-BindPort currently supports Linux and macOS local development. Windows is
-post-1.0 and is not a supported install target yet.
+BindPort supports local development on Linux and macOS through v1. Windows is
+post-v1 and is not a supported build, install, CI, or runtime target.
 
-## Supported Targets
+## Rust Version Policy
 
-| Area | Supported |
+The supported Rust build floor (MSRV policy) is **Rust 1.96.0**. That is the
+version pinned by `mise.toml`, used by Linux CI through the locked mise toolset,
+installed explicitly by macOS CI, and used for all release artifact builds.
+Release and compatibility changes must continue to compile and test on 1.96.0
+until an announced MSRV increase.
+
+The workspace currently uses Rust edition 2024 but does not set Cargo's
+`package.rust-version`; `cargo metadata` therefore reports no enforced
+`rust_version`. Cargo may attempt a build with an older compiler, but such a
+build is outside the support contract even if it happens to succeed. This page
+and the pinned CI/release toolchains are the current policy authority.
+
+## Operating Systems, Architectures, And Distributions
+
+| Area | Support contract |
 |---|---|
-| Operating systems | Linux, macOS |
-| Architectures | x64, arm64 |
-| Cargo install | Linux/macOS through `cargo install bindport` |
-| cargo-binstall | Linux/macOS x64/arm64 from GitHub Release binaries |
-| npm install | `bindport` wrapper plus Linux/macOS native packages |
-| Homebrew | `bindport/tap/bindport` formula from GitHub Release binaries |
-| mise / ubi | `ubi:bindport/bindport` from GitHub Release binaries |
-| GitHub Release assets | Linux/macOS raw binaries and npm tarballs |
-| CI compatibility | Linux full CI, macOS compatibility build/test/npm smoke |
-| Windows | Post-1.0; not supported yet |
+| Runtime operating systems | Linux and macOS |
+| Prebuilt architectures | x86_64 (`x64`) and AArch64 (`arm64`) |
+| GitHub Release binaries | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, and `aarch64-apple-darwin` |
+| npm native packages | Linux/macOS x64/arm64, selected by a POSIX shell wrapper |
+| cargo-binstall, Homebrew, mise/ubi | The same four GitHub Release binary targets |
+| Cargo install | Source build on a supported Linux or macOS host using Rust 1.96.0 or newer |
+| Windows and other operating systems | Unsupported through v1 |
 
-## Paths
+Architecture support for prebuilt channels is narrower than source-build
+possibility. Cargo may compile on another Linux/macOS architecture, but without
+a corresponding CI runner or release asset it is not a supported architecture.
 
-Project config is discovered from `.bindport.toml`, `.bindport.json`, or
-`.bindport.yaml` by walking upward from the current directory. A matching
-`.bindport.local.*` or `bindport.local.*` file in the same directory provides
-machine-local overrides and should stay untracked.
+Linux release binaries use the GNU target and are built on Ubuntu 24.04 x64 and
+arm64 runners. Ubuntu is the full Linux CI environment. Other glibc-based Linux
+distributions may run those binaries when their runtime ABI is compatible, but
+BindPort does not publish a per-distribution compatibility matrix. No musl
+binary, static-Linux guarantee, container image, or Windows asset is currently
+published. A source build on an untested distribution is not equivalent to a
+release-asset support guarantee.
 
-User fallback config uses:
+macOS release assets are built separately on macOS 15 Intel and arm64 runners.
+The regular macOS compatibility job runs clippy, all-target tests, a locked
+release build, and the npm wrapper smoke test. BindPort does not currently
+publish a minimum macOS release number beyond what those build artifacts and
+runners support.
 
-- `$XDG_CONFIG_HOME/bindport/config.toml`
-- `~/.config/bindport/config.toml` when `XDG_CONFIG_HOME` is unset
+For channel-specific installation commands, use
+[Install BindPort](../getting-started/install.md). This page defines support
+boundaries rather than duplicating release procedures.
 
-State uses:
+## Shell And External Command Requirements
 
-- `$XDG_STATE_HOME/bindport/registry.sqlite`
-- `~/.local/state/bindport/registry.sqlite` when `XDG_STATE_HOME` is unset
+The native Rust binary does not require a shell for normal subcommands.
+`bindport -- <command>`, configured service commands, and hooks execute
+structured argv directly. Shell syntax works only when the user explicitly
+runs a shell such as `sh -c`.
 
-Dashboard service state, dashboard logs, and hook trust state live under the
-same BindPort state directory.
+The npm launcher is a POSIX `sh` script. It uses common Unix tools including
+`uname`, `dirname`, and `readlink`, then executes the matching native package.
+The npm distribution is therefore not a native Windows launcher. Project
+scripts and documentation examples that use `sh` also require a compatible
+shell, even when the underlying BindPort command itself does not.
 
-## Process And Port Behavior
+Optional platform commands are:
 
-BindPort probes TCP loopback on IPv4 and IPv6, then starts the child process with
-the assigned `PORT`. The probe listener is released before the child starts, so
-BindPort retries once when the child fails immediately and the assigned port is
-then occupied.
+- `git` for worktree, branch, and package identity enrichment; BindPort falls
+  back when git metadata is unavailable;
+- `ps` on macOS for best-effort command-line verification; and
+- `open` on macOS or `xdg-open` on Linux for the explicit `open --browser`
+  action.
 
-On Unix platforms, the runner forwards SIGINT and SIGTERM to the wrapped child
-and exits with the child's status code. Dashboard service controls use SIGTERM
-for `bindport dashboard stop`.
+## Process, Signal, And Port Differences
 
-Linux has the strongest PID-reuse protection today because BindPort can compare
-recorded process start time and command line through `/proc`. macOS does not
-expose the same `/proc` start-time fields, so BindPort falls back to PID
-liveness plus command-line inspection through `ps` where command verification is
-needed.
+BindPort probes TCP loopback on IPv4 and IPv6, then releases the probe listener
+before starting a child. Reservations are SQLite coordination and likewise do
+not retain an OS listener. Another process can claim the port during that gap.
+An ordinary allocation can retry once after an immediate occupied-port startup
+failure; an unavailable reserved port fails without silently renumbering it.
+UDP availability is not checked.
 
-Output files are written with sibling temp files and `rename`, so generated
-template output is atomic on the same filesystem. On Unix platforms, registry
-directories and files are permission-hardened when BindPort creates them.
+Linux and macOS are Unix platforms for runner purposes. The wrapper forwards
+SIGINT and SIGTERM to its child. A normal child exit is passed through; a child
+terminated by a signal is represented as the conventional `128 + signal`
+numeric status. See [CLI Stability Contract](cli-stability.md) for the exact
+exit contract.
 
-## Verification Gates
+Linux has the strongest PID-reuse checks. New run records capture process start
+time from `/proc` and compare it during stale reconciliation; older records
+without that value use PID liveness plus command-line inspection. macOS has no
+Linux-style `/proc` start-time value; BindPort combines PID liveness with a
+best-effort command-line query through `ps`. If command inspection is
+unavailable, some stale checks conservatively fall back to PID liveness, so PID
+reuse can be misclassified until manual cleanup. `doctor` reports registry and
+listener conflicts; it does not promise full process ownership attribution.
 
-Local:
+Background dashboard stop uses SIGTERM only after matching the recorded state.
+Linux can compare both start time and command shape. macOS can inspect command
+shape through `ps` when available but cannot compare the Linux start-time
+field, so stale PID reuse has weaker protection.
 
-```sh
-mise run ci
-```
+## Filesystem And Path Assumptions
 
-The local CI task includes format, clippy, platform cfg guard, workflow lint,
-audit, dependency guard, secret scan, security scan, tests, coverage, release
-build, and npm wrapper smoke tests.
+Config discovery walks ancestors of the current directory. Project config,
+local override config, custom templates, and generated text are expected to be
+UTF-8. CLI arguments use Rust's Unicode argument interface. Arbitrary non-UTF-8
+path and argument round-tripping is not a supported contract for JSON, status,
+or registry display fields.
 
-GitHub Actions:
+Service paths and project-config output roots are relative to the discovered
+config root and may not contain `..`; fallback-config outputs use the invoking
+cwd as their base. Configured service paths are canonicalized and must remain
+under their config root. Output targets must remain under the resolved output
+root and may not traverse symlink components.
 
-- Linux runs the full CI gate, including the platform cfg guard and npm wrapper
-  smoke test.
-- macOS runs clippy, tests, release build, and npm wrapper smoke as a
-  compatibility gate.
-- Release builds Linux/macOS x64/arm64 binaries and matching npm tarballs.
+Generated outputs use a temporary sibling plus `rename`; atomic replacement is
+therefore expected only within the same filesystem. Registry state uses SQLite
+WAL files beside the database. On Unix, the registry directory/database created
+by BindPort are hardened to `0700`/`0600`; output temp files are created as
+`0600`.
+See [Security and Privacy](../operations/security.md) for ownership and local
+state limits.
 
-The platform cfg guard catches Linux-only `#[cfg(target_os = "linux")]` patterns
-that Linux clippy can miss but macOS clippy reports as unused code.
+Default paths are:
+
+- project config: `.bindport.toml`, `.bindport.json`, or `.bindport.yaml`,
+  discovered upward;
+- user fallback config: `$XDG_CONFIG_HOME/bindport/config.toml` or
+  `~/.config/bindport/config.toml`;
+- registry: `$XDG_STATE_HOME/bindport/registry.sqlite` or
+  `~/.local/state/bindport/registry.sqlite`; and
+- dashboard state/log and hook trust: the same BindPort state directory.
+
+## Verification Coverage
+
+Linux CI runs format, clippy, tests, coverage, a platform-cfg guard, release
+build, dependency/security checks, CLI asset checks, npm smoke, and docs build.
+macOS CI runs clippy, all-target tests, a locked release build, and npm smoke.
+The release matrix builds and packages all four prebuilt targets listed above
+with Rust 1.96.0.
+
+The platform-cfg guard catches Linux-only conditional-compilation shapes that a
+Linux clippy run can miss but macOS would report as unused. There is no Windows,
+musl, BSD, or other Unix CI job, and no compatibility promise for those targets.

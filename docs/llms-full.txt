@@ -4,8 +4,10 @@
 > integration files, dashboard visibility, and trusted lifecycle hooks without
 > becoming the user's proxy, process manager, DNS layer, or secret manager.
 
-BindPort is for local development on Linux and macOS. It wraps commands,
-assigns stable ports from a configured range, records project/service/worktree
+BindPort is for local development on Linux and macOS. Its supported Rust build
+floor is 1.96.0; prebuilt assets cover GNU/Linux and macOS on x64/arm64, while
+Windows is unsupported through v1. It wraps commands, assigns stable ports from
+a configured range, records project/service/worktree
 ownership in a local SQLite registry, exposes status through CLI JSON and a
 dashboard, renders text files for existing tools such as Traefik, and runs
 locally trusted hooks when lifecycle events happen.
@@ -74,6 +76,25 @@ stopped, stale, ambiguous, or unavailable metadata. They do not apply to CLI,
 route metadata, outputs, or hooks. Port assignment does not imply readiness;
 BindPort does not start, order, supervise, or wait for dependencies.
 
+## CLI Contract
+
+The canonical v1-candidate command/flag, exit, and machine-output policy is
+`docs/reference/cli-stability.md`. Human prose, whitespace, and ordering are not
+stable interfaces. BindPort-owned usage/startup/config/required-registry
+failures return 1; there is no separately reserved numeric range, so a child
+that returns 1 is indistinguishable by status alone. Normal child codes pass
+through. On Unix, a signaled child is recorded and returned as `128 + signal`.
+Help and version succeed with 0. Wrapped children inherit stdio, so wrapper mode
+does not reserve stdout for BindPort.
+
+Machine modes write their own payloads to stdout and diagnostics/warnings to
+stderr. `status --json` alone is frozen as schema 1.0. `list --json` and
+`registry export` each currently report their separate schema 0.1; `clean
+--json` is unversioned, and destructive cleanup hook stdout can contaminate its
+stream (`--dry-run` runs no hooks). `port` is the exact decimal-port scalar, and
+`open --print` is the registry-wide URL scalar. No JSON member or array ordering is guaranteed. Config and hook
+status surfaces are human output, not JSON contracts.
+
 ## Registry State
 
 Registry states are `active`, `reserved`, `stopped`, and `stale`. The registry
@@ -83,8 +104,11 @@ is local state stored under `$XDG_STATE_HOME/bindport/registry.sqlite` or
 Agents and scripts should use `bindport port <service>` for exact decimal port
 output, `bindport status --json` for normal registry detail, or
 `bindport list --json` for grouped project/service inventory instead of parsing
-human output or hardcoding ports. Port lookup considers only active or reserved
-services in the selected project and current worktree. Use
+human output or hardcoding ports. Status and list are registry-wide; select by
+identity or exact worktree rather than array position. Port lookup considers
+only active or reserved services in the selected project and current worktree.
+`open --project` is registry-wide and can remain ambiguous across worktrees; use
+status identity fields for an exact current-worktree URL. Use
 `bindport registry export` for debug/backup snapshots that need raw lease, run,
 output ownership, and render state rows.
 
@@ -114,8 +138,9 @@ project templates, global templates, and built-ins. The built-in templates are
 `snapshot.generated_at`, `snapshot.route_count`, `route.*`, `output.*`, and
 user-provided `vars.*`.
 
-Output roots must be relative to the config file and must not contain `..`.
-BindPort tracks output ownership in the registry and refuses to overwrite
+Output roots must be relative and must not contain `..`. Project-config roots
+resolve beside that config; fallback-config outputs resolve from the invoking
+cwd. BindPort tracks output ownership in the registry and refuses to overwrite
 unowned or externally modified files during normal render. Ownership is scoped
 to the resolved output root and config root, so separate worktrees can render
 the same output and route without overwriting each other's registry row.
@@ -152,18 +177,38 @@ Supported hook events include `route_started`, `route_finished`,
 
 ## Dashboard
 
-The dashboard defaults to `127.0.0.1:27080`. Non-loopback binds require auth.
-The dashboard shows active, reserved, stopped, and stale registry state; route
-URLs; output status; health status; and hook trust visibility. It can clean
-stopped and stale entries but cannot approve hooks.
+The dashboard defaults to `127.0.0.1:27080`. Non-loopback binds require bearer
+auth. It uses plain HTTP and provides no TLS. The HTML/assets and `/healthz`
+remain unauthenticated; registry and cleanup APIs require auth when enabled,
+and cleanup also requires an action header. The dashboard shows active,
+reserved, stopped, and stale registry state; route URLs; output status; health
+status; and hook trust visibility. It can clean stopped and stale entries but
+cannot approve hooks.
+
+## Security And Privacy
+
+The canonical contract is `docs/operations/security.md`. BindPort is not a
+sandbox or secret manager. Wrapped commands inherit the ambient environment and
+user permissions. Approved hooks run with user permissions but a cleared
+environment containing only PATH and BindPort event metadata. Registry, status,
+dashboard, trust state, logs, exports, and generated templates can expose local
+commands, paths, branches, URLs, and user-supplied values; no secret scrubbing or
+encryption is promised.
+
+The installed runtime has no telemetry or update check. BindPort performs
+loopback port probes, loopback-only HTTP health probes during status reads, the
+configured dashboard listener, and explicit browser launching. Wrapped
+children, approved hooks, browsers, package managers, and release tooling are
+separate processes that may use broader networks.
 
 ## Agent Safety Rules
 
 Agents should use existing project scripts or `bindport run <service>`, use
 `bindport reserve --all` when all configured addresses are needed before
 startup, run `bindport config validate` after config changes, discover ports
-through `bindport port <service>`, discover URLs through
-`bindport status --json` or `bindport open <service> --print`, and avoid editing
+through `bindport port <service>`, and discover exact-worktree URLs by filtering
+`bindport status --json` identity fields (using `bindport open <service>
+--print` only when registry-wide selection is unambiguous). Avoid editing
 machine-local overrides or generated files unless explicitly asked. Agents
 should not run hook trust, deny, reset, or hook commands without user approval.
 
@@ -174,6 +219,7 @@ should not run hook trust, deny, reset, or hook commands without user approval.
 - Install: https://github.com/bindport/bindport/blob/main/docs/getting-started/install.md
 - Quick Start: https://github.com/bindport/bindport/blob/main/docs/getting-started/quick-start.md
 - CLI Commands: https://github.com/bindport/bindport/blob/main/docs/daily-use/cli.md
+- CLI stability contract: https://github.com/bindport/bindport/blob/main/docs/reference/cli-stability.md
 - Running Services: https://github.com/bindport/bindport/blob/main/docs/daily-use/running-services.md
 - Configuration: https://github.com/bindport/bindport/blob/main/docs/daily-use/configuration.md
 - Config schema: https://github.com/bindport/bindport/blob/main/docs/config.schema.json

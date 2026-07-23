@@ -216,7 +216,9 @@ examples and boundaries.
 ## Signals And Exit Codes
 
 On Unix platforms, BindPort forwards SIGINT and SIGTERM to the wrapped child
-and exits with the child's status code. This lets package scripts and CI jobs
+and returns normal child exit codes unchanged. Unix signal termination is
+reported as `128 + signal`; BindPort-owned failures use `1`, which is not
+reserved from children. This lets package scripts and CI jobs
 treat BindPort as a transparent wrapper around the dev command.
 
 ## Probe Window

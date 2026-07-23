@@ -18,21 +18,28 @@ development ports when BindPort config or scripts already describe the service.
 4. Use `bindport reserve --all` when every named configured service needs a
    stable port before any child starts.
 5. Use `bindport run <service>` to run configured services.
-6. Use `bindport port <service>` for an exact active or reserved port, or
-   `bindport status --json`, `bindport list --json`, and
-   `bindport open <service> --print` for broader discovery.
+6. Use `bindport port <service>` for an exact current-worktree active or
+   reserved port. Use `bindport status --json` and match identity/worktree
+   fields for an exact URL; use `bindport list --json` for inventory and
+   `bindport open <service> --print` only when registry-wide selection is
+   unambiguous.
 7. Use `bindport registry export` only for debug/backup snapshots or output
    ownership investigations; prefer `status --json` for normal automation.
 
 `status --json` uses schema `1.0`. Ignore unfamiliar additive object fields,
 handle its documented enum values explicitly, and do not depend on JSON member
-or array ordering. Do not edit the SQLite registry directly to resolve a
-migration error; preserve it and follow `docs/reference/registry-migrations.md`.
+or array ordering. Status and list are registry-wide: select by `identity_key`
+or exact project/service/worktree fields, never array position. `open
+--project` does not select a worktree. Do not edit the SQLite registry directly
+to resolve a migration error; preserve it and follow
+`docs/reference/registry-migrations.md`.
 
 `reserve --all` is idempotent and scoped to the discovered project and current
 worktree; new reservations commit all-or-nothing, and it neither starts
 children nor owns sockets. `port` prints only the decimal port and newline, and
-fails for missing, stopped, stale, or ambiguous matches.
+fails for missing, stopped, stale, or ambiguous matches. Use `open --print`,
+never `--browser`, in non-interactive automation. Preview cleanup with
+`bindport clean --dry-run --json`; do not add `--yes` without explicit approval.
 
 ## Config Rules
 
@@ -75,6 +82,7 @@ bindport doctor outputs
 bindport status --json
 bindport list --json
 bindport registry export
+bindport clean --dry-run --json
 bindport reserve --all
 bindport port <service>
 bindport open <service> --print

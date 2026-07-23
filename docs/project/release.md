@@ -47,7 +47,8 @@ The minimum release gate is:
 2. The child process receives `PORT=<assigned>`.
 3. The child inherits stdio.
 4. SIGINT and SIGTERM are forwarded.
-5. BindPort exits with the child's exit code.
+5. BindPort returns a normal child's exit code unchanged; Unix signal
+   termination follows the documented `128 + signal` convention.
 6. `bindport status --json` reports the latest service plus run history using
    the documented status schema.
 7. Configured service commands can pass assigned values through env templates

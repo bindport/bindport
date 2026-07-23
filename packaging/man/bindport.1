@@ -47,7 +47,15 @@ Release a reserved lease by service identity or port.
 .B status [--json]
 Show registry status. Use
 .B --json
-for machine-readable output.
+for the stable status schema 1.0 machine output.
+.TP
+.B list [--json]
+List projects and services in a grouped registry-wide inventory. Its JSON schema
+is versioned separately from status.
+.TP
+.B registry export
+Print a full registry debug/backup JSON snapshot. Its schema and SQLite user
+version are separate from status schema 1.0.
 .TP
 .B open [service]
 Print or open the best URL for a service.
@@ -88,7 +96,15 @@ Serve the local dashboard.
 Control the background dashboard service.
 .TP
 .B render [output]
-Render configured output files.
+Render configured output files. Use
+.B --dry-run
+or
+.B --diff
+for non-writing previews,
+.B --repair
+for ownership reconciliation, and
+.BR --verbose / -v
+for diagnostics on standard error.
 .TP
 .B templates list|show|export
 Inspect or export output templates.
@@ -177,7 +193,7 @@ Private machine-local override config. This file should not be committed.
 .I $XDG_CONFIG_HOME/bindport/config.toml
 Optional user fallback config.
 .TP
-.I $XDG_STATE_HOME/bindport/registry.sqlite3
+.I $XDG_STATE_HOME/bindport/registry.sqlite
 Default SQLite registry path on Linux-style systems.
 .SH ENVIRONMENT
 .TP
@@ -190,8 +206,10 @@ Project identity override.
 .B BINDPORT_SERVICE
 Service identity override.
 .SH EXIT STATUS
-When wrapping a child process, BindPort exits with the child process exit code.
-Command parsing, config, registry, or render errors exit non-zero.
+BindPort-owned usage and fatal startup failures exit 1; no distinct numeric
+range is reserved from children. Normal wrapped-child exit codes pass through.
+On Unix, a child terminated by a signal is represented as 128 plus the signal
+number. Help and version exit 0.
 .SH SEE ALSO
 Project documentation:
 .UR https://github.com/bindport/bindport
