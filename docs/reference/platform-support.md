@@ -43,9 +43,9 @@ release-asset support guarantee.
 
 macOS release assets are built separately on macOS 15 Intel and arm64 runners.
 The regular macOS compatibility job runs clippy, all-target tests, a locked
-release build, and the npm wrapper smoke test. BindPort does not currently
-publish a minimum macOS release number beyond what those build artifacts and
-runners support.
+release build, and the staged release smoke. BindPort does not currently publish
+a minimum macOS release number beyond what those build artifacts and runners
+support.
 
 For channel-specific installation commands, use
 [Install BindPort](../getting-started/install.md). This page defines support
@@ -136,10 +136,14 @@ Default paths are:
 ## Verification Coverage
 
 Linux CI runs format, clippy, tests, coverage, a platform-cfg guard, release
-build, dependency/security checks, CLI asset checks, npm smoke, and docs build.
-macOS CI runs clippy, all-target tests, a locked release build, and npm smoke.
-The release matrix builds and packages all four prebuilt targets listed above
-with Rust 1.96.0.
+build, dependency/security checks, docs build, and the staged release smoke.
+macOS CI runs clippy, all-target tests, a locked release build, and the same
+staged release smoke. That smoke reuses the npm, CLI asset, binstall, and
+Homebrew formula checks, then executes the host-compatible staged npm package
+through the v0.8 reservation, wiring, render, dashboard, and cleanup flow. The
+other three targets are metadata-mapped; only a separately authorized live
+release-candidate exercise verifies public channels. The release matrix builds
+and packages all four prebuilt targets listed above with Rust 1.96.0.
 
 The platform-cfg guard catches Linux-only conditional-compilation shapes that a
 Linux clippy run can miss but macOS would report as unused. There is no Windows,

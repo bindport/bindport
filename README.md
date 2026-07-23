@@ -11,10 +11,12 @@ root-owned daemon.
 
 ## Current Status
 
-BindPort v0.6.0 is the current release candidate. Once published, it installs
-the same Rust CLI through Cargo, npm, GitHub Release binaries, `cargo binstall`,
-Homebrew, or mise/ubi. See [Install BindPort](docs/getting-started/install.md) for channel
-details.
+BindPort is in pre-1.0 stable-candidate development. Cargo/npm manifests, not
+this README, are the source-version authority. Release metadata maps the same
+Rust CLI across Cargo, npm, GitHub Release binaries, `cargo binstall`, the
+Homebrew tap, and mise/ubi; availability still depends on publishing the
+specific version. See [Install BindPort](docs/getting-started/install.md) for channel
+and verification boundaries.
 
 Install globally with Cargo:
 
@@ -163,6 +165,7 @@ The same local checks are available through `mise`:
 mise install --locked
 mise run check
 mise run ci
+mise run release-smoke
 mise run dev-dashboard
 ```
 
@@ -384,8 +387,8 @@ machine-readable counts. Active services are not removed. Destructive
 - [Platform and MSRV Support](docs/reference/platform-support.md): Rust 1.96.0 policy,
   supported operating systems, package targets, filesystem paths, process
   behavior, and verification gates.
-- [Release](docs/project/release.md): release prep automation, GitHub release binaries,
-  Cargo publish helpers, and npm packaging.
+- [Release](docs/project/release.md): local staged release smoke, deferred live-channel
+  acceptance, release prep automation, GitHub artifacts, and Cargo/npm packaging.
 - [Changelog](CHANGELOG.md): generated release notes from Conventional Commits.
 
 ## License
