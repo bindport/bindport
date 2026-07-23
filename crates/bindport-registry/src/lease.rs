@@ -277,6 +277,13 @@ impl Registry {
             .filter(|run| !active_run_process_matches(run))
             .collect::<Vec<_>>();
 
+        self.mark_observed_runs_stale(&stale_runs)
+    }
+
+    pub(crate) fn mark_observed_runs_stale(
+        &mut self,
+        stale_runs: &[ActiveRun],
+    ) -> Result<usize, RegistryError> {
         if stale_runs.is_empty() {
             return Ok(0);
         }
@@ -285,25 +292,30 @@ impl Registry {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut transitioned = 0;
 
-        for stale_run in &stale_runs {
+        for stale_run in stale_runs {
+            let updated = transaction.execute(
+                "UPDATE leases
+                 SET state = 'stale', last_seen_at = ?1, released_at = ?1
+                 WHERE id = ?2 AND state = 'active'",
+                params![now, stale_run.lease_id],
+            )?;
+            if updated == 0 {
+                continue;
+            }
             transaction.execute(
                 "UPDATE runs
                  SET exited_at = COALESCE(exited_at, ?1)
-                 WHERE id = ?2",
+                 WHERE id = ?2 AND exited_at IS NULL",
                 params![now, stale_run.run_id],
             )?;
-            transaction.execute(
-                "UPDATE leases
-                 SET state = 'stale', last_seen_at = ?1, released_at = ?1
-                 WHERE id = ?2",
-                params![now, stale_run.lease_id],
-            )?;
+            transitioned += updated;
         }
 
         transaction.commit()?;
 
-        Ok(stale_runs.len())
+        Ok(transitioned)
     }
 
     pub fn record_run_started(&mut self, run: &RunStart) -> Result<StartedRun, RegistryError> {

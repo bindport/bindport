@@ -256,6 +256,84 @@ fn record_run_started_rejects_duplicate_active_port() {
     assert_eq!(registry.active_ports().expect("ports"), vec![29_500]);
 }
 
+#[test]
+fn stale_reconciliation_does_not_clobber_a_concurrently_finished_run() {
+    let path = temp_registry_path("stale-finish-race");
+    let mut registry = Registry::open(&path).expect("registry");
+    let first = registry
+        .record_run_started(&test_run_start(
+            "bindport",
+            "web",
+            29_505,
+            std::process::id(),
+        ))
+        .expect("first run");
+    let second = registry
+        .record_run_started(&test_run_start(
+            "bindport",
+            "api",
+            29_506,
+            std::process::id(),
+        ))
+        .expect("second run");
+    let observed_stale = [
+        ActiveRun {
+            lease_id: first.lease_id,
+            run_id: first.run_id,
+            pid: std::process::id(),
+            process_start_time: None,
+            command: current_process_command(),
+        },
+        ActiveRun {
+            lease_id: second.lease_id,
+            run_id: second.run_id,
+            pid: std::process::id(),
+            process_start_time: None,
+            command: current_process_command(),
+        },
+    ];
+
+    let mut concurrent = Registry::open(&path).expect("concurrent registry");
+    concurrent
+        .record_run_finished(first, Some(0))
+        .expect("concurrent finish");
+
+    assert_eq!(
+        registry
+            .mark_observed_runs_stale(&observed_stale)
+            .expect("mark observed stale runs"),
+        1
+    );
+    let export = registry.export_snapshot().expect("registry export");
+    let first_lease = export
+        .leases
+        .iter()
+        .find(|lease| lease.id == first.lease_id)
+        .expect("first lease");
+    let first_run = export
+        .runs
+        .iter()
+        .find(|run| run.id == first.run_id)
+        .expect("first run");
+    assert_eq!(first_lease.state, "stopped");
+    assert_eq!(first_run.exit_code, Some(0));
+    assert!(first_run.exited_at.is_some());
+
+    let second_lease = export
+        .leases
+        .iter()
+        .find(|lease| lease.id == second.lease_id)
+        .expect("second lease");
+    let second_run = export
+        .runs
+        .iter()
+        .find(|run| run.id == second.run_id)
+        .expect("second run");
+    assert_eq!(second_lease.state, "stale");
+    assert_eq!(second_run.exit_code, None);
+    assert!(second_run.exited_at.is_some());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn active_ports_marks_reused_pid_stale_when_start_time_changes() {
