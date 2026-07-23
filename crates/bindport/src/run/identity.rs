@@ -17,14 +17,26 @@ pub(crate) fn resolve_run_identity(
         .as_ref()
         .and_then(|loaded| loaded.configured_service_name_for_cwd(cwd));
 
-    resolve_identity(IdentitySources {
-        cwd,
-        command,
-        cli_project: None,
-        cli_service: options.service.as_deref(),
-        env_project: env_project.as_deref(),
-        env_service: env_service.as_deref(),
-        config_project,
-        config_service,
-    })
+    resolve_identity_in_scope(
+        IdentitySources {
+            cwd,
+            command,
+            cli_project: None,
+            cli_service: options.service.as_deref(),
+            env_project: env_project.as_deref(),
+            env_service: env_service.as_deref(),
+            config_project,
+            config_service,
+        },
+        project_identity_scope(cwd, config),
+    )
+}
+
+pub(crate) fn project_identity_scope<'a>(cwd: &'a Path, config: &'a ResolvedConfig) -> &'a Path {
+    config
+        .loaded
+        .as_ref()
+        .filter(|loaded| loaded.source == ConfigSource::Project)
+        .and_then(|loaded| loaded.path.parent())
+        .unwrap_or(cwd)
 }

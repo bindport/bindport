@@ -36,6 +36,13 @@ pub struct IdentitySources<'a> {
     pub config_service: Option<&'a str>,
 }
 pub fn resolve_identity(sources: IdentitySources<'_>) -> ServiceIdentity {
+    resolve_identity_in_scope(sources, sources.cwd)
+}
+
+pub fn resolve_identity_in_scope(
+    sources: IdentitySources<'_>,
+    no_git_scope: &Path,
+) -> ServiceIdentity {
     let git = detect_git_identity(sources.cwd);
     let package = package_inference(sources.cwd, git.as_ref());
     let project = first_non_empty([
@@ -54,7 +61,7 @@ pub fn resolve_identity(sources: IdentitySources<'_>) -> ServiceIdentity {
     .map(str::to_owned)
     .or_else(|| package.service_name())
     .unwrap_or_else(|| infer_service_name(sources.command));
-    let identity_key = identity_key(&project, &service, sources.cwd, git.as_ref());
+    let identity_key = identity_key(&project, &service, no_git_scope, git.as_ref());
 
     ServiceIdentity {
         project,

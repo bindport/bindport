@@ -136,6 +136,41 @@ fn port_rejects_stale_services() {
 }
 
 #[test]
+fn project_config_root_scopes_nested_port_lookup_without_git() {
+    let registry_path = temp_registry_path("port-project-root");
+    let root = temp_test_dir("port-project-root-directory");
+    let service_root = root.join("apps").join("web");
+    fs::create_dir_all(&service_root).expect("service directory");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"project-root\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\npath = \"apps/web\"\n"
+        ),
+    )
+    .expect("project config");
+
+    let reserve = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve", "--all"])
+        .output()
+        .expect("reserve project services");
+    assert!(
+        reserve.status.success(),
+        "reserve failed: {}",
+        String::from_utf8_lossy(&reserve.stderr)
+    );
+
+    let nested = port_output(&registry_path, &service_root, &["web"]);
+    assert!(
+        nested.status.success(),
+        "nested lookup failed: {}",
+        String::from_utf8_lossy(&nested.stderr)
+    );
+    assert_eq!(nested.stdout, format!("{port}\n").as_bytes());
+}
+
+#[test]
 fn port_never_crosses_current_worktree_or_project_scope() {
     let registry_path = temp_registry_path("port-worktrees");
     let first_root = temp_test_dir("port-worktree-first");

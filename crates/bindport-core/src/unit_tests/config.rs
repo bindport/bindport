@@ -258,6 +258,43 @@ fn discover_config_uses_fallback_and_project_local_override() {
 }
 
 #[test]
+fn yaml_anchor_detection_handles_compact_flow_tokens_without_false_positives() {
+    for contents in [
+        "defaults: [&defaults value]\n",
+        "--- &defaults\nvalue: safe\n",
+        "value: !custom &defaults safe\n",
+        "service: [*defaults]\n",
+        "service: {value:*defaults}\n",
+    ] {
+        assert!(yaml_contains_anchor_or_alias(contents), "{contents:?}");
+    }
+    for contents in [
+        "url: 'https://example.test/a*b'\n",
+        "literal: \"rock&roll\"\n",
+        "value: plain*text\n",
+        "flags: echo &word\n",
+        "flags: -Wl, &word\n",
+        "# [*defaults]\nvalue: safe\n",
+    ] {
+        assert!(!yaml_contains_anchor_or_alias(contents), "{contents:?}");
+    }
+
+    let config = parse_config(
+        ConfigFormat::Yaml,
+        "services:\n  - name: web\n    env:\n      LINKER_FLAGS: -Wl, &word\n",
+    )
+    .expect("plain YAML scalar containing ampersand word");
+    assert_eq!(
+        config.services.expect("services")[0]
+            .env
+            .as_ref()
+            .and_then(|env| env.get("LINKER_FLAGS"))
+            .map(String::as_str),
+        Some("-Wl, &word")
+    );
+}
+
+#[test]
 fn loaded_config_helpers_report_defaults_and_invalid_ranges() {
     let loaded = LoadedConfig {
         path: PathBuf::from("/workspace/demo/.bindport.toml"),

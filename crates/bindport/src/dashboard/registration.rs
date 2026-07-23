@@ -29,6 +29,7 @@ pub(crate) fn register_dashboard_service(
     server: &DashboardServer,
     host: &str,
     cwd: &Path,
+    identity_scope: &Path,
 ) -> DashboardRegistration {
     if !enabled {
         return DashboardRegistration::inactive();
@@ -37,16 +38,19 @@ pub(crate) fn register_dashboard_service(
     let Some(mut registry) = open_optional_registry() else {
         return DashboardRegistration::inactive();
     };
-    let identity = resolve_identity(IdentitySources {
-        cwd,
-        command: &[],
-        cli_project: Some(SERVICE_NAME),
-        cli_service: Some("dashboard"),
-        env_project: None,
-        env_service: None,
-        config_project: None,
-        config_service: None,
-    });
+    let identity = resolve_identity_in_scope(
+        IdentitySources {
+            cwd,
+            command: &[],
+            cli_project: Some(SERVICE_NAME),
+            cli_service: Some("dashboard"),
+            env_project: None,
+            env_service: None,
+            config_project: None,
+            config_service: None,
+        },
+        identity_scope,
+    );
     let run = RunStart {
         project: identity.project.clone(),
         service: identity.service.clone(),

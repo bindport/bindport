@@ -66,14 +66,19 @@ fn record_active_sibling(
         .expect("record active sibling");
 }
 
-fn free_loopback_ports(count: usize) -> Vec<u16> {
+fn guarded_loopback_ports(count: usize) -> (Vec<TcpListener>, Vec<u16>) {
     let listeners = (0..count)
         .map(|_| TcpListener::bind(("127.0.0.1", 0)).expect("bind test port"))
         .collect::<Vec<_>>();
-    listeners
+    let ports = listeners
         .iter()
         .map(|listener| listener.local_addr().expect("local address").port())
-        .collect()
+        .collect();
+    (listeners, ports)
+}
+
+fn free_loopback_ports(count: usize) -> Vec<u16> {
+    guarded_loopback_ports(count).1
 }
 
 #[test]
@@ -82,7 +87,7 @@ fn configured_templates_expand_every_active_and_reserved_sibling_field() {
     let root = temp_test_dir("sibling-fields-root")
         .canonicalize()
         .expect("canonical root");
-    let ports = free_loopback_ports(3);
+    let (mut port_guards, ports) = guarded_loopback_ports(3);
     let api = scoped_identity(&root, "sibling-fields", "api");
     let database = scoped_identity(&root, "sibling-fields", "database");
     record_active_sibling(
@@ -121,6 +126,7 @@ env.RESERVED_FIELDS = "{{services.database.port}}|{{services.database.host}}|{{s
     )
     .expect("write config");
 
+    drop(port_guards.pop().expect("consumer port guard"));
     let output = bindport_with_registry(&registry_path)
         .current_dir(&root)
         .args(["run", "consumer"])
@@ -149,7 +155,7 @@ fn repeated_sibling_references_remain_one_startup_snapshot_while_child_runs() {
         .expect("root");
     let ready = root.join("ready");
     let continue_file = root.join("continue");
-    let ports = free_loopback_ports(3);
+    let (mut port_guards, ports) = guarded_loopback_ports(3);
     let api = scoped_identity(&root, "sibling-snapshot", "api");
     reserve_sibling(&registry_path, &api, ports[0], None, None, None);
     fs::write(
@@ -171,19 +177,33 @@ env.API_VALUES = "{{services.api.port}}|{{services.api.port}}|{{services.api.url
     )
     .expect("write config");
 
-    let child = bindport_with_registry(&registry_path)
+    drop(port_guards.pop().expect("consumer port guard"));
+    let mut child = bindport_with_registry(&registry_path)
         .current_dir(&root)
         .args(["run", "consumer"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn consumer");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(15);
     while !ready.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "consumer did not reach snapshot barrier"
-        );
+        if child.try_wait().expect("poll consumer").is_some() {
+            let output = child.wait_with_output().expect("collect consumer output");
+            panic!(
+                "consumer exited before snapshot barrier with status {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if Instant::now() >= deadline {
+            let kill_error = child.kill().err();
+            let output = child.wait_with_output().expect("reap timed-out consumer");
+            panic!(
+                "consumer did not reach snapshot barrier before timeout; status {}; kill error: {kill_error:?}; stderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         thread::sleep(Duration::from_millis(10));
     }
 
@@ -217,7 +237,7 @@ fn sibling_references_are_isolated_by_project_and_exact_worktree_scope() {
     let second_root = temp_test_dir("sibling-scope-second")
         .canonicalize()
         .expect("second root");
-    let ports = free_loopback_ports(5);
+    let (mut port_guards, ports) = guarded_loopback_ports(5);
     reserve_sibling(
         &registry_path,
         &scoped_identity(&first_root, "scope-project", "api"),
@@ -243,10 +263,14 @@ fn sibling_references_are_isolated_by_project_and_exact_worktree_scope() {
         None,
     );
 
-    for (root, consumer_port, expected) in [
+    let consumer_guards = port_guards.split_off(3);
+    for ((root, consumer_port, expected), consumer_guard) in [
         (&first_root, ports[3], ports[0]),
         (&second_root, ports[4], ports[1]),
-    ] {
+    ]
+    .into_iter()
+    .zip(consumer_guards)
+    {
         fs::write(
             root.join(".bindport.toml"),
             format!(
@@ -254,6 +278,7 @@ fn sibling_references_are_isolated_by_project_and_exact_worktree_scope() {
             ),
         )
         .expect("write config");
+        drop(consumer_guard);
         let output = bindport_with_registry(&registry_path)
             .current_dir(root)
             .args(["run", "consumer"])
@@ -475,7 +500,8 @@ fn sibling_syntax_is_narrow_and_brace_escaping_remains_compatible() {
 
     let registry_path = temp_registry_path("sibling-escaped-registry");
     let root = temp_test_dir("sibling-escaped-root");
-    let port = free_loopback_port();
+    let (port_guards, ports) = guarded_loopback_ports(1);
+    let port = ports[0];
     fs::write(
         root.join(".bindport.toml"),
         format!(
@@ -483,6 +509,7 @@ fn sibling_syntax_is_narrow_and_brace_escaping_remains_compatible() {
         ),
     )
     .expect("write config");
+    drop(port_guards);
     let output = bindport_with_registry(&registry_path)
         .current_dir(&root)
         .args([
@@ -500,53 +527,82 @@ fn sibling_syntax_is_narrow_and_brace_escaping_remains_compatible() {
 }
 
 #[test]
-fn sibling_references_do_not_expand_in_cli_or_route_metadata_templates() {
-    let registry_path = temp_registry_path("sibling-narrow-surfaces-registry");
-    let root = temp_test_dir("sibling-narrow-surfaces-root");
-    let ports = free_loopback_ports(2);
-    reserve_sibling(
-        &registry_path,
-        &scoped_identity(&root, "sibling-narrow", "api"),
-        ports[0],
-        None,
-        None,
-        None,
-    );
+fn sibling_references_in_route_metadata_report_the_supported_locations() {
+    for (field, value) in [
+        ("hostname", "{services.api.port}.localhost"),
+        ("route_url", "http://127.0.0.1:{services.api.port}"),
+        ("health_url", "http://127.0.0.1:{services.api.port}/health"),
+    ] {
+        let registry_path = temp_registry_path(&format!("sibling-{field}-registry"));
+        let root = temp_test_dir(&format!("sibling-{field}-root"));
+        let port = free_loopback_port();
+        fs::write(
+            root.join(".bindport.toml"),
+            format!(
+                "project = \"sibling-narrow\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"consumer\"\n{field} = \"{value}\"\n"
+            ),
+        )
+        .expect("write config");
+        let marker = root.join("spawned");
+
+        let output = bindport_with_registry(&registry_path)
+            .current_dir(&root)
+            .args([
+                "run",
+                "consumer",
+                "--",
+                "sh",
+                "-c",
+                "touch \"$1\"",
+                "sh",
+                marker.to_str().expect("marker"),
+            ])
+            .output()
+            .expect("run consumer");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(!output.status.success());
+        assert!(!marker.exists());
+        assert!(stderr.contains(&format!("is not supported in {field}")));
+        assert!(stderr.contains(
+            "sibling references are only supported in configured service command, args, and env"
+        ));
+    }
+}
+
+#[test]
+fn sibling_references_do_not_expand_in_cli_env_templates() {
+    let registry_path = temp_registry_path("sibling-cli-env-registry");
+    let root = temp_test_dir("sibling-cli-env-root");
+    let port = free_loopback_port();
     fs::write(
         root.join(".bindport.toml"),
         format!(
-            "project = \"sibling-narrow\"\ndefault_range = \"{0}-{0}\"\nskip_ports = []\n[[services]]\nname = \"consumer\"\nhostname = \"{{services.api.port}}.localhost\"\n",
-            ports[1]
+            "project = \"sibling-narrow\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"consumer\"\n"
         ),
     )
     .expect("write config");
 
-    for args in [
-        vec!["run", "consumer", "--", "sh", "-c", "true"],
-        vec![
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args([
             "run",
             "consumer",
-            "--hostname",
-            "consumer.localhost",
             "--env",
             "VALUE={services.api.port}",
             "--",
             "sh",
             "-c",
             "true",
-        ],
-    ] {
-        let output = bindport_with_registry(&registry_path)
-            .current_dir(&root)
-            .args(args)
-            .output()
-            .expect("run consumer");
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("unknown or unavailable template placeholder")
-        );
-    }
+        ])
+        .output()
+        .expect("run consumer");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("unknown or unavailable template placeholder")
+    );
 }
 
 #[test]
@@ -595,7 +651,7 @@ fn absent_optional_sibling_metadata_fails_clearly_before_spawn() {
     );
 }
 
-fn free_two_port_range() -> (u16, u16) {
+fn guarded_two_port_range() -> (Vec<TcpListener>, u16, u16) {
     loop {
         let first = TcpListener::bind(("127.0.0.1", 0)).expect("first port");
         let start = first.local_addr().expect("first address").port();
@@ -603,9 +659,7 @@ fn free_two_port_range() -> (u16, u16) {
             continue;
         };
         if let Ok(second) = TcpListener::bind(("127.0.0.1", end)) {
-            drop(second);
-            drop(first);
-            return (start, end);
+            return (vec![first, second], start, end);
         }
     }
 }
@@ -616,7 +670,7 @@ fn reserve_all_supports_out_of_declaration_order_sibling_startup() {
     let root = temp_test_dir("sibling-reserve-all-root")
         .canonicalize()
         .expect("root");
-    let (range_start, range_end) = free_two_port_range();
+    let (range_guards, range_start, range_end) = guarded_two_port_range();
     fs::write(
         root.join(".bindport.toml"),
         format!(
@@ -637,6 +691,7 @@ env.API_PORT = "{{services.api.port}}"
     )
     .expect("write config");
 
+    drop(range_guards);
     let reserve = bindport_with_registry(&registry_path)
         .current_dir(&root)
         .args(["reserve", "--all"])

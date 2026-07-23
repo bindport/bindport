@@ -24,6 +24,47 @@ fn config_validate_reports_ok_for_valid_config() {
     assert!(stdout.contains("BindPort config validate"));
     assert!(stdout.contains("validation: ok"));
 }
+
+#[test]
+fn config_validate_reports_port_range_minimum_in_every_format() {
+    for (extension, contents) in [
+        (
+            "toml",
+            "project = \"zero-port\"\ndefault_range = \"0-10\"\n",
+        ),
+        (
+            "json",
+            "{\"project\":\"zero-port\",\"default_range\":\"0-10\"}\n",
+        ),
+        ("yaml", "project: zero-port\ndefault_range: 0-10\n"),
+    ] {
+        let registry_path = temp_registry_path(&format!("zero-port-{extension}-registry"));
+        let root = temp_test_dir(&format!("zero-port-{extension}-root"));
+        fs::write(root.join(format!(".bindport.{extension}")), contents)
+            .expect("write zero-port config");
+
+        let output = bindport_with_registry(&registry_path)
+            .current_dir(&root)
+            .args(["config", "validate"])
+            .output()
+            .expect("validate zero-port config");
+
+        assert!(
+            !output.status.success(),
+            "{extension} unexpectedly succeeded"
+        );
+        let message = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            message.contains("range start 0 must be at least 1"),
+            "unexpected {extension} error: {message}"
+        );
+    }
+}
+
 #[test]
 fn config_validate_reports_actionable_errors() {
     let registry_path = temp_registry_path("config-validate-error-registry");

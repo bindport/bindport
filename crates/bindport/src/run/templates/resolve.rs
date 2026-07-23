@@ -160,6 +160,16 @@ pub(crate) fn resolve_run_route_metadata(
     port: u16,
     templates: &RunTemplates,
 ) -> Result<RunMetadata, TemplateError> {
+    for (location, template) in [
+        ("hostname", templates.hostname.as_deref()),
+        ("route_url", templates.route_url.as_deref()),
+        ("health_url", templates.health_url.as_deref()),
+    ] {
+        if let Some(template) = template {
+            reject_sibling_route_metadata(template, location)?;
+        }
+    }
+
     let base_values = TemplateValues::new(identity, port, None, None, None);
     let hostname = templates
         .hostname
@@ -197,6 +207,21 @@ pub(crate) fn resolve_run_route_metadata(
         health_url,
         env: Vec::new(),
     })
+}
+
+fn reject_sibling_route_metadata(
+    template: &str,
+    location: &'static str,
+) -> Result<(), TemplateError> {
+    for placeholder in template_placeholders(template)? {
+        if placeholder.starts_with("services.") {
+            return Err(TemplateError::UnsupportedSiblingLocation {
+                placeholder,
+                location,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_run_metadata(
