@@ -76,6 +76,106 @@ fn reserve_records_reserved_service_and_reuses_identity_port() {
 
 #[cfg(unix)]
 #[test]
+fn reserve_reuses_an_active_scoped_service_without_creating_ambiguity() {
+    let registry_path = temp_registry_path("reserve-active-service");
+    let root = temp_test_dir("reserve-active-service-root");
+    let active_port = free_loopback_port();
+    let range_start = active_port.saturating_sub(2).max(1);
+    let range_end = active_port.saturating_add(2);
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"active-project\"\ndefault_range = \"{range_start}-{range_end}\"\nskip_ports = []\n[[services]]\nname = \"web\"\n"
+        ),
+    )
+    .expect("write project config");
+    let root = root.canonicalize().expect("canonical project root");
+    let identity = resolve_identity(IdentitySources {
+        cwd: &root,
+        command: &[],
+        cli_project: Some("active-project"),
+        cli_service: Some("web"),
+        env_project: None,
+        env_service: None,
+        config_project: None,
+        config_service: None,
+    });
+    Registry::open(&registry_path)
+        .expect("registry")
+        .record_run_started(&RunStart {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port: active_port,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: root.clone(),
+        })
+        .expect("active run");
+
+    let reserve = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve", "web"])
+        .output()
+        .expect("reserve active service");
+
+    assert!(
+        reserve.status.success(),
+        "reserve failed: {}",
+        String::from_utf8_lossy(&reserve.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(reserve.stdout).expect("reserve stdout"),
+        format!("active web\t127.0.0.1:{active_port}\n")
+    );
+    let port = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["port", "web"])
+        .output()
+        .expect("port lookup");
+    assert!(port.status.success());
+    assert_eq!(port.stdout, format!("{active_port}\n").as_bytes());
+    assert_eq!(
+        Registry::open(&registry_path)
+            .expect("registry")
+            .export_snapshot()
+            .expect("export")
+            .leases
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn reserve_rejects_child_environment_options() {
+    let registry_path = temp_registry_path("reserve-env-option");
+    let root = temp_test_dir("reserve-env-option-root");
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"reserve-env-option\"\nservice = \"web\"\n",
+    )
+    .expect("write project config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve", "--env", "UNUSED=value"])
+        .output()
+        .expect("reserve with env");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("reserve does not accept --env because it does not spawn a child")
+    );
+    assert!(!registry_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn reserve_prunes_oldest_stale_leases_under_range_pressure() {
     let registry_path = temp_registry_path("reserve-pressure-cleanup");
     let root = temp_test_dir("reserve-pressure-cleanup-root");

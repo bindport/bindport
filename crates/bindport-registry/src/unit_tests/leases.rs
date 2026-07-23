@@ -177,6 +177,108 @@ fn failed_reserved_startup_records_exit_and_restores_reservation() {
 }
 
 #[test]
+fn failed_reserved_startup_stops_lease_when_port_was_reassigned() {
+    let path = temp_registry_path("reserved-restore-conflict");
+    let mut registry = Registry::open(&path).expect("registry");
+    let failed_identity = test_identity("v1:failed-reservation");
+    let replacement_identity = test_identity("v1:replacement-reservation");
+    let failed = registry
+        .record_reserved_lease(&ReserveLease {
+            project: failed_identity.project.clone(),
+            service: failed_identity.service.clone(),
+            identity: Some(failed_identity),
+            host: String::from("127.0.0.1"),
+            port: 29_507,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        })
+        .expect("failed reservation");
+    let started = registry
+        .promote_reserved_lease(&ReservedRunStart {
+            lease_id: failed.lease_id,
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: env::temp_dir(),
+        })
+        .expect("promotion");
+    assert_eq!(
+        registry
+            .mark_observed_runs_stale(&[ActiveRun {
+                lease_id: started.lease_id,
+                run_id: started.run_id,
+                pid: std::process::id(),
+                process_start_time: None,
+                command: current_process_command(),
+            }])
+            .expect("stale reconciliation"),
+        1
+    );
+
+    let mut concurrent = Registry::open(&path).expect("concurrent registry");
+    let replacement = concurrent
+        .record_reserved_lease(&ReserveLease {
+            project: replacement_identity.project.clone(),
+            service: replacement_identity.service.clone(),
+            identity: Some(replacement_identity),
+            host: String::from("127.0.0.1"),
+            port: 29_507,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        })
+        .expect("replacement reservation");
+
+    let error = registry
+        .record_reserved_run_failed(started, Some(98))
+        .expect_err("restore must reject reassigned port");
+    assert!(matches!(
+        error,
+        RegistryError::ReservationRestoreConflict {
+            lease_id,
+            port: 29_507
+        } if lease_id == failed.lease_id
+    ));
+
+    let export = registry.export_snapshot().expect("export");
+    assert_eq!(
+        export
+            .leases
+            .iter()
+            .find(|lease| lease.id == failed.lease_id)
+            .expect("failed lease")
+            .state,
+        "stopped"
+    );
+    assert_eq!(
+        export
+            .leases
+            .iter()
+            .find(|lease| lease.id == replacement.lease_id)
+            .expect("replacement lease")
+            .state,
+        "reserved"
+    );
+    assert_eq!(
+        export
+            .leases
+            .iter()
+            .filter(|lease| {
+                lease.port == 29_507 && matches!(lease.state.as_str(), "active" | "reserved")
+            })
+            .count(),
+        1
+    );
+    let run = export
+        .runs
+        .iter()
+        .find(|run| run.id == started.run_id)
+        .expect("failed run");
+    assert_eq!(run.exit_code, Some(98));
+    assert!(run.exited_at.is_some());
+}
+
+#[test]
 fn registry_releases_reserved_leases_by_identity_and_port() {
     let mut registry = Registry::open(temp_registry_path("release-reserved")).expect("registry");
     let first_identity = test_identity("v1:release-first");
@@ -257,6 +359,110 @@ fn record_run_started_rejects_duplicate_active_port() {
 }
 
 #[test]
+fn run_claim_can_be_adopted_and_discarded_without_leaving_registry_rows() {
+    let mut registry = Registry::open(temp_registry_path("run-claim-lifecycle")).expect("registry");
+    let claim = registry
+        .record_run_started(&test_run_start(
+            "bindport",
+            "web",
+            29_504,
+            std::process::id(),
+        ))
+        .expect("claim run port");
+
+    registry
+        .adopt_run_claim(
+            claim,
+            std::process::id(),
+            "adopted child command",
+            &env::temp_dir(),
+        )
+        .expect("adopt run claim");
+    let active = registry.export_snapshot().expect("active export");
+    assert_eq!(active.leases.len(), 1);
+    assert_eq!(active.leases[0].state, "active");
+    assert_eq!(active.runs.len(), 1);
+    assert_eq!(active.runs[0].command, "adopted child command");
+
+    registry
+        .discard_run_claim(claim)
+        .expect("discard run claim");
+    let discarded = registry.export_snapshot().expect("discarded export");
+    assert!(discarded.leases.is_empty());
+    assert!(discarded.runs.is_empty());
+}
+
+#[test]
+fn fast_run_claim_finalization_records_child_metadata_and_exit_atomically() {
+    let mut registry =
+        Registry::open(temp_registry_path("fast-run-claim-finalization")).expect("registry");
+    let claim = registry
+        .record_run_started(&test_run_start(
+            "bindport",
+            "web",
+            29_506,
+            std::process::id(),
+        ))
+        .expect("claim run port");
+    let child_cwd = env::temp_dir().join("bindport-fast-child");
+
+    registry
+        .finalize_run_claim(
+            claim,
+            4_000_000_000,
+            "fast child command",
+            &child_cwd,
+            Some(23),
+        )
+        .expect("finalize fast run claim");
+
+    let snapshot = registry.export_snapshot().expect("finalized export");
+    assert_eq!(snapshot.leases.len(), 1);
+    assert_eq!(snapshot.leases[0].state, "stopped");
+    assert_eq!(snapshot.runs.len(), 1);
+    assert_eq!(snapshot.runs[0].pid, 4_000_000_000);
+    assert_eq!(snapshot.runs[0].command, "fast child command");
+    assert_eq!(snapshot.runs[0].cwd, child_cwd.display().to_string());
+    assert_eq!(snapshot.runs[0].exit_code, Some(23));
+    assert!(snapshot.runs[0].exited_at.is_some());
+}
+
+#[test]
+fn reserved_run_claim_can_be_restored_without_leaving_a_run() {
+    let mut registry =
+        Registry::open(temp_registry_path("reserved-run-claim-rollback")).expect("registry");
+    let reservation = registry
+        .record_reserved_lease(&ReserveLease {
+            project: String::from("bindport"),
+            service: String::from("web"),
+            identity: Some(test_identity("v1:reserved-run-claim-rollback")),
+            host: String::from("127.0.0.1"),
+            port: 29_507,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        })
+        .expect("reservation");
+    let claim = registry
+        .promote_reserved_lease(&ReservedRunStart {
+            lease_id: reservation.lease_id,
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: env::temp_dir(),
+        })
+        .expect("claim reservation");
+
+    registry
+        .restore_reserved_run_claim(claim)
+        .expect("restore reservation");
+    let restored = registry.export_snapshot().expect("restored export");
+    assert_eq!(restored.leases.len(), 1);
+    assert_eq!(restored.leases[0].id, reservation.lease_id);
+    assert_eq!(restored.leases[0].state, "reserved");
+    assert!(restored.runs.is_empty());
+}
+
+#[test]
 fn stale_reconciliation_does_not_clobber_a_concurrently_finished_run() {
     let path = temp_registry_path("stale-finish-race");
     let mut registry = Registry::open(&path).expect("registry");
@@ -332,6 +538,73 @@ fn stale_reconciliation_does_not_clobber_a_concurrently_finished_run() {
     assert_eq!(second_lease.state, "stale");
     assert_eq!(second_run.exit_code, None);
     assert!(second_run.exited_at.is_some());
+}
+
+#[test]
+fn stale_observation_does_not_clobber_a_repromoted_live_run() {
+    let mut registry =
+        Registry::open(temp_registry_path("stale-repromotion-race")).expect("registry");
+    let identity = test_identity("v1:stale-repromotion-race");
+    let reservation = registry
+        .record_reserved_lease(&ReserveLease {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity),
+            host: String::from("127.0.0.1"),
+            port: 29_508,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        })
+        .expect("reservation");
+    let first = registry
+        .promote_reserved_lease(&ReservedRunStart {
+            lease_id: reservation.lease_id,
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: env::temp_dir(),
+        })
+        .expect("first promotion");
+    let observed_stale = [ActiveRun {
+        lease_id: first.lease_id,
+        run_id: first.run_id,
+        pid: std::process::id(),
+        process_start_time: None,
+        command: current_process_command(),
+    }];
+    registry
+        .record_reserved_run_failed(first, Some(98))
+        .expect("restore reservation");
+    let second = registry
+        .promote_reserved_lease(&ReservedRunStart {
+            lease_id: reservation.lease_id,
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: env::temp_dir(),
+        })
+        .expect("second promotion");
+
+    assert_eq!(
+        registry
+            .mark_observed_runs_stale(&observed_stale)
+            .expect("stale compare-and-set"),
+        0
+    );
+    let export = registry.export_snapshot().expect("export");
+    assert_eq!(export.leases[0].state, "active");
+    let first_run = export
+        .runs
+        .iter()
+        .find(|run| run.id == first.run_id)
+        .expect("first run");
+    assert!(first_run.exited_at.is_some());
+    let second_run = export
+        .runs
+        .iter()
+        .find(|run| run.id == second.run_id)
+        .expect("second run");
+    assert!(second_run.exited_at.is_none());
+    assert_eq!(second_run.exit_code, None);
 }
 
 #[cfg(target_os = "linux")]

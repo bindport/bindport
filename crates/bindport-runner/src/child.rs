@@ -34,6 +34,54 @@ impl RunningChild {
         self.child.kill()
     }
 
+    #[cfg(unix)]
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>, RunnerError> {
+        let exited = child_has_exited_without_reaping(self.child.id()).map_err(|source| {
+            RunnerError::Wait {
+                command: self.program.clone(),
+                source,
+            }
+        })?;
+        if !exited {
+            return Ok(None);
+        }
+
+        let signal_forwarding = self
+            .signal_forwarding
+            .deactivate()
+            .map_err(|source| RunnerError::SignalForwarding { source });
+        let status = self.child.try_wait().map_err(|source| RunnerError::Wait {
+            command: self.program.clone(),
+            source,
+        });
+
+        match (status, signal_forwarding) {
+            (Ok(Some(status)), Ok(())) => Ok(Some(status)),
+            (Ok(None), Ok(())) => Err(RunnerError::Wait {
+                command: self.program.clone(),
+                source: io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "child exit was no longer available to reap",
+                ),
+            }),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>, RunnerError> {
+        let status = self.child.try_wait().map_err(|source| RunnerError::Wait {
+            command: self.program.clone(),
+            source,
+        })?;
+        if status.is_some() {
+            self.signal_forwarding
+                .deactivate()
+                .map_err(|source| RunnerError::SignalForwarding { source })?;
+        }
+        Ok(status)
+    }
+
     pub fn wait(&mut self) -> Result<ExitStatus, RunnerError> {
         let pre_reap = wait_until_child_exits_without_reaping(self.child.id());
         let signal_forwarding = self
@@ -54,6 +102,30 @@ impl RunningChild {
         match (status, signal_forwarding) {
             (Ok(status), Ok(())) => Ok(status),
             (Err(error), _) | (_, Err(error)) => Err(error),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn child_has_exited_without_reaping(pid: u32) -> io::Result<bool> {
+    loop {
+        let mut siginfo = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                siginfo.as_mut_ptr(),
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            let siginfo = unsafe { siginfo.assume_init() };
+            return Ok(unsafe { siginfo.si_pid() } != 0);
+        }
+
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
         }
     }
 }

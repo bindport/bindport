@@ -1,5 +1,7 @@
 use super::*;
 
+const RESERVATION_COMMIT_RETRIES: usize = 3;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistryService {
     pub lease_id: i64,
@@ -77,82 +79,146 @@ impl Registry {
     pub fn reserve_services<E>(
         &mut self,
         identities: &[ServiceIdentity],
-        mut plan: impl FnMut(&ServiceIdentity, &[u16], Option<u16>) -> Result<ReservationCandidate, E>,
+        plan: impl FnMut(&ServiceIdentity, &[u16], Option<u16>) -> Result<ReservationCandidate, E>,
     ) -> Result<Vec<RegistryService>, BatchReservationError<E>> {
-        self.reconcile_stale_active_leases()?;
-        let now = utc_now(&self.connection)?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(RegistryError::from)?;
-        let mut occupied_ports = active_and_reserved_ports(&transaction)?;
-        let mut services = Vec::with_capacity(identities.len());
+        self.reserve_services_with_state(identities, plan)
+            .map(|services| services.into_iter().map(|(service, _)| service).collect())
+    }
 
-        for identity in identities {
-            if let Some(service) = select_scoped_service(&transaction, identity)? {
-                services.push(service);
+    pub fn reserve_service<E>(
+        &mut self,
+        identity: &ServiceIdentity,
+        plan: impl FnMut(&ServiceIdentity, &[u16], Option<u16>) -> Result<ReservationCandidate, E>,
+    ) -> Result<(RegistryService, bool), BatchReservationError<E>> {
+        self.reserve_services_with_state(std::slice::from_ref(identity), plan)
+            .map(|mut services| services.remove(0))
+    }
+
+    fn reserve_services_with_state<E>(
+        &mut self,
+        identities: &[ServiceIdentity],
+        mut plan: impl FnMut(&ServiceIdentity, &[u16], Option<u16>) -> Result<ReservationCandidate, E>,
+    ) -> Result<Vec<(RegistryService, bool)>, BatchReservationError<E>> {
+        if identities.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.reconcile_stale_active_leases()?;
+        let mut last_conflict = None;
+        let mut last_retry_identity = None;
+
+        for _ in 0..=RESERVATION_COMMIT_RETRIES {
+            last_conflict = None;
+            let snapshot = reservation_snapshot(&mut self.connection, identities)?;
+            let mut occupied_ports = snapshot.occupied_ports;
+            let mut candidates = Vec::with_capacity(identities.len());
+            for ((identity, existing), previous_port) in identities
+                .iter()
+                .zip(snapshot.services)
+                .zip(snapshot.previous_ports)
+            {
+                if existing.is_some() {
+                    candidates.push(None);
+                    continue;
+                }
+                let candidate = plan(identity, &occupied_ports, previous_port)
+                    .map_err(BatchReservationError::Plan)?;
+                occupied_ports.push(candidate.port);
+                candidates.push(Some(candidate));
+            }
+
+            let now = utc_now(&self.connection)?;
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(RegistryError::from)?;
+            let mut committed_ports = active_and_reserved_ports(&transaction)?;
+            let mut services = Vec::with_capacity(identities.len());
+            let mut retry = false;
+
+            for (identity, candidate) in identities.iter().zip(candidates) {
+                if let Some(service) = select_scoped_service(&transaction, identity)? {
+                    services.push((service, false));
+                    continue;
+                }
+                let Some(candidate) = candidate else {
+                    last_retry_identity = Some(identity);
+                    retry = true;
+                    break;
+                };
+                if committed_ports.contains(&candidate.port) {
+                    last_conflict = Some(candidate.port);
+                    last_retry_identity = Some(identity);
+                    retry = true;
+                    break;
+                }
+
+                let git = identity.git.as_ref();
+                transaction
+                    .execute(
+                        "INSERT INTO leases (
+                            project, service, worktree_path, worktree_hash, git_common_dir,
+                            branch, branch_label, git_commit, identity_key, port, host,
+                            hostname, route_url, health_url, state, allocated_at, last_seen_at
+                         ) VALUES (
+                            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                            ?14, 'reserved', ?15, ?15
+                         )",
+                        params![
+                            identity.project,
+                            identity.service,
+                            git.map(|git| git.worktree_path.display().to_string()),
+                            git.map(|git| git.worktree_hash.as_str()),
+                            git.map(|git| git.git_common_dir.display().to_string()),
+                            git.map(|git| git.branch.as_str()),
+                            git.map(|git| git.branch_label.as_str()),
+                            git.map(|git| git.commit.as_str()),
+                            identity.identity_key,
+                            candidate.port,
+                            candidate.host,
+                            candidate.hostname,
+                            candidate.route_url,
+                            candidate.health_url,
+                            now,
+                        ],
+                    )
+                    .map_err(RegistryError::from)?;
+                let lease_id = transaction.last_insert_rowid();
+                committed_ports.push(candidate.port);
+                services.push((
+                    RegistryService {
+                        lease_id,
+                        project: identity.project.clone(),
+                        service: identity.service.clone(),
+                        identity_key: identity.identity_key.clone(),
+                        state: String::from("reserved"),
+                        host: candidate.host,
+                        port: candidate.port,
+                        hostname: candidate.hostname,
+                        route_url: candidate.route_url,
+                        health_url: candidate.health_url,
+                    },
+                    true,
+                ));
+            }
+
+            if retry {
+                drop(transaction);
                 continue;
             }
-
-            let previous_port = previous_identity_port(&transaction, &identity.identity_key)?;
-            let candidate = plan(identity, &occupied_ports, previous_port)
-                .map_err(BatchReservationError::Plan)?;
-            if occupied_ports.contains(&candidate.port) {
-                return Err(RegistryError::PortConflict {
-                    port: candidate.port,
-                }
-                .into());
-            }
-
-            let git = identity.git.as_ref();
-            transaction
-                .execute(
-                    "INSERT INTO leases (
-                        project, service, worktree_path, worktree_hash, git_common_dir,
-                        branch, branch_label, git_commit, identity_key, port, host,
-                        hostname, route_url, health_url, state, allocated_at, last_seen_at
-                     ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                        ?14, 'reserved', ?15, ?15
-                     )",
-                    params![
-                        identity.project,
-                        identity.service,
-                        git.map(|git| git.worktree_path.display().to_string()),
-                        git.map(|git| git.worktree_hash.as_str()),
-                        git.map(|git| git.git_common_dir.display().to_string()),
-                        git.map(|git| git.branch.as_str()),
-                        git.map(|git| git.branch_label.as_str()),
-                        git.map(|git| git.commit.as_str()),
-                        identity.identity_key,
-                        candidate.port,
-                        candidate.host,
-                        candidate.hostname,
-                        candidate.route_url,
-                        candidate.health_url,
-                        now,
-                    ],
-                )
-                .map_err(RegistryError::from)?;
-            let lease_id = transaction.last_insert_rowid();
-            occupied_ports.push(candidate.port);
-            services.push(RegistryService {
-                lease_id,
-                project: identity.project.clone(),
-                service: identity.service.clone(),
-                identity_key: identity.identity_key.clone(),
-                state: String::from("reserved"),
-                host: candidate.host,
-                port: candidate.port,
-                hostname: candidate.hostname,
-                route_url: candidate.route_url,
-                health_url: candidate.health_url,
-            });
+            transaction.commit().map_err(RegistryError::from)?;
+            return Ok(services);
         }
 
-        transaction.commit().map_err(RegistryError::from)?;
-
-        Ok(services)
+        if let Some(port) = last_conflict {
+            return Err(RegistryError::PortConflict { port }.into());
+        }
+        let identity = last_retry_identity
+            .expect("exhausted reservation retries must have an invalidating identity");
+        Err(RegistryError::ConcurrentReservation {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+        }
+        .into())
     }
 
     pub fn promote_reserved_lease(
@@ -199,6 +265,35 @@ impl Registry {
 
         Ok(started)
     }
+}
+
+struct ReservationSnapshot {
+    occupied_ports: Vec<u16>,
+    services: Vec<Option<RegistryService>>,
+    previous_ports: Vec<Option<u16>>,
+}
+
+fn reservation_snapshot(
+    connection: &mut Connection,
+    identities: &[ServiceIdentity],
+) -> Result<ReservationSnapshot, RegistryError> {
+    let transaction = connection.transaction()?;
+    let occupied_ports = active_and_reserved_ports(&transaction)?;
+    let services = identities
+        .iter()
+        .map(|identity| select_scoped_service(&transaction, identity))
+        .collect::<Result<Vec<_>, _>>()?;
+    let previous_ports = identities
+        .iter()
+        .map(|identity| previous_identity_port(&transaction, &identity.identity_key))
+        .collect::<Result<Vec<_>, _>>()?;
+    transaction.commit()?;
+
+    Ok(ReservationSnapshot {
+        occupied_ports,
+        services,
+        previous_ports,
+    })
 }
 
 fn select_scoped_service(

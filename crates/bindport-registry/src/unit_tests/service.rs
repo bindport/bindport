@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use std::sync::{Arc, Barrier};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Barrier},
+};
 
 fn candidate(port: u16) -> ReservationCandidate {
     ReservationCandidate {
@@ -59,10 +62,14 @@ fn selector_accepts_only_active_or_reserved_exact_scope() {
         registry.select_service(&second).expect("second").port,
         29_511
     );
-    assert!(matches!(
-        registry.select_service(&other_project),
-        Err(RegistryError::ServiceNotFound { .. })
-    ));
+    let error = registry
+        .select_service(&other_project)
+        .expect_err("other project must not match");
+    assert!(matches!(&error, RegistryError::ServiceNotFound { .. }));
+    assert_eq!(
+        error.to_string(),
+        "no active or reserved service matched `other/web` in the current project scope (Git worktree and branch when available)"
+    );
 
     registry
         .release_reserved_identity(&first.identity_key)
@@ -157,10 +164,33 @@ fn selector_rejects_ambiguous_exact_scope() {
             .expect("reservation");
     }
 
-    assert!(matches!(
-        registry.select_service(&identity),
-        Err(RegistryError::AmbiguousService { .. })
-    ));
+    let error = registry
+        .select_service(&identity)
+        .expect_err("duplicate scoped services must be ambiguous");
+    assert!(matches!(&error, RegistryError::AmbiguousService { .. }));
+    assert_eq!(
+        error.to_string(),
+        "multiple active or reserved services matched `example/web` in the current project scope (Git worktree and branch when available)"
+    );
+}
+
+#[test]
+fn single_reservation_reports_only_the_inserting_call_as_new() {
+    let mut registry =
+        Registry::open(temp_registry_path("single-reservation-state")).expect("registry");
+    let identity = scoped_identity("example", "web", "worktree");
+    let (created, newly_reserved) = registry
+        .reserve_service(&identity, |_, _, _| Ok::<_, ()>(candidate(29_519)))
+        .expect("new reservation");
+    assert!(newly_reserved);
+
+    let (reused, newly_reserved) = registry
+        .reserve_service(&identity, |_, _, _| -> Result<ReservationCandidate, ()> {
+            panic!("existing service must not be replanned")
+        })
+        .expect("reused reservation");
+    assert!(!newly_reserved);
+    assert_eq!(reused.lease_id, created.lease_id);
 }
 
 #[test]
@@ -280,6 +310,111 @@ fn batch_reservation_rolls_back_on_late_port_conflict() {
             .expect("status")
             .services
             .is_empty()
+    );
+}
+
+#[test]
+fn exhausted_batch_retries_report_the_later_invalidated_service() {
+    let path = temp_registry_path("batch-later-invalidation");
+    let mut registry = Registry::open(&path).expect("registry");
+    let web = scoped_identity("example", "web", "worktree");
+    let api = scoped_identity("example", "api", "worktree");
+    let api_reservation = registry
+        .record_reserved_lease(&ReserveLease {
+            project: api.project.clone(),
+            service: api.service.clone(),
+            identity: Some(api.clone()),
+            host: String::from("127.0.0.1"),
+            port: 29_525,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        })
+        .expect("api reservation");
+    Connection::open(&path)
+        .expect("trigger connection")
+        .execute_batch(
+            "CREATE TRIGGER invalidate_later_batch_service
+             BEFORE INSERT ON leases
+             WHEN NEW.project = 'example' AND NEW.service = 'web'
+             BEGIN
+                 UPDATE leases
+                 SET state = 'stopped'
+                 WHERE project = 'example' AND service = 'api'
+                 AND state = 'reserved';
+             END;",
+        )
+        .expect("invalidation trigger");
+    let mut planned = 0;
+
+    let result = registry.reserve_services(&[web, api], |identity, _, _| {
+        assert_eq!(identity.service, "web");
+        planned += 1;
+        Ok::<_, ()>(candidate(29_526))
+    });
+
+    assert_eq!(planned, 4);
+    assert!(matches!(
+        result,
+        Err(BatchReservationError::Registry(
+            RegistryError::ConcurrentReservation {
+                project,
+                service
+            }
+        )) if project == "example" && service == "api"
+    ));
+    let export = registry.export_snapshot().expect("export");
+    assert_eq!(export.leases.len(), 1);
+    assert_eq!(export.leases[0].id, api_reservation.lease_id);
+    assert_eq!(export.leases[0].state, "reserved");
+}
+
+#[test]
+fn reservation_replans_after_snapshot_port_conflict_without_holding_write_lock() {
+    let path = temp_registry_path("reservation-snapshot-conflict");
+    let mut registry = Registry::open(&path).expect("registry");
+    let target = scoped_identity("example", "web", "worktree");
+    let competing = scoped_identity("other", "api", "worktree");
+    let mut concurrent = Registry::open(&path).expect("concurrent registry");
+    let mut calls = 0;
+
+    let (service, newly_reserved) = registry
+        .reserve_service(&target, |_, occupied, _| {
+            calls += 1;
+            if calls == 1 {
+                assert!(!occupied.contains(&29_523));
+                concurrent
+                    .record_reserved_lease(&ReserveLease {
+                        project: competing.project.clone(),
+                        service: competing.service.clone(),
+                        identity: Some(competing.clone()),
+                        host: String::from("127.0.0.1"),
+                        port: 29_523,
+                        hostname: None,
+                        route_url: None,
+                        health_url: None,
+                    })
+                    .expect("competing reservation proves planner holds no write lock");
+                Ok::<_, ()>(candidate(29_523))
+            } else {
+                assert!(occupied.contains(&29_523));
+                Ok(candidate(29_524))
+            }
+        })
+        .expect("retried reservation");
+
+    assert_eq!(calls, 2);
+    assert!(newly_reserved);
+    assert_eq!(service.port, 29_524);
+    let export = registry.export_snapshot().expect("export");
+    assert_eq!(export.leases.len(), 2);
+    assert_eq!(
+        export
+            .leases
+            .iter()
+            .map(|lease| lease.port)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([29_523, 29_524])
     );
 }
 

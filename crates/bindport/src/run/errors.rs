@@ -9,6 +9,7 @@ pub(crate) enum RunCommandError {
     SiblingResolution(RegistryError),
     OutputRender(RenderCommandError),
     ReservedPortUnavailable { port: u16 },
+    ReservedClaim { port: u16, source: RegistryError },
     ReservedPromotion { port: u16, source: RegistryError },
 }
 

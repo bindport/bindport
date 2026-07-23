@@ -295,6 +295,21 @@ impl Registry {
         let mut transitioned = 0;
 
         for stale_run in stale_runs {
+            let current_run_id = transaction
+                .query_row(
+                    "SELECT id
+                     FROM runs
+                     WHERE lease_id = ?1 AND exited_at IS NULL
+                     ORDER BY id DESC
+                     LIMIT 1",
+                    params![stale_run.lease_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            if current_run_id != Some(stale_run.run_id) {
+                continue;
+            }
+
             let updated = transaction.execute(
                 "UPDATE leases
                  SET state = 'stale', last_seen_at = ?1, released_at = ?1
@@ -307,8 +322,8 @@ impl Registry {
             transaction.execute(
                 "UPDATE runs
                  SET exited_at = COALESCE(exited_at, ?1)
-                 WHERE id = ?2 AND exited_at IS NULL",
-                params![now, stale_run.run_id],
+                 WHERE id = ?2 AND lease_id = ?3 AND exited_at IS NULL",
+                params![now, stale_run.run_id, stale_run.lease_id],
             )?;
             transitioned += updated;
         }
@@ -393,6 +408,173 @@ impl Registry {
         Ok(StartedRun { lease_id, run_id })
     }
 
+    pub fn adopt_run_claim(
+        &mut self,
+        run: StartedRun,
+        pid: u32,
+        command: &str,
+        cwd: &Path,
+    ) -> Result<(), RegistryError> {
+        let now = utc_now(&self.connection)?;
+        let process_start_time = process_start_time(pid);
+        let cwd = cwd.display().to_string();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let active = transaction
+            .query_row(
+                "SELECT 1 FROM leases WHERE id = ?1 AND state = 'active'",
+                params![run.lease_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !active {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        let updated = transaction.execute(
+            "UPDATE runs
+             SET pid = ?1, process_start_time = ?2, command = ?3, cwd = ?4
+             WHERE id = ?5 AND lease_id = ?6 AND exited_at IS NULL",
+            params![
+                pid,
+                process_start_time,
+                command,
+                cwd,
+                run.run_id,
+                run.lease_id
+            ],
+        )?;
+        if updated == 0 {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        transaction.execute(
+            "UPDATE leases SET last_seen_at = ?1 WHERE id = ?2 AND state = 'active'",
+            params![now, run.lease_id],
+        )?;
+        transaction.commit()?;
+
+        Ok(())
+    }
+
+    pub fn finalize_run_claim(
+        &mut self,
+        run: StartedRun,
+        pid: u32,
+        command: &str,
+        cwd: &Path,
+        exit_code: Option<i32>,
+    ) -> Result<(), RegistryError> {
+        let now = utc_now(&self.connection)?;
+        let process_start_time = process_start_time(pid);
+        let cwd = cwd.display().to_string();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let active = transaction
+            .query_row(
+                "SELECT 1 FROM leases WHERE id = ?1 AND state = 'active'",
+                params![run.lease_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !active {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        let updated = transaction.execute(
+            "UPDATE runs
+             SET pid = ?1, process_start_time = ?2, command = ?3, cwd = ?4,
+                 exited_at = ?5, exit_code = ?6
+             WHERE id = ?7 AND lease_id = ?8 AND exited_at IS NULL",
+            params![
+                pid,
+                process_start_time,
+                command,
+                cwd,
+                now,
+                exit_code,
+                run.run_id,
+                run.lease_id
+            ],
+        )?;
+        if updated == 0 {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        let updated = transaction.execute(
+            "UPDATE leases
+             SET state = 'stopped', last_seen_at = ?1, released_at = ?1
+             WHERE id = ?2 AND state = 'active'",
+            params![now, run.lease_id],
+        )?;
+        if updated == 0 {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        transaction.commit()?;
+
+        Ok(())
+    }
+
+    pub fn discard_run_claim(&mut self, run: StartedRun) -> Result<(), RegistryError> {
+        self.rollback_run_claim(run, false)
+    }
+
+    pub fn restore_reserved_run_claim(&mut self, run: StartedRun) -> Result<(), RegistryError> {
+        self.rollback_run_claim(run, true)
+    }
+
+    fn rollback_run_claim(
+        &mut self,
+        run: StartedRun,
+        restore_reservation: bool,
+    ) -> Result<(), RegistryError> {
+        let now = utc_now(&self.connection)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let deleted = transaction.execute(
+            "DELETE FROM runs
+             WHERE id = ?1 AND lease_id = ?2 AND exited_at IS NULL",
+            params![run.run_id, run.lease_id],
+        )?;
+        if deleted == 0 {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        let updated = if restore_reservation {
+            transaction.execute(
+                "UPDATE leases
+                 SET state = 'reserved', last_seen_at = ?1, released_at = NULL
+                 WHERE id = ?2 AND state = 'active'",
+                params![now, run.lease_id],
+            )?
+        } else {
+            transaction.execute(
+                "DELETE FROM leases WHERE id = ?1 AND state = 'active'",
+                params![run.lease_id],
+            )?
+        };
+        if updated == 0 {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
+        transaction.commit()?;
+
+        Ok(())
+    }
+
     pub fn record_run_finished(
         &mut self,
         run: StartedRun,
@@ -425,27 +607,79 @@ impl Registry {
         exit_code: Option<i32>,
     ) -> Result<(), RegistryError> {
         let now = utc_now(&self.connection)?;
-        let transaction = self.connection.transaction()?;
-
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let lease = transaction
+            .query_row(
+                "SELECT port
+                 FROM leases
+                 WHERE id = ?1 AND state IN ('active', 'stale')",
+                params![run.lease_id],
+                |row| row.get::<_, u16>(0),
+            )
+            .optional()?;
+        let Some(port) = lease else {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        };
+        let current_run_id = transaction
+            .query_row(
+                "SELECT id
+                 FROM runs
+                 WHERE lease_id = ?1
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![run.lease_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        if current_run_id != Some(run.run_id) {
+            return Err(RegistryError::ReservationNotFound {
+                lease_id: run.lease_id,
+            });
+        }
         let updated_run = transaction.execute(
             "UPDATE runs
              SET exited_at = ?1, exit_code = ?2
              WHERE id = ?3 AND lease_id = ?4",
             params![now, exit_code, run.run_id, run.lease_id],
         )?;
-        let updated_lease = transaction.execute(
-            "UPDATE leases
-             SET state = 'reserved', last_seen_at = ?1, released_at = NULL
-             WHERE id = ?2 AND state IN ('active', 'stale')",
-            params![now, run.lease_id],
-        )?;
-        if updated_run == 0 || updated_lease == 0 {
+        if updated_run == 0 {
             return Err(RegistryError::ReservationNotFound {
                 lease_id: run.lease_id,
             });
         }
 
+        let port_conflict = transaction
+            .query_row(
+                "SELECT 1
+                 FROM leases
+                 WHERE id != ?1 AND port = ?2
+                 AND state IN ('active', 'reserved')
+                 LIMIT 1",
+                params![run.lease_id, port],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        let state = if port_conflict { "stopped" } else { "reserved" };
+        transaction.execute(
+            "UPDATE leases
+             SET state = ?1, last_seen_at = ?2,
+                 released_at = CASE WHEN ?1 = 'reserved' THEN NULL ELSE ?2 END
+             WHERE id = ?3 AND state IN ('active', 'stale')",
+            params![state, now, run.lease_id],
+        )?;
         transaction.commit()?;
+
+        if port_conflict {
+            return Err(RegistryError::ReservationRestoreConflict {
+                lease_id: run.lease_id,
+                port,
+            });
+        }
 
         Ok(())
     }

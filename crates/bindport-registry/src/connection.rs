@@ -3,23 +3,46 @@ use super::*;
 const WAL_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 fn enable_wal(connection: &Connection) -> rusqlite::Result<()> {
-    let deadline = std::time::Instant::now() + REGISTRY_BUSY_TIMEOUT;
+    enable_wal_with_timeout(connection, REGISTRY_BUSY_TIMEOUT)
+}
 
-    loop {
-        match connection.pragma_update(None, "journal_mode", "WAL") {
-            Ok(()) => return Ok(()),
-            Err(error) if is_sqlite_lock_contention(&error) => {
-                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                if remaining.is_zero() {
-                    return Err(error);
+pub(crate) fn enable_wal_with_timeout(
+    connection: &Connection,
+    timeout: Duration,
+) -> rusqlite::Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    let result = (|| {
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let retry_interval = remaining.min(WAL_RETRY_INTERVAL);
+            connection.busy_timeout(retry_interval)?;
+            let attempt_started = std::time::Instant::now();
+            match connection.pragma_update(None, "journal_mode", "WAL") {
+                Ok(()) => return Ok(()),
+                Err(error) if is_sqlite_lock_contention(&error) => {
+                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        return Err(error);
+                    }
+                    // SQLITE_LOCKED may bypass the busy handler, so explicitly pace retries.
+                    let sleep = retry_interval
+                        .saturating_sub(attempt_started.elapsed())
+                        .min(remaining);
+                    if !sleep.is_zero() {
+                        std::thread::sleep(sleep);
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err(error);
+                    }
                 }
-                std::thread::sleep(remaining.min(WAL_RETRY_INTERVAL));
-                if std::time::Instant::now() >= deadline {
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
-            Err(error) => return Err(error),
         }
+    })();
+    let restore = connection.busy_timeout(REGISTRY_BUSY_TIMEOUT);
+    match (result, restore) {
+        (Err(error), _) => Err(error),
+        (Ok(()), restore) => restore,
     }
 }
 
@@ -134,6 +157,7 @@ impl Registry {
             source,
         })?;
         connection.busy_timeout(REGISTRY_BUSY_TIMEOUT)?;
+        connection.pragma_update(None, "foreign_keys", true)?;
         let user_version =
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
         if user_version > REGISTRY_USER_VERSION {
@@ -143,13 +167,18 @@ impl Registry {
                 supported: REGISTRY_USER_VERSION,
             });
         }
-        enable_wal(&connection)?;
+        enable_wal(&connection).map_err(|source| RegistryError::Open {
+            path: path.clone(),
+            source,
+        })?;
         harden_registry_file(&path).map_err(|source| RegistryError::CreateDirectory {
             path: path.clone(),
             source,
         })?;
         let mut registry = Self { connection, path };
-        registry.ensure_schema()?;
+        if user_version < REGISTRY_USER_VERSION {
+            registry.ensure_schema()?;
+        }
 
         Ok(registry)
     }

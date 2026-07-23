@@ -2,7 +2,6 @@ use super::*;
 
 impl Registry {
     pub(crate) fn ensure_schema(&mut self) -> Result<(), RegistryError> {
-        self.connection.pragma_update(None, "foreign_keys", true)?;
         let path = self.path.clone();
         let transaction = self
             .connection
@@ -15,6 +14,10 @@ impl Registry {
                 found: user_version,
                 supported: REGISTRY_USER_VERSION,
             });
+        }
+        if user_version == REGISTRY_USER_VERSION {
+            transaction.commit()?;
+            return Ok(());
         }
         transaction.execute_batch(
             "

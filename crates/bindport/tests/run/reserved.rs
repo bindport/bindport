@@ -218,7 +218,7 @@ fn occupied_reserved_port_fails_before_spawn_and_remains_queryable() {
 }
 
 #[test]
-fn promotion_failure_terminates_child_and_leaves_no_false_active_run() {
+fn promotion_failure_happens_before_spawn_and_leaves_no_false_active_run() {
     let registry_path = temp_registry_path("reserved-promotion-failure-registry");
     let root = temp_test_dir("reserved-promotion-failure-root")
         .canonicalize()
@@ -258,7 +258,7 @@ fn promotion_failure_terminates_child_and_leaves_no_false_active_run() {
 
     assert!(!output.status.success());
     assert!(started_at.elapsed() < Duration::from_secs(5));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("child was terminated"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no child was spawned"));
     assert_eq!(lookup_port(&registry_path, &root), reserved_port);
     let mut registry = Registry::open(&registry_path).expect("registry");
     let after = registry.export_snapshot().expect("export");

@@ -45,6 +45,13 @@ impl TestPortRange {
     fn config_range(&self) -> String {
         format!("{}-{}", self.start, self.end)
     }
+
+    fn open_allocation_window(&mut self) {
+        const GUARD_PORTS: usize = 2;
+        assert!(self.listeners.len() > GUARD_PORTS);
+        let guards = self.listeners.split_off(self.listeners.len() - GUARD_PORTS);
+        self.listeners = guards;
+    }
 }
 
 struct Client {
@@ -93,6 +100,7 @@ impl Drop for Client {
     }
 }
 
+#[derive(Debug)]
 struct ClientOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
@@ -102,7 +110,7 @@ struct ClientOutput {
 #[test]
 fn concurrent_reserve_all_clients_are_idempotent_and_worktree_isolated() {
     let registry_path = temp_registry_path("concurrent-reserve-all");
-    let port_range = TestPortRange::claim(12);
+    let mut port_range = TestPortRange::claim(12);
     let roots = (0..3)
         .map(|index| {
             let root = temp_test_dir(&format!("concurrent-reserve-root-{index}"));
@@ -110,7 +118,7 @@ fn concurrent_reserve_all_clients_are_idempotent_and_worktree_isolated() {
             root.canonicalize().expect("canonical reservation root")
         })
         .collect::<Vec<_>>();
-    drop(port_range.listeners);
+    port_range.open_allocation_window();
 
     let commands = roots
         .iter()
@@ -166,7 +174,7 @@ fn concurrent_reserve_all_clients_are_idempotent_and_worktree_isolated() {
 #[test]
 fn concurrent_run_clients_get_unique_stable_ports_without_lost_records() {
     let registry_path = temp_registry_path("concurrent-run-allocation");
-    let port_range = TestPortRange::claim(16);
+    let mut port_range = TestPortRange::claim(16);
     let roots = distinct_run_roots(
         "concurrent-run-root",
         PortRange {
@@ -175,18 +183,15 @@ fn concurrent_run_clients_get_unique_stable_ports_without_lost_records() {
         },
         4,
     );
-    drop(port_range.listeners);
+    port_range.open_allocation_window();
 
     let commands = roots
         .iter()
         .map(|root| blocking_run_command(&registry_path, root))
         .collect::<Vec<_>>();
     let mut clients = spawn_concurrently(commands);
-    let first_ports = read_ready_ports(&mut clients);
-    assert_eq!(
-        first_ports.iter().copied().collect::<BTreeSet<_>>().len(),
-        4
-    );
+    let first_ports = read_ready_ports(&registry_path, &mut clients);
+    assert_unique_ready_ports(&registry_path, &first_ports, &mut clients);
     wait_for_active_services(&registry_path, 4);
 
     let registry = Registry::open(&registry_path).expect("active allocation registry");
@@ -250,9 +255,52 @@ fn concurrent_run_clients_get_unique_stable_ports_without_lost_records() {
 }
 
 #[test]
+fn concurrent_run_claims_ports_before_children_report_them() {
+    let registry_path = temp_registry_path("concurrent-run-preclaim");
+    let mut port_range = TestPortRange::claim(8);
+    let range = PortRange {
+        start: port_range.start,
+        end: port_range.end,
+    };
+    let guarded_scan_start = port_range.end - 1;
+    let roots = run_roots_for_scan_starts(
+        "concurrent-run-preclaim-root",
+        range,
+        &[
+            guarded_scan_start,
+            guarded_scan_start,
+            guarded_scan_start,
+            guarded_scan_start,
+        ],
+    );
+    port_range.open_allocation_window();
+
+    let mut clients = spawn_concurrently(
+        roots
+            .iter()
+            .map(|root| blocking_run_command(&registry_path, root))
+            .collect(),
+    );
+    let ports = read_ready_ports(&registry_path, &mut clients);
+    assert_unique_ready_ports(&registry_path, &ports, &mut clients);
+    wait_for_active_services(&registry_path, 4);
+
+    for client in &mut clients {
+        client.release();
+    }
+    for output in clients.into_iter().map(Client::finish) {
+        assert_client_succeeded(&output, "concurrent preclaimed run");
+    }
+
+    let registry = Registry::open(&registry_path).expect("preclaim registry");
+    let stopped = registry.export_snapshot().expect("preclaim export");
+    assert_complete_registry(&stopped, 4, "stopped");
+}
+
+#[test]
 fn concurrent_reserved_runs_promote_original_leases_without_duplicates() {
     let registry_path = temp_registry_path("concurrent-promotion");
-    let port_range = TestPortRange::claim(12);
+    let mut port_range = TestPortRange::claim(12);
     let range = port_range.config_range();
     let roots = (0..4)
         .map(|index| {
@@ -261,7 +309,7 @@ fn concurrent_reserved_runs_promote_original_leases_without_duplicates() {
             root.canonicalize().expect("canonical promotion root")
         })
         .collect::<Vec<_>>();
-    drop(port_range.listeners);
+    port_range.open_allocation_window();
 
     let reservations = run_concurrent_outputs(
         roots
@@ -291,7 +339,7 @@ fn concurrent_reserved_runs_promote_original_leases_without_duplicates() {
             .map(|root| blocking_run_command(&registry_path, root))
             .collect(),
     );
-    let promoted_ports = read_ready_ports(&mut clients);
+    let promoted_ports = read_ready_ports(&registry_path, &mut clients);
     assert_eq!(promoted_ports, reserved_ports);
     wait_for_active_services(&registry_path, 4);
 
@@ -355,6 +403,43 @@ fn distinct_run_roots(name: &str, range: PortRange, count: usize) -> Vec<PathBuf
     }
 
     panic!("could not create {count} roots with distinct port scan starts");
+}
+
+fn run_roots_for_scan_starts(name: &str, range: PortRange, scan_starts: &[u16]) -> Vec<PathBuf> {
+    let mut roots = (0..scan_starts.len()).map(|_| None).collect::<Vec<_>>();
+    for index in 0..1_000 {
+        let root = temp_test_dir(&format!("{name}-{index}"))
+            .canonicalize()
+            .expect("canonical collision root");
+        let identity = resolve_identity(IdentitySources {
+            cwd: &root,
+            command: &[],
+            cli_project: None,
+            cli_service: None,
+            env_project: None,
+            env_service: None,
+            config_project: Some("concurrent-project"),
+            config_service: Some("web"),
+        });
+        let scan_start = identity.port_scan_start(range).expect("port scan start");
+        let Some(slot) = scan_starts
+            .iter()
+            .zip(&roots)
+            .position(|(target, root)| *target == scan_start && root.is_none())
+        else {
+            continue;
+        };
+        write_project_config(&root, &format!("{}-{}", range.start, range.end), &["web"]);
+        roots[slot] = Some(root);
+        if roots.iter().all(Option::is_some) {
+            return roots
+                .into_iter()
+                .map(|root| root.expect("collision root"))
+                .collect();
+        }
+    }
+
+    panic!("could not create roots with scan starts {scan_starts:?}");
 }
 
 fn write_project_config(root: &Path, range: &str, services: &[&str]) {
@@ -440,7 +525,7 @@ fn run_concurrent_outputs(commands: Vec<Command>) -> Vec<ClientOutput> {
         .collect()
 }
 
-fn read_ready_ports(clients: &mut [Client]) -> Vec<u16> {
+fn read_ready_ports(registry_path: &Path, clients: &mut Vec<Client>) -> Vec<u16> {
     let (sender, receiver) = mpsc::channel();
     let handles = clients
         .iter_mut()
@@ -469,22 +554,96 @@ fn read_ready_ports(clients: &mut [Client]) -> Vec<u16> {
     drop(sender);
 
     let deadline = Instant::now() + CLIENT_TIMEOUT;
-    let mut ports = vec![None; clients.len()];
+    let mut ports = (0..clients.len()).map(|_| None).collect::<Vec<_>>();
     for _ in 0..clients.len() {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        let (index, result) = receiver
-            .recv_timeout(remaining)
-            .expect("wrapped children did not report ports before timeout");
-        ports[index] = Some(result.expect("wrapped child port"));
+        let received = receiver.recv_timeout(remaining);
+        let Ok((index, result)) = received else {
+            panic_with_client_diagnostics(
+                registry_path,
+                format!("wrapped children did not report ports before timeout: {ports:?}"),
+                clients,
+            );
+        };
+        ports[index] = Some(result);
     }
     for handle in handles {
         handle.join().expect("client stdout thread");
     }
+    if ports.iter().any(|port| !matches!(port, Some(Ok(_)))) {
+        panic_with_client_diagnostics(
+            registry_path,
+            format!("wrapped child port results: {ports:?}"),
+            clients,
+        );
+    }
 
     ports
         .into_iter()
-        .map(|port| port.expect("reported client port"))
+        .map(|port| {
+            port.expect("reported client port")
+                .expect("decimal client port")
+        })
         .collect()
+}
+
+fn assert_unique_ready_ports(registry_path: &Path, ports: &[u16], clients: &mut Vec<Client>) {
+    let unique = ports.iter().copied().collect::<BTreeSet<_>>().len();
+    if unique == clients.len() {
+        return;
+    }
+
+    panic_with_client_diagnostics(
+        registry_path,
+        format!("concurrent clients reported duplicate initial ports: {ports:?}"),
+        clients,
+    );
+}
+
+fn panic_with_client_diagnostics(
+    registry_path: &Path,
+    message: String,
+    clients: &mut Vec<Client>,
+) -> ! {
+    let before = Registry::open(registry_path)
+        .expect("diagnostic registry")
+        .export_snapshot()
+        .expect("diagnostic export before release");
+    let statuses = clients
+        .iter_mut()
+        .map(|client| client.child.try_wait().expect("poll diagnostic client"))
+        .collect::<Vec<_>>();
+    for (client, status) in clients.iter_mut().zip(&statuses) {
+        if status.is_none()
+            && let Some(mut stdin) = client.child.stdin.take()
+        {
+            let _ = stdin.write_all(b"\n");
+            let _ = stdin.flush();
+        }
+    }
+    let outputs = std::mem::take(clients)
+        .into_iter()
+        .map(Client::finish)
+        .collect::<Vec<_>>();
+    let output_details = outputs
+        .iter()
+        .map(|output| {
+            format!(
+                "status={}, stdout={}, stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+        .collect::<Vec<_>>();
+    let after = Registry::open(registry_path)
+        .expect("diagnostic registry after release")
+        .export_snapshot()
+        .expect("diagnostic export after release");
+
+    panic!(
+        "{message}; statuses_before_release={statuses:?}, outputs={output_details:#?}, registry_before_release={before:#?}, registry_after_release={after:#?}"
+    );
 }
 
 fn wait_for_active_services(registry_path: &Path, expected: usize) {
