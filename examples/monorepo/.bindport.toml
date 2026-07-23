@@ -28,6 +28,8 @@ hostname = "{branch}.example-web.localhost"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
+env.NEXT_PUBLIC_API_URL = "{services.api.route_url}"
+env.API_PORT = "{services.api.port}"
 
 [[services]]
 name = "api"

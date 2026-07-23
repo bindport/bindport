@@ -51,8 +51,10 @@ bindport run api
 ```
 
 When a service has `command` and `args` in config, BindPort expands templates
-such as `{port}`, `{hostname}`, and `{route_url}` after allocation. An explicit
-child command overrides the configured command for one run:
+such as `{port}`, `{hostname}`, and `{route_url}` after allocation. Configured
+`env`, `command`, and `args` may also read one startup snapshot of same-project,
+exact-worktree active or reserved siblings through `{services.<name>.<field>}`.
+An explicit child command overrides the configured command for one run:
 
 ```sh
 bindport run web -- next dev --hostname 0.0.0.0 --port "$PORT"
@@ -147,7 +149,9 @@ bindport reserve --all
 `reserve --all` is scoped to the current project and worktree. It preserves
 matching active services and reservations, allocates every missing configured
 service, and commits all new reservations as one idempotent, all-or-nothing
-registry operation. It starts no children and owns no OS sockets; reservations
+registry operation. Use it before startup when configured sibling references
+need every address. It starts no children, orders no dependency graph, implies
+no readiness, and owns no OS sockets; reservations
 coordinate BindPort registry clients only.
 
 Print one prepared or running service port for scripts:

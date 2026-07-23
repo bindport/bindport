@@ -58,7 +58,8 @@ The current source tree includes:
   when available.
 - Service command, argument, and env templates through `[[services]].command`,
   `[[services]].args`, `[[services]].env`, and `bindport run --env`, including
-  route hostname metadata when configured.
+  scoped active/reserved sibling references in configured templates and route
+  hostname metadata when configured.
 - Basic SQLite-backed lease/run/output recording with `bindport status --json`
   and grouped inventory through `bindport list --json`, including reserved
   leases for processes BindPort does not wrap.
@@ -295,10 +296,14 @@ BindPort assigns it:
 bindport run web -- sh -c 'storybook dev --port "$PORT" --host 0.0.0.0'
 ```
 
-Supported template placeholders are `{port}`, `{host}`, `{url}`, `{project}`,
+Supported own-service placeholders are `{port}`, `{host}`, `{url}`, `{project}`,
 `{service}`, `{hostname}`, `{route_url}`, `{health_url}`, `{branch}`,
 `{branch_label}`, `{git_branch}`, `{worktree}`, `{worktree_label}`, and
-`{worktree_hash}`.
+`{worktree_hash}`. Configured service `env`, `command`, and `args` may also use
+`{services.<name>.<field>}` for `port`, `host`, `url`, `hostname`, `route_url`,
+and `health_url`. Run `bindport reserve --all` first when sibling addresses must
+exist before startup. References use one active/reserved registry snapshot in
+the current project and worktree; assignment does not imply process readiness.
 Use `{{` and `}}` when a template value needs literal braces, for example a
 JSON-valued environment variable.
 `bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, `--route-url TEMPLATE`,

@@ -55,10 +55,18 @@ project config plus local overrides, then inference from package metadata,
 workspace roots, git worktree, and command name.
 
 Service config supports `name`, `path`, `command`, `args`, `env`, `hostname`,
-`route_url`, and `health_url`. Template placeholders include `{port}`, `{host}`,
-`{url}`, `{project}`, `{service}`, `{hostname}`, `{route_url}`, `{health_url}`,
-`{branch}`, `{branch_label}`, `{git_branch}`, `{worktree}`,
-`{worktree_label}`, and `{worktree_hash}`.
+`route_url`, and `health_url`. Own-service template placeholders include
+`{port}`, `{host}`, `{url}`, `{project}`, `{service}`, `{hostname}`,
+`{route_url}`, `{health_url}`, `{branch}`, `{branch_label}`, `{git_branch}`,
+`{worktree}`, `{worktree_label}`, and `{worktree_hash}`.
+
+Configured service `env`, `command`, and `args` additionally support exactly
+`{services.<name>.<field>}` for `port`, `host`, `url`, `hostname`, `route_url`,
+and `health_url`. References resolve one active/reserved registry snapshot in
+the current project and exact worktree and fail before spawn for missing,
+stopped, stale, ambiguous, or unavailable metadata. They do not apply to CLI,
+route metadata, outputs, or hooks. Port assignment does not imply readiness;
+BindPort does not start, order, supervise, or wait for dependencies.
 
 ## Registry State
 

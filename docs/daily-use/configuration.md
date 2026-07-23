@@ -233,6 +233,35 @@ env, hostname, route URL, and health URL templates can use:
 {worktree_hash}
 ```
 
+Configured service `env`, `command`, and `args` values can additionally use the
+narrow sibling syntax:
+
+```text
+{services.<name>.port}
+{services.<name>.host}
+{services.<name>.url}
+{services.<name>.hostname}
+{services.<name>.route_url}
+{services.<name>.health_url}
+```
+
+Sibling lookup accepts exactly one active or reserved service with that name in
+the current project and exact current worktree. Missing, stopped, stale, and
+ambiguous matches fail before output preflight, hooks, or child spawn. BindPort
+captures the referenced values once during startup; a running child's argv and
+environment do not change when registry state changes.
+
+`port` is decimal, `host` is the registered direct host, and `url` is the direct
+`http://<host>:<port>` URL. `hostname` and `health_url` require configured
+metadata. `route_url` uses the registered configured or hostname-derived route,
+then the existing direct URL fallback. An assigned active or reserved address
+does not mean the service is ready. BindPort does not start, order, supervise,
+wait for, or health-check a dependency graph.
+
+Sibling references do not apply to hostname, route URL, health URL, output,
+route metadata, hook, or CLI `--env` templates. This is a placeholder extension,
+not an expression language.
+
 Use `{{` and `}}` when a template value needs literal braces.
 `bindport run --hostname TEMPLATE`, `--route-url TEMPLATE`, and
 `--health-url TEMPLATE` override service config for one run. Wrapper scripts can

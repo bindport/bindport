@@ -39,6 +39,12 @@ fails for missing, stopped, stale, or ambiguous matches.
   CLI flag, for example `args = ["--port", "{port}"]`.
 - Use service `env` templates for app-level values such as `PORT`,
   `HOSTNAME`, public route URLs, or framework-specific URL variables.
+- Configured `env`, `command`, and `args` can reference an active or reserved
+  sibling in the same project and exact worktree as
+  `{services.<name>.<field>}`, where `field` is `port`, `host`, `url`,
+  `hostname`, `route_url`, or `health_url`. Run `reserve --all` first when the
+  sibling may not be active. Assignment does not imply readiness, and BindPort
+  does not order or wait for services.
 - Do not put execution-sensitive env names such as `PATH`, `LD_PRELOAD`,
   `DYLD_*`, `NODE_OPTIONS`, or `GIT_CONFIG_*` into config.
 

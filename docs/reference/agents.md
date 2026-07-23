@@ -16,7 +16,8 @@ instruction file:
   development ports.
 - Run `bindport config validate` after changing `.bindport.*` config.
 - Use `bindport reserve --all` to prepare every configured service without
-  starting children.
+  starting children, including before a configured `env`, `command`, or `args`
+  value reads `{services.<name>.<field>}`.
 - Use `bindport port <service>` for an exact machine-readable active or reserved
   port, and `bindport status --json` or `bindport open <service> --print` for
   service details and active URLs.
@@ -77,9 +78,11 @@ bindport open web --print
 
 `reserve --all` idempotently prepares the named services in the discovered
 project and current worktree. New reservations commit all-or-nothing; the
-command starts no children and owns no sockets. `port` prints only a decimal
-port and newline for one active or reserved service in that scope; missing,
-stopped, stale, and ambiguous matches fail.
+command starts no children and owns no sockets. Configured sibling references
+resolve active or reserved services once at child startup in that exact scope;
+they do not imply readiness or create an ordered dependency graph. `port` prints
+only a decimal port and newline for one active or reserved service in that
+scope; missing, stopped, stale, and ambiguous matches fail.
 
 Recommended cleanup flow:
 
