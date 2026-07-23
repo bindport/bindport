@@ -20,8 +20,11 @@ schema upgrades, preservation guarantees, failure handling, and backups.
 | `stale` | The registry entry points at a process that no longer appears live. |
 
 Stopped and stale entries are retained so users can see recent state and so
-output cleanup can make deliberate decisions. Use cleanup commands when the
-history is no longer useful.
+output cleanup can make deliberate decisions. Building a normal status snapshot
+can reconcile an apparently active record to stale and can perform a configured
+loopback HTTP health probe, so status/list/open/dashboard reads are not pure
+byte-for-byte database reads. Use cleanup commands when the history is no
+longer useful.
 
 ## Human Status
 
@@ -54,8 +57,9 @@ bindport list --json
 `bindport list` is a registry-wide inventory view. It groups latest service
 records by project and prints compact service rows with state, address, best URL,
 branch label, and PID. `bindport list --json` exposes the same grouping through
-a small JSON payload with `schema_version`, `generated_at`, aggregate counts,
-and `projects[].services[]`.
+a small JSON payload with its own current `schema_version` of `0.1`,
+`generated_at`, aggregate counts, and `projects[].services[]`. That version is
+not status schema 1.0 and does not carry the status field-freeze promise.
 
 Use `list` when you need to answer "what projects and services are recorded on
 this machine?" Use `status --json` when you need the full registry snapshot,
@@ -183,8 +187,11 @@ Hook target `kind` is `local_file`, `missing_file`, or `opaque`; `display` and
 a string `error` and `items` remains present (normally empty).
 
 Agents and scripts should prefer `status --json` or `list --json` over parsing
-human output. Use `status --json` for the complete v1 status contract and
-`list --json` for grouped project/service inventory.
+human output. Both are registry-wide: select by `identity_key` or exact
+project/service/worktree fields, never by array position. Use `status --json`
+for the complete v1 status contract and `list --json` for grouped
+project/service inventory. See the [CLI Stability Contract](../reference/cli-stability.md)
+for stdout, stderr, exit, and ordering guarantees.
 
 ## Registry Export
 
@@ -194,8 +201,9 @@ Use registry export for debug or backup workflows:
 bindport registry export
 ```
 
-The export is JSON-only and includes raw `leases`, `runs`, `output_files`, and
-`output_render_state` rows. Output rows include scoped ownership fields such as
+The export is JSON-only, currently reports its own export `schema_version` of
+`0.1` plus SQLite `user_version`, and includes raw `leases`, `runs`,
+`output_files`, and `output_render_state` rows. Output rows include scoped ownership fields such as
 `output_scope`, `output_root`, `config_root`, `worktree_path`, and
 `worktree_hash`, which makes the payload useful when diagnosing multi-worktree
 output ownership problems.
@@ -209,9 +217,9 @@ Review and redact it before sharing in a bug report.
 
 ## URL Lookup
 
-`bindport open [service]` resolves the best active service URL from the same
-snapshot. It prints `route_url` when configured, otherwise the direct loopback
-`url`.
+`bindport open [service]` resolves the best active service URL from the
+registry-wide snapshot. It prints `route_url` when configured, otherwise the
+direct loopback `url`.
 
 Examples:
 
@@ -223,7 +231,10 @@ bindport open web --browser
 ```
 
 Use `--project PROJECT` when multiple active services share the same service
-name. `--browser` only launches HTTP or HTTPS URLs.
+name. Project filtering does not select the current worktree, so duplicate
+active worktrees can remain ambiguous. For exact-worktree automation, filter
+`status --json` by identity/worktree fields. `--browser` only launches HTTP or
+HTTPS URLs; use `--print` in headless or machine workflows.
 
 ## Reservations
 
@@ -270,7 +281,10 @@ Remove stopped and stale entries, which is the default selection:
 bindport clean --all --yes
 ```
 
-Machine-readable cleanup counts are available with `--json`:
+Machine-readable cleanup counts are available with `--json`. This report is
+currently unversioned and is not status schema 1.0. Destructive cleanup can run
+an approved lifecycle hook whose inherited stdout can contaminate the JSON;
+`--dry-run` runs no hooks and is the safe parse-only preview:
 
 ```sh
 bindport clean --json --dry-run

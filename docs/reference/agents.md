@@ -18,9 +18,10 @@ instruction file:
 - Use `bindport reserve --all` to prepare every configured service without
   starting children, including before a configured `env`, `command`, or `args`
   value reads `{services.<name>.<field>}`.
-- Use `bindport port <service>` for an exact machine-readable active or reserved
-  port, and `bindport status --json` or `bindport open <service> --print` for
-  service details and active URLs.
+- Use `bindport port <service>` for an exact current-worktree active or reserved
+  port. Use `bindport status --json` and match identity/worktree fields for an
+  exact URL; use `bindport open <service> --print` only when registry-wide
+  service selection is unambiguous.
 - Do not edit `.bindport.local.*`, `bindport.local.*`, generated output files,
   or `.env.local` unless explicitly asked.
 - Do not run `bindport hooks trust`, `bindport hooks deny`, or hook commands
@@ -69,8 +70,11 @@ bindport doctor
 
 `status --json` reports schema `1.0`. Treat documented fields and closed enum
 values as the v1 contract, ignore unfamiliar additive object fields, and do not
-rely on object or array ordering. See [Status and Cleanup](../operations/status.md)
-and [Registry Migration Policy](registry-migrations.md) before writing direct
+rely on object or array ordering. Status and list are registry-wide, so select
+by `identity_key` or project/service plus exact `worktree_path`/`worktree_hash`,
+not the first array entry. See [CLI Stability Contract](cli-stability.md),
+[Status and Cleanup](../operations/status.md), and
+[Registry Migration Policy](registry-migrations.md) before writing direct
 registry/status tooling.
 
 Recommended service flow:
@@ -88,12 +92,15 @@ command starts no children and owns no sockets. Configured sibling references
 resolve active or reserved services once at child startup in that exact scope;
 they do not imply readiness or create an ordered dependency graph. `port` prints
 only a decimal port and newline for one active or reserved service in that
-scope; missing, stopped, stale, and ambiguous matches fail.
+scope; missing, stopped, stale, and ambiguous matches fail. `open --project`
+filters the registry-wide active set by project but not worktree; use status
+identity fields when multiple worktrees can be active. Always use `--print`, not
+`--browser`, in non-interactive runs.
 
 Recommended cleanup flow:
 
 ```sh
-bindport clean --dry-run
+bindport clean --dry-run --json
 bindport clean --stopped
 ```
 

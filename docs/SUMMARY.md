@@ -29,10 +29,11 @@
 
 - [Status and Cleanup](operations/status.md)
 - [Health and Troubleshooting](operations/troubleshooting.md)
-- [Security Model](operations/security.md)
+- [Security and Privacy](operations/security.md)
 
 # Reference
 
+- [CLI Stability Contract](reference/cli-stability.md)
 - [Configuration Stability](reference/config-stability.md)
 - [Registry Migration Policy](reference/registry-migrations.md)
 - [Platform Support](reference/platform-support.md)

@@ -6,6 +6,8 @@ commands=(
   'reserve:hold a port without running a child process'
   'release:release a reserved port'
   'status:show registry status'
+  'list:list projects and services in the registry'
+  'registry:export registry debug JSON'
   'open:print or open the best service URL'
   'port:print an active or reserved service port'
   'clean:remove stopped and stale registry entries'
@@ -18,9 +20,14 @@ commands=(
   'init:create project or user config'
 )
 
-local -a run_opts clean_opts dashboard_opts render_opts
+local -a run_opts reserve_opts clean_opts dashboard_opts render_opts
 run_opts=(
   '--env[add a templated child environment variable]:NAME=VALUE:'
+  '--hostname[set route hostname metadata]:template:'
+  '--route-url[set route URL metadata]:template:'
+  '--health-url[set service health check URL metadata]:template:'
+)
+reserve_opts=(
   '--hostname[set route hostname metadata]:template:'
   '--route-url[set route URL metadata]:template:'
   '--health-url[set service health check URL metadata]:template:'
@@ -46,11 +53,11 @@ dashboard_opts=(
   '--allowed-host[additional accepted HTTP Host header]:host:'
   '--static-dir[read dashboard assets from a local directory]:directory:_files -/'
 )
-render_opts=('--all[render every enabled output]' '--dry-run[print targets without writing files]' '--repair[reconcile DB-owned files]')
+render_opts=('--all[render every enabled output]' '--dry-run[print targets without writing files]' '--diff[print content changes without writing files]' '--repair[reconcile DB-owned files]' '(-v --verbose)'{-v,--verbose}'[print render diagnostics to stderr]')
 
 _arguments -C \
   '(-h --help)'{-h,--help}'[show help]' \
-  '--version[print version]' \
+  '(-V --version)'{-V,--version}'[print version]' \
   '1:command:->command' \
   '*::arg:->args'
 
@@ -64,13 +71,19 @@ case "$state" in
         _arguments $run_opts
         ;;
       reserve)
-        _arguments $run_opts '--all[reserve every named configured service]'
+        _arguments $reserve_opts '--all[reserve every named configured service]'
         ;;
       release)
         _arguments '1:service or port:'
         ;;
       status)
         _arguments '--json[print machine-readable status]'
+        ;;
+      list)
+        _arguments '--json[print grouped project/service JSON]'
+        ;;
+      registry)
+        _arguments '1:registry command:(export)'
         ;;
       open)
         _arguments '--project[disambiguate project]:project:' '--browser[open the URL with the system browser]' '--print[print without launching a browser]' '1:service:'

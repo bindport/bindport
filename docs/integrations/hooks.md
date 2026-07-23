@@ -62,8 +62,9 @@ Supported events:
 - `render_requested`: a render operation was requested.
 - `output_rendered`: one or more output files were rendered.
 
-Hooks can subscribe to one or more events. BindPort passes event metadata
-through environment variables, not through secrets or inherited shell state.
+Hooks can subscribe to one or more events. BindPort passes event metadata through a minimal environment rather than
+inheriting the caller's full shell state. It does not classify user-provided
+hook argv or event labels as secrets.
 
 ## Trust Workflow
 
@@ -110,7 +111,9 @@ trust decision.
 
 Commands resolved from `PATH`, such as `docker`, are opaque targets. BindPort
 can trust the configured command definition, but it cannot fingerprint every
-external executable that may be found by the user's shell environment.
+external executable that may be found by the user's shell environment. Trust is
+an execution gate, not a sandbox; an approved hook runs with the invoking
+user's local permissions.
 
 ## Environment
 
@@ -121,8 +124,10 @@ Hook processes receive a minimal environment:
 - `BINDPORT_HOOK_SOURCES`
 - `BINDPORT_HOOK_CONTEXT`
 
-Other parent environment values are not inherited. Secret values are not copied
-into hook metadata or the registry.
+Other parent environment values are not inherited. Ambient environment values
+are not copied into hook metadata or dedicated registry fields, but configured
+hook argv and expanded child command arguments are visible local data and are
+not secret-scrubbed. See [Security and Privacy](../operations/security.md).
 
 Hooks that call tools such as `kubectl`, `docker`, or cloud CLIs should declare
 the environment they need inside the hook or through reviewed wrapper scripts.
