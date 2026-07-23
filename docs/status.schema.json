@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://bindport.dev/schemas/status.schema.json",
-  "title": "BindPort status snapshot",
+  "title": "BindPort status --json schema 1.0",
   "type": "object",
   "required": [
     "schema_version",
@@ -14,11 +14,10 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "0.7"
+      "const": "1.0"
     },
     "generated_at": {
-      "type": "string",
-      "minLength": 1
+      "type": "string"
     },
     "outputs": {
       "type": "array",
@@ -42,32 +41,35 @@
       "$ref": "#/$defs/hooks"
     }
   },
-  "additionalProperties": false,
+  "additionalProperties": true,
   "$defs": {
     "nullableString": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "nullableInteger": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
+      "type": [
+        "string",
+        "null"
       ]
     },
     "port": {
       "type": "integer",
       "minimum": 0,
       "maximum": 65535
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "exitCode": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "outputSummary": {
       "type": "object",
@@ -99,7 +101,7 @@
           "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "serviceOutput": {
       "type": "object",
@@ -129,7 +131,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "proxy": {
       "type": "object",
@@ -140,16 +142,19 @@
       ],
       "properties": {
         "adapter": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "traefik"
+          ]
         },
         "rendered": {
           "type": "boolean"
         },
         "target": {
-          "$ref": "#/$defs/nullableString"
+          "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "service": {
       "type": "object",
@@ -236,7 +241,14 @@
           "$ref": "#/$defs/nullableString"
         },
         "pid": {
-          "$ref": "#/$defs/nullableInteger"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pid"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "command": {
           "type": "string"
@@ -251,7 +263,7 @@
           "$ref": "#/$defs/nullableString"
         },
         "exit_code": {
-          "$ref": "#/$defs/nullableInteger"
+          "$ref": "#/$defs/exitCode"
         },
         "health": {
           "type": "string",
@@ -279,7 +291,7 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "run": {
       "type": "object",
@@ -301,7 +313,7 @@
           "type": "integer"
         },
         "pid": {
-          "type": "integer"
+          "$ref": "#/$defs/pid"
         },
         "command": {
           "type": "string"
@@ -316,10 +328,10 @@
           "$ref": "#/$defs/nullableString"
         },
         "exit_code": {
-          "$ref": "#/$defs/nullableInteger"
+          "$ref": "#/$defs/exitCode"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "hooks": {
       "type": "object",
@@ -337,7 +349,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "hook": {
       "type": "object",
@@ -367,7 +379,15 @@
           ]
         },
         "trust": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "approved (worktree)",
+            "approved (repo)",
+            "denied (worktree)",
+            "denied (repo)",
+            "changed",
+            "pending"
+          ]
         },
         "source": {
           "type": "string"
@@ -397,7 +417,8 @@
         },
         "timeout_ms": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 0,
+          "maximum": 18446744073709551615
         },
         "hook_hash": {
           "type": "string"
@@ -406,7 +427,7 @@
           "$ref": "#/$defs/hookTarget"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "hookTarget": {
       "type": "object",
@@ -431,7 +452,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     }
   }
 }

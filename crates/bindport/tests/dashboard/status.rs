@@ -22,7 +22,7 @@ fn dashboard_serves_status_api() {
     let body = http_body(&response);
     let status = serde_json::from_str::<Value>(body).expect("status json");
 
-    assert_eq!(status["schema_version"], "0.7");
+    assert_eq!(status["schema_version"], "1.0");
     assert!(status["outputs"].as_array().expect("outputs").is_empty());
     assert_eq!(status["services"][0]["project"], "dashboard-fixture");
     assert_eq!(status["services"][0]["service"], "web");

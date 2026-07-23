@@ -39,7 +39,8 @@ default.
 - [Platform Support](https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md): Supported OS/package targets, paths, process behavior, and CI gates.
 - [Config JSON Schema](https://github.com/bindport/bindport/blob/main/docs/config.schema.json): Machine-readable v1-candidate configuration shape and accepted value kinds.
 - [Configuration Stability](https://github.com/bindport/bindport/blob/main/docs/reference/config-stability.md): Config freeze boundary and deprecation policy; no keys are currently deprecated.
-- [Status JSON Schema](https://github.com/bindport/bindport/blob/main/docs/status.schema.json): Machine-readable `bindport status --json` schema; use `bindport list --json` for grouped inventory and `bindport registry export` for debug/backup snapshots.
+- [Status JSON Schema](https://github.com/bindport/bindport/blob/main/docs/status.schema.json): Machine-readable `bindport status --json` schema 1.0; consumers ignore additive object fields but must handle the documented closed enums.
+- [Registry Migration Policy](https://github.com/bindport/bindport/blob/main/docs/reference/registry-migrations.md): Supported tagged SQLite schemas, active/reserved lease preservation, atomic failure behavior, and backup responsibility.
 - [Agent and LLM Setup](https://github.com/bindport/bindport/blob/main/docs/reference/agents.md): Agent instructions for project-wide preparation and scoped discovery, Codex skill, and LLM discovery files.
 
 ## Project

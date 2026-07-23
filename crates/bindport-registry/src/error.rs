@@ -11,6 +11,11 @@ pub enum RegistryError {
         path: PathBuf,
         message: &'static str,
     },
+    UnsupportedRegistryVersion {
+        path: PathBuf,
+        found: i64,
+        supported: i64,
+    },
     PortConflict {
         port: u16,
     },
@@ -51,6 +56,15 @@ impl fmt::Display for RegistryError {
             Self::UnsafePath { path, message } => {
                 write!(f, "unsafe registry path `{}`: {message}", path.display())
             }
+            Self::UnsupportedRegistryVersion {
+                path,
+                found,
+                supported,
+            } => write!(
+                f,
+                "registry `{}` uses unsupported user_version {found}; this BindPort supports through {supported}",
+                path.display()
+            ),
             Self::PortConflict { port } => {
                 write!(f, "port {port} is already active in the registry")
             }
@@ -80,6 +94,7 @@ impl std::error::Error for RegistryError {
             Self::Open { source, .. } | Self::Sqlite(source) => Some(source),
             Self::MissingStateDirectory
             | Self::UnsafePath { .. }
+            | Self::UnsupportedRegistryVersion { .. }
             | Self::PortConflict { .. }
             | Self::ServiceNotFound { .. }
             | Self::AmbiguousService { .. }

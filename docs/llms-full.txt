@@ -86,8 +86,22 @@ output, `bindport status --json` for normal registry detail, or
 human output or hardcoding ports. Port lookup considers only active or reserved
 services in the selected project and current worktree. Use
 `bindport registry export` for debug/backup snapshots that need raw lease, run,
-output ownership, and render state rows. The status JSON schema is in
-`docs/status.schema.json`.
+output ownership, and render state rows.
+
+`status --json` is frozen as schema `1.0`; its complete contract is
+`docs/status.schema.json`. Existing fields, JSON kinds, nullability, meanings,
+and closed enum sets remain compatible through v1. Additive object fields may
+appear, so consumers ignore unknown fields and do not rely on object or array
+ordering. This version is separate from registry `user_version`, export, list,
+and config schemas.
+
+The SQLite registry currently uses `user_version = 9` and automatically
+upgrades tagged schemas from v0.1.0 through v0.7.0 in one transaction. A
+supported upgrade preserves active/reserved identity and ports plus available
+run, route, health, and output state. Newer versions are rejected without a
+rewrite; failures roll back. No automatic backup, downgrade, or arbitrary data
+recovery is promised. Preserve a failing registry and follow
+`docs/reference/registry-migrations.md`.
 
 ## Outputs And Templates
 
@@ -171,6 +185,8 @@ should not run hook trust, deny, reset, or hook commands without user approval.
 - Optional Output Patterns: https://github.com/bindport/bindport/blob/main/docs/integrations/optional-output-patterns.md
 - Hooks: https://github.com/bindport/bindport/blob/main/docs/integrations/hooks.md
 - Status: https://github.com/bindport/bindport/blob/main/docs/operations/status.md
+- Status schema 1.0: https://github.com/bindport/bindport/blob/main/docs/status.schema.json
+- Registry migrations: https://github.com/bindport/bindport/blob/main/docs/reference/registry-migrations.md
 - Troubleshooting: https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md
 - Security: https://github.com/bindport/bindport/blob/main/docs/operations/security.md
 - Platform Support: https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md
