@@ -2,6 +2,64 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.8.0 - 2026-07-23
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.7.0...v0.8.0)
+
+### Features
+
+- Add project-scoped registry allocation (72e7ba1)
+- Add project-wide port preparation commands (a4b79e5)
+- Run configured services from their project paths (4a337e3)
+- Restore reservations after failed startup (9908d31)
+- Promote reserved leases when services start (683767c)
+- Add cross-service template references (b9099e0)
+- Define the stable config contract (d453229)
+- Enforce registry and status compatibility (cb48717)
+
+
+### Fixes
+
+- Retry concurrent WAL initialization (97a1fbf)
+- Preserve finished runs during stale reconciliation (d516df6)
+- Harden config validation and project identity handling (d0e414e)
+- Make port allocation and registry recovery atomic (1108a86)
+- Preserve live runs during macOS reconciliation (6958d81)
+
+
+### Documentation
+
+- Document multi-service port preparation (2a29b2f)
+- Document configured service execution context (7cd1e29)
+- Document cross-service template references (101fbe6)
+- Document the config stability policy (a765046)
+- Document registry migration guarantees (8c0f83a)
+- Define stable CLI and security contracts (0b5e13d)
+- Clarify release channel verification (e93fe0d)
+- Clarify stable CLI and release contracts (2762194)
+
+
+### Tests
+
+- Canonicalize project config paths on macOS (05e3150)
+- Enforce the startup overhead budget (0b86856)
+- Cover concurrent registry clients (623e9a1)
+- Add staged release smoke coverage (eb7121c)
+- Fix release smoke CI portability (11b97dc)
+
+
+### CI
+
+- Bump jdx/mise-action from 4.2.0 to 4.2.1 in the github-actions group (aecfce3)
+- Align coverage with local gate (6289ddb)
+- Strengthen release packaging and verification (bdd8466)
+
+
+### Dependencies
+
+- Bump the cargo-dependencies group with 2 updates (41e1285)
+- Update dependencies and release tool pins (896bf65)
+
 ## v0.7.0 - 2026-07-09
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.6.2...v0.7.0)
