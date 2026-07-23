@@ -52,6 +52,8 @@ The docs source includes:
 
 - [llms.txt](../llms.txt): curated LLM entrypoint.
 - [llms-full.txt](../llms-full.txt): expanded LLM context.
+- [config.schema.json](../config.schema.json): v1-candidate config contract.
+- [status.schema.json](../status.schema.json): status JSON contract.
 - [robots.txt](../robots.txt): basic crawler policy.
 
 The docs scripts copy these text files into `dist/docs` after mdBook writes the

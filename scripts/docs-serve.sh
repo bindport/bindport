@@ -21,7 +21,7 @@ xtask="${BINDPORT_XTASK:-$repo_root/target/debug/xtask}"
 
 copy_static() {
   if [[ -f "$out_dir/index.html" ]]; then
-    cp docs/llms.txt docs/llms-full.txt docs/robots.txt docs/status.schema.json "$out_dir"/
+    cp docs/llms.txt docs/llms-full.txt docs/robots.txt docs/config.schema.json docs/status.schema.json "$out_dir"/
     "$xtask" docs-postprocess "$out_dir"
   fi
 }

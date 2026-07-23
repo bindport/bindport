@@ -54,6 +54,12 @@ Runtime identity precedence is CLI service argument, environment variables,
 project config plus local overrides, then inference from package metadata,
 workspace roots, git worktree, and command name.
 
+The complete known v1-candidate shape is in `docs/config.schema.json` and its
+stability policy is in `docs/reference/config-stability.md`. `default_range` is
+the only supported port-range key. Unknown top-level keys are reported as
+unknown. No config keys are currently deprecated, so `config validate` emits no
+deprecation warnings.
+
 Service config supports `name`, `path`, `command`, `args`, `env`, `hostname`,
 `route_url`, and `health_url`. Own-service template placeholders include
 `{port}`, `{host}`, `{url}`, `{project}`, `{service}`, `{hostname}`,
@@ -156,6 +162,8 @@ should not run hook trust, deny, reset, or hook commands without user approval.
 - CLI Commands: https://github.com/bindport/bindport/blob/main/docs/daily-use/cli.md
 - Running Services: https://github.com/bindport/bindport/blob/main/docs/daily-use/running-services.md
 - Configuration: https://github.com/bindport/bindport/blob/main/docs/daily-use/configuration.md
+- Config schema: https://github.com/bindport/bindport/blob/main/docs/config.schema.json
+- Configuration stability: https://github.com/bindport/bindport/blob/main/docs/reference/config-stability.md
 - Monorepos: https://github.com/bindport/bindport/blob/main/docs/daily-use/monorepos.md
 - Dashboard: https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md
 - Templates: https://github.com/bindport/bindport/blob/main/docs/integrations/templates.md
