@@ -20,6 +20,7 @@ fn config_validate_accepts_complete_stable_candidate_in_every_format() {
         let root = temp_test_dir(&format!("config-contract-{format}-root"));
         let config_path = root.join(filename);
         fs::write(&config_path, contents).expect("write config contract fixture");
+        let config_path = fs::canonicalize(config_path).expect("canonical config contract path");
 
         let output = bindport_with_registry(&registry_path)
             .current_dir(&root)
@@ -118,6 +119,8 @@ fn unknown_keys_preserve_fallback_and_local_override_sources() {
     let local_path = local_root.join(".bindport.local.json");
     fs::write(&base_path, "default_range = \"29000-29999\"\n").expect("write base config");
     fs::write(&local_path, r#"{"range":"29100-29199"}"#).expect("write local config");
+    let base_path = fs::canonicalize(base_path).expect("canonical base config path");
+    let local_path = fs::canonicalize(local_path).expect("canonical local config path");
 
     let local_output = bindport_with_registry(&local_registry)
         .current_dir(&local_root)
