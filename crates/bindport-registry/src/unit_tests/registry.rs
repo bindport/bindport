@@ -8,6 +8,13 @@ fn registry_defaults_are_named_for_bindport() {
     assert_eq!(DEFAULT_REGISTRY_FILE, "registry.sqlite");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_process_start_time_identifies_the_current_process() {
+    assert!(process_start_time(std::process::id()).is_some());
+    assert!(process_start_time(u32::MAX).is_none());
+}
+
 #[test]
 fn default_registry_path_honors_env_precedence() {
     let root = env::temp_dir().join(format!("bindport-registry-env-{}", std::process::id()));
