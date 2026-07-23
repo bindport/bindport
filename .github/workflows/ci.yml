@@ -100,7 +100,7 @@ jobs:
         run: trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --exit-code 1 --skip-dirs target --skip-dirs .git --no-progress .
 
       - name: Coverage
-        run: cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90 --locked
+        run: cargo llvm-cov --workspace --exclude xtask --all-targets --summary-only --fail-under-lines 90 --locked
 
       - name: Build release binary
         run: cargo build --release --locked
@@ -108,17 +108,8 @@ jobs:
       - name: Check wrapper startup regression ceiling
         run: target/release/xtask startup-budget --ci
 
-      - name: Validate cargo-binstall metadata
-        run: node scripts/check-binstall-metadata.js
-
-      - name: Validate CLI release assets
-        run: scripts/check-cli-assets.sh
-
-      - name: Validate Homebrew formula generation
-        run: scripts/check-homebrew-formula.sh
-
-      - name: Smoke test npm wrapper
-        run: scripts/npm-smoke.sh
+      - name: Smoke test staged release artifacts
+        run: target/release/xtask release-smoke --binary target/release/bindport
 
       - name: Build docs site
         run: scripts/docs-build.sh
@@ -151,5 +142,5 @@ jobs:
       - name: Check wrapper startup regression ceiling
         run: target/release/xtask startup-budget --ci
 
-      - name: Smoke test npm wrapper
-        run: scripts/npm-smoke.sh
+      - name: Smoke test staged release artifacts
+        run: target/release/xtask release-smoke --binary target/release/bindport

@@ -212,6 +212,18 @@ through `bindport port <service>`, and discover exact-worktree URLs by filtering
 machine-local overrides or generated files unless explicitly asked. Agents
 should not run hook trust, deny, reset, or hook commands without user approval.
 
+## Release And Install Verification
+
+`mise run release-smoke` is the non-publishing Linux/macOS gate. It validates
+Cargo source shape, four-target binstall/npm/GitHub/Homebrew mappings,
+checksummed completion/man assets, a generated formula, and the real host npm
+tarball through the v0.8 reservation, wiring, render, dashboard, and cleanup
+flow in isolated temporary state. Foreign targets are metadata checks only. A
+pass does not prove a version exists on GitHub Releases, crates.io, npm, the
+external Homebrew tap, or mise/ubi. The separately authorized
+`v1.0.0-rc.1` checklist is in `docs/project/release.md`; agents must not tag,
+publish, install globally, or mutate the tap without explicit authorization.
+
 ## Important Docs
 
 - Why BindPort: https://github.com/bindport/bindport/blob/main/docs/getting-started/why-bindport.md
@@ -236,3 +248,4 @@ should not run hook trust, deny, reset, or hook commands without user approval.
 - Troubleshooting: https://github.com/bindport/bindport/blob/main/docs/operations/troubleshooting.md
 - Security: https://github.com/bindport/bindport/blob/main/docs/operations/security.md
 - Platform Support: https://github.com/bindport/bindport/blob/main/docs/reference/platform-support.md
+- Release Process: https://github.com/bindport/bindport/blob/main/docs/project/release.md

@@ -19,9 +19,11 @@ or npm/Cargo publish behavior.
 
 ## Current Status
 
-BindPort v0.6.0 is the release described by this document. Cargo and npm are
-alternate supported install paths after the release workflow and manual publish
-steps complete.
+This process is version-neutral. `Cargo.toml` and the npm manifests are the
+authority for the source version; public channel availability must be checked
+for the specific release rather than inferred from this document. Cargo and npm
+become install paths for a version only after their separate publish steps
+complete.
 
 Global Cargo install:
 
@@ -114,8 +116,40 @@ mise run ci
 If the local shell refuses to load this repo's trusted `mise.toml`, run:
 
 ```sh
-MISE_TRUSTED_CONFIG_PATHS=$PWD mise run ci
+MISE_TRUSTED_CONFIG_PATHS="$PWD" mise run ci
 ```
+
+## Local Staged Release Smoke
+
+Build and exercise the release candidate without publishing or installing into
+user-owned package-manager state:
+
+```sh
+MISE_TRUSTED_CONFIG_PATHS="$PWD" mise run release-smoke
+```
+
+The dependency-light xtask entry point:
+
+- checks the `cargo install bindport` source package file list without reaching
+  crates.io;
+- validates all four cargo-binstall URLs, npm native package mappings, raw
+  GitHub binary names, checksum sidecars, completion/man archives, and generated
+  Homebrew formula URLs;
+- reuses the canonical npm, completion/man, binstall, and formula helpers;
+- packages the real host release binary into a native npm tarball, installs it
+  with the wrapper offline under a temporary `HOME`, and executes it there;
+- runs version/help, idempotent `reserve --all`, exact `port`, web-before-api
+  configured startup, sibling env wiring, service cwd, JSON output render,
+  dashboard start/status/health/stop, and stopped/stale cleanup; and
+- uses a canonical temporary project, isolated XDG/registry/npm paths,
+  test-owned ports, bounded waits, process cleanup guards, and automatic temp
+  removal.
+
+Only the current host's native package is executable. The other three targets
+are metadata- and artifact-name checks. The smoke never contacts GitHub
+Releases, crates.io, npm, mise/ubi, or the external Homebrew tap, and it does not
+claim those live channels are published. Linux and macOS run this entry point in
+ordinary CI.
 
 ## Release Prep PR
 
@@ -126,8 +160,9 @@ mise run release-prep
 mise run release-prep patch
 mise run release-prep minor
 mise run release-prep major
-mise run release-prep v0.6.0
-mise run release-prep 0.6.0
+VERSION=X.Y.Z
+mise run release-prep "v${VERSION}"
+mise run release-prep "${VERSION}"
 ```
 
 When no argument is provided, `release-prep` defaults to `patch`.
@@ -175,13 +210,14 @@ Run it locally after a release-prep branch updates versions and package
 artifacts:
 
 ```sh
-mise run release-check 0.6.0
+VERSION=X.Y.Z
+mise run release-check "${VERSION}"
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/release-check.sh --version 0.6.0
+scripts/release-check.sh --version "${VERSION}"
 ```
 
 The same validation gate is available as the manual `Release Check` GitHub
@@ -199,7 +235,8 @@ After the release prep PR is merged, finish the release from clean, synced
 `main` with:
 
 ```sh
-mise run release-finish v0.6.0
+VERSION=X.Y.Z
+mise run release-finish "v${VERSION}"
 ```
 
 `release-finish` is the normal post-merge path. It verifies the checkout, asks
@@ -213,9 +250,9 @@ skipped and the remaining crates continue in order.
 Use these options for recovery or non-interactive runs:
 
 ```sh
-mise run release-finish --yes v0.6.0
-mise run release-finish --skip-github-release v0.6.0
-mise run release-finish --skip-cargo-publish v0.6.0
+mise run release-finish --yes "v${VERSION}"
+mise run release-finish --skip-github-release "v${VERSION}"
+mise run release-finish --skip-cargo-publish "v${VERSION}"
 ```
 
 `release-finish` waits for the manual `Release` workflow. If the
@@ -225,8 +262,8 @@ the local command continues polling until the workflow completes or times out.
 The lower-level release dispatch command remains available:
 
 ```sh
-mise run release-publish --dry-run v0.6.0
-mise run release-publish v0.6.0
+mise run release-publish --dry-run "v${VERSION}"
+mise run release-publish "v${VERSION}"
 ```
 
 When no version is provided, `release-publish` and `release-finish` use the
@@ -309,13 +346,14 @@ publishes or dry-runs those crates in dependency order:
 exists. To exercise the Cargo publish helper directly, run the local dry-run:
 
 ```sh
-mise run cargo-publish 0.6.0
+VERSION=X.Y.Z
+mise run cargo-publish "${VERSION}"
 ```
 
 Or call the script directly:
 
 ```sh
-scripts/cargo-publish.sh --version 0.6.0 --dry-run
+scripts/cargo-publish.sh --version "${VERSION}" --dry-run
 ```
 
 The dry-run requires the Cargo workspace version and `npm/bindport/package.json`
@@ -330,7 +368,7 @@ After the GitHub Release has been created from `main`, publish to crates.io
 directly with:
 
 ```sh
-mise run cargo-publish --execute 0.6.0
+mise run cargo-publish --execute "${VERSION}"
 ```
 
 Real publishing additionally requires:
@@ -367,9 +405,10 @@ After `release-finish` creates the GitHub Release, download the checksum assets
 and generate the formula:
 
 ```sh
+VERSION=X.Y.Z
 mkdir -p dist/homebrew
-gh release download v0.6.0 --repo bindport/bindport --pattern '*.sha256' --dir dist/homebrew
-mise run homebrew-formula v0.6.0 --dist dist/homebrew --output ../homebrew-tap/Formula/bindport.rb
+gh release download "v${VERSION}" --repo bindport/bindport --pattern '*.sha256' --dir dist/homebrew
+mise run homebrew-formula "${VERSION}" --dist dist/homebrew --output ../homebrew-tap/Formula/bindport.rb
 ```
 
 Review the generated formula in the tap checkout. It should install the
@@ -572,6 +611,81 @@ diagnostics from a fresh checkout or clean worktree:
     and lifecycle cleanup without printing child env or hook payloads.
 13. Run `mise run ci` on the release branch before requesting review.
 
+## v0.8.0 Local Staged Acceptance
+
+The required Linux/macOS release acceptance is now the automated
+`mise run release-smoke` entry point described above. Run it at least twice on
+the release checkout to catch leaked dashboard processes, reused registry
+state, fixed-port assumptions, or incomplete temporary cleanup. A pass verifies
+local source/package shape and host-compatible staged artifacts only. It is not
+evidence that any public channel contains the version.
+
+## Authorized `v1.0.0-rc.1` Live-Channel Checklist
+
+Do **not** run this checklist without separate explicit authorization. Tags,
+GitHub Releases, crates.io versions, and npm versions are external mutations;
+crate/package versions cannot safely be reused after publication. The Homebrew
+tap is another repository and must be changed only from its own reviewed
+checkout.
+
+The current release automation intentionally accepts stable `X.Y.Z` only,
+creates a normal GitHub Release, publishes npm without a dist-tag override, and
+updates only the stable Homebrew formula. Therefore `v1.0.0-rc.1` must not be
+passed to the current scripts as if it were a stable release. Before the live
+exercise, land a separate reviewed change that:
+
+- accepts SemVer prereleases consistently in release-prep, release-check,
+  release-publish, release-finish, Cargo/npm publish helpers, and workflows;
+- creates `v1.0.0-rc.1` as a GitHub prerelease;
+- publishes all five npm packages with `--tag next`, never `latest`; and
+- defines an owner-approved RC tap strategy without replacing the stable
+  `bindport` formula (for example, a reviewed temporary `bindport-rc` formula).
+
+After that prerequisite is merged, the authorized operator performs and records
+these steps in order:
+
+1. Confirm the clean, synced `main` checkout contains the reviewed
+   `1.0.0-rc.1` Cargo/npm metadata and changelog, and confirm all six Cargo
+   crate names plus all five npm package names are intended to receive this
+   irreversible version.
+2. Run `mise run release-smoke` twice on Linux and twice on macOS, then run
+   `mise run ci`, `mise run docs-build`, and `git diff --check`.
+3. Dispatch `release.yml` with `version=1.0.0-rc.1` and `dry_run=true`. Confirm
+   all four native build jobs pass and the assembled dry-run artifacts match
+   the documented binary, npm, completion, manpage, and checksum names.
+4. With a second approval, dispatch the real workflow. Confirm tag
+   `v1.0.0-rc.1` points at the reviewed commit, the GitHub Release is marked as
+   a prerelease, every `.sha256` verifies, and downloaded Linux/macOS binaries
+   report exactly `1.0.0-rc.1`. Exercise x64 and arm64 artifacts on matching
+   runners where available.
+5. Run the Cargo publish dry-run, then publish the six crates in dependency
+   order. In a temporary `CARGO_HOME` and install root, run
+   `cargo install bindport --version '=1.0.0-rc.1' --locked` and execute the
+   complete v0.8 flow with that installed binary. Separately run
+   `cargo binstall bindport --version 1.0.0-rc.1` in an isolated root and repeat
+   version/help plus the flow.
+6. Run the npm publish workflow dry-run from the reviewed GitHub tarballs.
+   Publish the four native packages and wrapper with the `next` tag, verify
+   `npm view bindport@next version` is `1.0.0-rc.1`, then install
+   `bindport@next` in an empty temporary project on Linux and macOS. Confirm the
+   wrapper selects the host native package and run the complete flow.
+7. Generate the RC Homebrew formula from the published checksums in a separate
+   tap checkout. Review all four URLs and hashes, install the owner-approved RC
+   formula on macOS (and Linuxbrew if claimed for the RC), verify completions
+   and `man 1 bindport`, and run the complete flow. Do not merge an RC over the
+   stable `bindport` formula.
+8. In an isolated mise config/data/cache directory, pin
+   `"ubi:bindport/bindport" = "1.0.0-rc.1"`, run `mise install`, verify the
+   selected GitHub asset and version, and repeat the flow. This is the first
+   point at which mise/ubi may be called live-channel verified.
+9. For every installed channel, record OS, architecture, exact command/version,
+   artifact checksum, and results for version/help, wrapper execution where
+   applicable, `reserve --all`, exact `port`, web-before-api startup, sibling
+   env wiring, render, dashboard start/status/stop, and stopped/stale cleanup.
+10. Announce a channel as verified only after its live install and flow pass.
+    Record failures without retagging or attempting to reuse a published Cargo
+    or npm version.
+
 ## Versioning
 
 - `0.0.x`: unreleased bootstrap only.
@@ -644,15 +758,16 @@ Before a real npm publish:
 Local npm publish dry-run from downloaded release tarballs:
 
 ```sh
-gh release download v0.6.0 --pattern "*.tgz" --dir dist/npm
-gh release download v0.6.0 --pattern "*.tgz.sha256" --dir dist/npm
-mise run npm-publish v0.6.0 --dist dist/npm
+VERSION=X.Y.Z
+gh release download "v${VERSION}" --pattern "*.tgz" --dir dist/npm
+gh release download "v${VERSION}" --pattern "*.tgz.sha256" --dir dist/npm
+mise run npm-publish "${VERSION}" --dist dist/npm
 ```
 
 Real local npm publish, when intentionally bypassing the workflow:
 
 ```sh
-mise run npm-publish v0.6.0 --dist dist/npm --execute
+mise run npm-publish "${VERSION}" --dist dist/npm --execute
 ```
 
 Publish order matters: native platform packages are published first, then the
@@ -716,7 +831,7 @@ run:
     "dev": "bindport -- next dev"
   },
   "devDependencies": {
-    "bindport": "^0.6.0"
+    "bindport": "X.Y.Z"
   }
 }
 ```

@@ -7,12 +7,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use release_smoke::release_smoke;
 use startup::startup_budget;
 
 const DESCRIPTION_LIMIT: usize = 170;
 const SKIP_DESCRIPTIONS: &[&str] = &["print.html", "toc.html"];
 const SITEMAP_SKIP: &[&str] = &["404.html", "print.html", "toc.html"];
 
+mod release_smoke;
 mod startup;
 
 fn main() -> ExitCode {
@@ -31,6 +33,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
         [command] if command == "startup-budget" => startup_budget(false),
         [command, flag] if command == "startup-budget" && flag == "--ci" => startup_budget(true),
         [command] if command == "__startup-child" => Ok(()),
+        [command, release_args @ ..] if command == "release-smoke" => {
+            release_smoke(release_args)
+        }
         [command, out_dir] if command == "docs-postprocess" => {
             docs_postprocess(Path::new(out_dir)).map_err(|error| error.to_string())
         }
@@ -38,7 +43,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             docs_sitemap(Path::new(out_dir), base_url).map_err(|error| error.to_string())
         }
         _ => Err(
-            "usage: xtask <platform-guard|startup-budget [--ci]|docs-postprocess <out-dir>|docs-sitemap <out-dir> <base-url>>"
+            "usage: xtask <platform-guard|startup-budget [--ci]|release-smoke [--binary <path>]|docs-postprocess <out-dir>|docs-sitemap <out-dir> <base-url>>"
                 .to_owned(),
         ),
     }

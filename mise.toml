@@ -325,6 +325,11 @@ scripts/cargo-publish.sh "${args[@]}"
 description = "Smoke test local npm wrapper and platform package tarballs"
 run = "scripts/npm-smoke.sh"
 
+[tasks.release-smoke]
+description = "Smoke test staged release artifacts and the v0.8 user flow"
+depends = ["build"]
+run = "target/release/xtask release-smoke --binary target/release/bindport"
+
 [tasks.npm-publish]
 description = "Dry-run or execute npm publishing from release tarballs"
 usage = '''
@@ -388,9 +393,6 @@ mise run test
 mise run coverage
 mise run build
 mise run startup-budget
-mise run binstall-metadata
-mise run cli-assets
-mise run homebrew-formula-check
-mise run npm-smoke
+mise run release-smoke
 mise run docs-build
 '''
