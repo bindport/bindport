@@ -7,6 +7,7 @@ use std::{
 };
 
 mod config;
+mod config_contract;
 mod identity;
 mod outputs;
 mod ports;
