@@ -18,6 +18,8 @@ health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.HOSTNAME = "0.0.0.0"
 env.NEXT_PUBLIC_BINDPORT_URL = "{route_url}"
+env.NEXT_PUBLIC_API_URL = "{services.api.route_url}"
+env.API_PORT = "{services.api.port}"
 
 [[services]]
 name = "api"
@@ -28,6 +30,18 @@ health_url = "{route_url}/health"
 env.PORT = "{port}"
 env.BINDPORT_ROUTE_URL = "{route_url}"
 ```
+
+Prepare sibling addresses, then run services in any order:
+
+```sh
+bindport reserve --all
+bindport run web
+bindport run api
+```
+
+The web service references the active or reserved API in the same project and
+worktree. Reservation makes its address available, but does not start the API or
+indicate readiness; applications remain responsible for retry behavior.
 
 Run from a service directory and BindPort selects the deepest matching path:
 

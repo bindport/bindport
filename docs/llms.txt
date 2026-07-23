@@ -22,7 +22,7 @@ default.
 ## User Documentation
 
 - [CLI Commands](https://github.com/bindport/bindport/blob/main/docs/daily-use/cli.md): Command reference for project-wide reservation, exact port lookup, running, status, cleanup, outputs, dashboard, and hooks.
-- [Running Services](https://github.com/bindport/bindport/blob/main/docs/daily-use/running-services.md): Service commands, args, environment bridging, route metadata, and framework examples.
+- [Running Services](https://github.com/bindport/bindport/blob/main/docs/daily-use/running-services.md): Service commands, args, environment bridging, scoped sibling references, route metadata, and framework examples.
 - [Configuration](https://github.com/bindport/bindport/blob/main/docs/daily-use/configuration.md): Config discovery, precedence, fields, placeholders, validation, outputs, hooks, and dashboard settings.
 - [Monorepos and Worktrees](https://github.com/bindport/bindport/blob/main/docs/daily-use/monorepos.md): Multi-service repositories, local overrides, and branch/worktree identity.
 - [Dashboard](https://github.com/bindport/bindport/blob/main/docs/integrations/dashboard.md): Local UI, API, service controls, auth, and cleanup actions.

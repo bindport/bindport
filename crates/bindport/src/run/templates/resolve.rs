@@ -29,7 +29,11 @@ pub(crate) fn resolve_run_templates(
                 );
                 continue;
             }
-            templates.env.push((name.clone(), value.clone()));
+            templates.env.push(EnvTemplate {
+                name: name.clone(),
+                value: value.clone(),
+                configured: true,
+            });
         }
     }
 
@@ -56,11 +60,16 @@ pub(crate) fn resolve_run_templates(
     templates
 }
 
-pub(crate) fn upsert_env_template(env: &mut Vec<(String, String)>, name: String, value: String) {
-    if let Some((_, existing)) = env.iter_mut().find(|(existing, _)| existing == &name) {
-        *existing = value;
+pub(crate) fn upsert_env_template(env: &mut Vec<EnvTemplate>, name: String, value: String) {
+    if let Some(existing) = env.iter_mut().find(|existing| existing.name == name) {
+        existing.value = value;
+        existing.configured = false;
     } else {
-        env.push((name, value));
+        env.push(EnvTemplate {
+            name,
+            value,
+            configured: false,
+        });
     }
 }
 
@@ -68,7 +77,85 @@ pub(crate) fn env_template_value(name: &str) -> Option<String> {
     env::var(name).ok().filter(|value| !value.trim().is_empty())
 }
 
-pub(crate) fn resolve_run_metadata(
+pub(crate) fn configured_sibling_service_names(
+    templates: &RunTemplates,
+) -> Result<Vec<String>, TemplateError> {
+    let configured_templates = templates.command.iter().flatten().chain(
+        templates
+            .env
+            .iter()
+            .filter(|template| template.configured)
+            .map(|template| &template.value),
+    );
+    let mut names = BTreeSet::new();
+
+    for template in configured_templates {
+        for placeholder in template_placeholders(template)? {
+            if !placeholder.starts_with("services.") {
+                continue;
+            }
+            let Some((service, _)) = sibling_reference(&placeholder) else {
+                return Err(TemplateError::UnknownPlaceholder {
+                    placeholder,
+                    template: template.clone(),
+                });
+            };
+            names.insert(service.to_string());
+        }
+    }
+
+    Ok(names.into_iter().collect())
+}
+
+pub(crate) fn resolve_sibling_services(
+    cwd: &Path,
+    config: &ResolvedConfig,
+    names: &[String],
+    registry: &mut Registry,
+) -> Result<SiblingServices, RegistryError> {
+    let identities = names
+        .iter()
+        .map(|service| {
+            let options = RunOptions {
+                service: Some(service.clone()),
+                ..RunOptions::default()
+            };
+            resolve_run_identity(cwd, &[], &options, config)
+        })
+        .collect::<Vec<_>>();
+    let services = registry.select_services(&identities)?;
+
+    Ok(names.iter().cloned().zip(services).collect())
+}
+
+pub(crate) fn resolve_reservation_metadata(
+    identity: &ServiceIdentity,
+    port: u16,
+    templates: &RunTemplates,
+) -> Result<RunMetadata, TemplateError> {
+    let sibling_services = configured_sibling_service_names(templates)?
+        .into_iter()
+        .map(|service| {
+            let selected = RegistryService {
+                lease_id: 0,
+                project: identity.project.clone(),
+                service: service.clone(),
+                identity_key: String::new(),
+                state: String::from("reserved"),
+                host: String::new(),
+                port: 0,
+                hostname: Some(String::new()),
+                route_url: Some(String::new()),
+                health_url: Some(String::new()),
+            };
+            (service, selected)
+        })
+        .collect();
+
+    resolve_run_metadata(identity, port, templates, &sibling_services)
+}
+
+pub(crate) fn resolve_run_route_metadata(
     identity: &ServiceIdentity,
     port: u16,
     templates: &RunTemplates,
@@ -102,31 +189,55 @@ pub(crate) fn resolve_run_metadata(
         .as_deref()
         .map(|template| expand_template(template, &health_values))
         .transpose()?;
-    let env_values = TemplateValues::new(
-        identity,
-        port,
-        hostname.as_deref(),
-        route_url.as_deref(),
-        health_url.as_deref(),
-    );
-    let env = templates
-        .env
-        .iter()
-        .map(|(name, template)| {
-            expand_template(template, &env_values).map(|value| (name.clone(), value))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let command = templates
-        .command
-        .as_ref()
-        .map(|command| expand_command_templates(command, &env_values))
-        .transpose()?;
 
     Ok(RunMetadata {
-        command,
+        command: None,
         hostname,
         route_url,
         health_url,
-        env,
+        env: Vec::new(),
     })
+}
+
+pub(crate) fn resolve_run_metadata(
+    identity: &ServiceIdentity,
+    port: u16,
+    templates: &RunTemplates,
+    sibling_services: &SiblingServices,
+) -> Result<RunMetadata, TemplateError> {
+    let mut metadata = resolve_run_route_metadata(identity, port, templates)?;
+    let sibling_values = TemplateValues::new(
+        identity,
+        port,
+        metadata.hostname.as_deref(),
+        metadata.route_url.as_deref(),
+        metadata.health_url.as_deref(),
+    )
+    .with_sibling_services(sibling_services);
+    let own_values = TemplateValues::new(
+        identity,
+        port,
+        metadata.hostname.as_deref(),
+        metadata.route_url.as_deref(),
+        metadata.health_url.as_deref(),
+    );
+    metadata.env = templates
+        .env
+        .iter()
+        .map(|template| {
+            let values = if template.configured {
+                &sibling_values
+            } else {
+                &own_values
+            };
+            expand_template(&template.value, values).map(|value| (template.name.clone(), value))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    metadata.command = templates
+        .command
+        .as_ref()
+        .map(|command| expand_command_templates(command, &sibling_values))
+        .transpose()?;
+
+    Ok(metadata)
 }

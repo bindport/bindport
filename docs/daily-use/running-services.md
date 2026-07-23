@@ -109,6 +109,45 @@ Config cannot set execution-sensitive names such as `PATH`, `LD_PRELOAD`,
 `DYLD_*`, `NODE_OPTIONS`, or `GIT_CONFIG_*`. Pass those explicitly only when a
 reviewed one-off command needs them.
 
+## Sibling Service Addresses
+
+Use `reserve --all` when configured services need each other's addresses before
+startup:
+
+```toml
+[[services]]
+name = "web"
+env.NEXT_PUBLIC_API_URL = "{services.api.route_url}"
+args = ["--api-port", "{services.api.port}"]
+
+[[services]]
+name = "api"
+hostname = "{branch}.example-api.localhost"
+health_url = "{route_url}/health"
+```
+
+```sh
+bindport reserve --all
+bindport run web
+bindport run api
+```
+
+The exact syntax is `{services.<name>.<field>}`. Allowed fields are `port`,
+`host`, `url`, `hostname`, `route_url`, and `health_url`, and the syntax is
+available only in configured service `env`, `command`, and `args`. Lookup uses
+one startup snapshot of active or reserved services in the current project and
+exact worktree. Missing, stopped, stale, ambiguous, or unavailable configured
+metadata fails before output preflight, hooks, or child spawn.
+
+`port` is decimal; `url` is the direct `http://<host>:<port>` URL. `hostname` and
+`health_url` are configured metadata, while `route_url` follows BindPort's
+configured/hostname/direct fallback. Registry changes never update a running
+child's argv or environment.
+
+Port assignment is not readiness. BindPort does not start, order, supervise,
+wait for, or health-check dependency graphs; applications still own retries and
+readiness behavior.
+
 ## Framework Port Flags
 
 Some frameworks honor `PORT`; others require a CLI flag. BindPort supports both

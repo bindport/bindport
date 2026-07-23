@@ -32,6 +32,10 @@ pub(crate) fn run_wrapped_command(command: &[String], options: RunOptions) -> Ex
             eprintln!("bindport: {error}");
             ExitCode::FAILURE
         }
+        Err(RunCommandError::SiblingResolution(error)) => {
+            eprintln!("bindport: failed to resolve sibling service reference: {error}");
+            ExitCode::FAILURE
+        }
         Err(RunCommandError::OutputRender(error)) => {
             eprintln!("bindport: {error}");
             ExitCode::FAILURE
@@ -160,8 +164,13 @@ pub(crate) fn run_wrapped_command_result(
     let execution_context =
         resolve_service_execution_context(&cwd, &config, &identity.service, service_config)?;
     let run_templates = resolve_run_templates(command, options, service_config);
-    let requires_output_preflight = has_blocking_auto_outputs(&config)?;
-    let mut registry = open_optional_registry();
+    let sibling_names = configured_sibling_service_names(&run_templates)?;
+    let mut registry = if sibling_names.is_empty() {
+        open_optional_registry()
+    } else {
+        Some(Registry::open_default().map_err(RunCommandError::SiblingResolution)?)
+    };
+    let mut sibling_services = SiblingServices::new();
     let mut reserved_lease = None;
     let mut skip_ports = config.skip_ports.clone();
     let mut previous_port = None;
@@ -179,6 +188,11 @@ pub(crate) fn run_wrapped_command_result(
             Err(error) => {
                 print_registry_warning("failed to prune stale registry leases", &error);
             }
+        }
+
+        if !sibling_names.is_empty() {
+            sibling_services = resolve_sibling_services(&cwd, &config, &sibling_names, registry)
+                .map_err(RunCommandError::SiblingResolution)?;
         }
 
         match registry.reserved_identity_lease(&identity.identity_key) {
@@ -215,6 +229,7 @@ pub(crate) fn run_wrapped_command_result(
         previous_port = None;
     }
 
+    let requires_output_preflight = has_blocking_auto_outputs(&config)?;
     let mut retries = 0;
 
     loop {
@@ -232,7 +247,8 @@ pub(crate) fn run_wrapped_command_result(
             };
             allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?
         };
-        let run_metadata = resolve_run_metadata(&identity, port, &run_templates)?;
+        let run_metadata =
+            resolve_run_metadata(&identity, port, &run_templates, &sibling_services)?;
         let child_command = resolved_child_command(command, &run_metadata)?;
         let child_env = child_environment(&run_metadata.env, &execution_context.local_bin_dirs)?;
         let command_display = child_command.join(" ");

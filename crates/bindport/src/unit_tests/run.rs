@@ -69,13 +69,26 @@ fn run_metadata_expands_route_and_env_templates() {
         route_url: Some(String::from("https://{hostname}")),
         health_url: Some(String::from("{route_url}/health")),
         env: vec![
-            (String::from("URL"), String::from("{route_url}")),
-            (String::from("HEALTH"), String::from("{health_url}")),
-            (String::from("JSON"), String::from(r#"{{"port":{port}}}"#)),
+            EnvTemplate {
+                name: String::from("URL"),
+                value: String::from("{route_url}"),
+                configured: true,
+            },
+            EnvTemplate {
+                name: String::from("HEALTH"),
+                value: String::from("{health_url}"),
+                configured: true,
+            },
+            EnvTemplate {
+                name: String::from("JSON"),
+                value: String::from(r#"{{"port":{port}}}"#),
+                configured: true,
+            },
         ],
     };
 
-    let metadata = resolve_run_metadata(&identity, 29100, &templates).expect("metadata");
+    let metadata = resolve_run_metadata(&identity, 29100, &templates, &SiblingServices::new())
+        .expect("metadata");
 
     assert_eq!(
         metadata.hostname.as_deref(),

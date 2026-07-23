@@ -48,13 +48,30 @@ impl Registry {
         &mut self,
         identity: &ServiceIdentity,
     ) -> Result<RegistryService, RegistryError> {
+        self.select_services(std::slice::from_ref(identity))
+            .map(|mut services| services.remove(0))
+    }
+
+    pub fn select_services(
+        &mut self,
+        identities: &[ServiceIdentity],
+    ) -> Result<Vec<RegistryService>, RegistryError> {
         self.reconcile_stale_active_leases()?;
-        select_scoped_service(&self.connection, identity)?.ok_or_else(|| {
-            RegistryError::ServiceNotFound {
-                project: identity.project.clone(),
-                service: identity.service.clone(),
-            }
-        })
+        let transaction = self.connection.transaction()?;
+        let services = identities
+            .iter()
+            .map(|identity| {
+                select_scoped_service(&transaction, identity)?.ok_or_else(|| {
+                    RegistryError::ServiceNotFound {
+                        project: identity.project.clone(),
+                        service: identity.service.clone(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        transaction.commit()?;
+
+        Ok(services)
     }
 
     pub fn reserve_services<E>(
