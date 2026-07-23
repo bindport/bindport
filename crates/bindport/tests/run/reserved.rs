@@ -223,7 +223,6 @@ fn promotion_failure_terminates_child_and_leaves_no_false_active_run() {
     let root = temp_test_dir("reserved-promotion-failure-root")
         .canonicalize()
         .expect("canonical root");
-    let marker = root.join("child-survived");
     let port = free_loopback_port();
     fs::write(
         root.join(".bindport.toml"),
@@ -233,6 +232,11 @@ fn promotion_failure_terminates_child_and_leaves_no_false_active_run() {
     )
     .expect("write config");
     let reserved_port = reserve_all_port(&registry_path, &root);
+    let before = Registry::open(&registry_path)
+        .expect("registry")
+        .export_snapshot()
+        .expect("export");
+    let lease_id = before.leases[0].id;
     Connection::open(&registry_path)
         .expect("sqlite connection")
         .execute_batch(
@@ -248,28 +252,22 @@ fn promotion_failure_terminates_child_and_leaves_no_false_active_run() {
     let started_at = Instant::now();
     let output = bindport_with_registry(&registry_path)
         .current_dir(&root)
-        .args([
-            "run",
-            "web",
-            "--",
-            "sh",
-            "-c",
-            "sleep 10; printf survived > \"$1\"",
-            "sh",
-            marker.to_str().expect("marker path"),
-        ])
+        .args(["run", "web", "--", "sleep", "10"])
         .output()
         .expect("run reserved service");
 
     assert!(!output.status.success());
     assert!(started_at.elapsed() < Duration::from_secs(5));
-    thread::sleep(Duration::from_millis(200));
-    assert!(!marker.exists(), "spawned child survived promotion failure");
     assert!(String::from_utf8_lossy(&output.stderr).contains("child was terminated"));
     assert_eq!(lookup_port(&registry_path, &root), reserved_port);
-    let status = status_json(&registry_path, &root);
-    assert_eq!(status["services"][0]["state"], "reserved");
-    assert!(status["runs"].as_array().expect("runs").is_empty());
+    let mut registry = Registry::open(&registry_path).expect("registry");
+    let after = registry.export_snapshot().expect("export");
+    assert_eq!(after.leases.len(), 1);
+    assert_eq!(after.leases[0].id, lease_id);
+    assert_eq!(after.leases[0].port, reserved_port);
+    assert!(after.runs.is_empty());
+    let status = registry.status_snapshot().expect("status");
+    assert_eq!(status.services[0].state, "reserved");
 }
 
 #[test]

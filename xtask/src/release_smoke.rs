@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -15,6 +16,55 @@ use sha2::{Digest, Sha256};
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const PACKAGE_TIMEOUT: Duration = Duration::from_secs(180);
 const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct CargoToolchainEnv {
+    cargo_home: Option<PathBuf>,
+    rustup_home: Option<PathBuf>,
+    rustup_toolchain: Option<OsString>,
+}
+
+impl CargoToolchainEnv {
+    fn capture() -> Self {
+        Self::from_values(
+            env::var_os("HOME"),
+            env::var_os("CARGO_HOME"),
+            env::var_os("RUSTUP_HOME"),
+            env::var_os("RUSTUP_TOOLCHAIN"),
+        )
+    }
+
+    fn from_values(
+        home: Option<OsString>,
+        cargo_home: Option<OsString>,
+        rustup_home: Option<OsString>,
+        rustup_toolchain: Option<OsString>,
+    ) -> Self {
+        let home = home.map(PathBuf::from);
+        let cargo_home = cargo_home
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|home| home.join(".cargo")));
+        let rustup_home = rustup_home
+            .map(PathBuf::from)
+            .or_else(|| home.map(|home| home.join(".rustup")));
+        Self {
+            cargo_home,
+            rustup_home,
+            rustup_toolchain,
+        }
+    }
+
+    fn apply(&self, command: &mut Command) {
+        if let Some(cargo_home) = &self.cargo_home {
+            command.env("CARGO_HOME", cargo_home);
+        }
+        if let Some(rustup_home) = &self.rustup_home {
+            command.env("RUSTUP_HOME", rustup_home);
+        }
+        if let Some(rustup_toolchain) = &self.rustup_toolchain {
+            command.env("RUSTUP_TOOLCHAIN", rustup_toolchain);
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct ReleaseTarget {
@@ -85,14 +135,15 @@ pub(crate) fn release_smoke(args: &[String]) -> Result<(), String> {
     let binary = binary
         .canonicalize()
         .map_err(|error| format!("canonicalize release binary: {error}"))?;
+    let cargo_env = CargoToolchainEnv::capture();
     let mut temp = SmokeTemp::new()?;
     create_isolated_homes(temp.path())?;
 
     println!("release smoke: validating source and channel metadata");
-    let version = workspace_version(&root, &temp)?;
-    validate_cargo_source_shape(&root, &temp)?;
+    let version = workspace_version(&root, &temp, &cargo_env)?;
+    validate_cargo_source_shape(&root, &temp, &cargo_env)?;
     validate_release_mapping(&root, &version)?;
-    run_existing_package_checks(&root, &temp, &version)?;
+    run_existing_package_checks(&root, &temp, &cargo_env, &version)?;
 
     println!("release smoke: staging local release artifacts for v{version}");
     let staged = stage_artifacts(&root, &temp, &binary, &version)?;
@@ -134,12 +185,16 @@ fn parse_binary_arg(args: &[String], root: &Path) -> Result<Option<PathBuf>, Str
     Ok(Some(binary))
 }
 
-fn workspace_version(root: &Path, temp: &SmokeTemp) -> Result<String, String> {
+fn workspace_version(
+    root: &Path,
+    temp: &SmokeTemp,
+    cargo_env: &CargoToolchainEnv,
+) -> Result<String, String> {
     let mut command = Command::new("cargo");
     command
         .current_dir(root)
         .args(["metadata", "--locked", "--no-deps", "--format-version", "1"]);
-    isolated_env(&mut command, temp);
+    isolated_cargo_env(&mut command, temp, cargo_env);
     let output = checked_output(command, "cargo metadata", PACKAGE_TIMEOUT)?;
     let metadata: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("parse cargo metadata: {error}"))?;
@@ -156,7 +211,11 @@ fn workspace_version(root: &Path, temp: &SmokeTemp) -> Result<String, String> {
         .ok_or_else(|| String::from("cargo metadata bindport package has no version"))
 }
 
-fn validate_cargo_source_shape(root: &Path, temp: &SmokeTemp) -> Result<(), String> {
+fn validate_cargo_source_shape(
+    root: &Path,
+    temp: &SmokeTemp,
+    cargo_env: &CargoToolchainEnv,
+) -> Result<(), String> {
     let mut command = Command::new("cargo");
     command.current_dir(root).args([
         "package",
@@ -166,7 +225,7 @@ fn validate_cargo_source_shape(root: &Path, temp: &SmokeTemp) -> Result<(), Stri
         "--allow-dirty",
         "--list",
     ]);
-    isolated_env(&mut command, temp);
+    isolated_cargo_env(&mut command, temp, cargo_env);
     let output = checked_output(command, "cargo package --list", PACKAGE_TIMEOUT)?;
     let files = String::from_utf8(output.stdout)
         .map_err(|error| format!("cargo package file list is not UTF-8: {error}"))?;
@@ -243,34 +302,46 @@ fn validate_release_mapping(root: &Path, version: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn run_existing_package_checks(root: &Path, temp: &SmokeTemp, version: &str) -> Result<(), String> {
-    let checks: [(&str, &str, &[&str]); 5] = [
+fn run_existing_package_checks(
+    root: &Path,
+    temp: &SmokeTemp,
+    cargo_env: &CargoToolchainEnv,
+    version: &str,
+) -> Result<(), String> {
+    let checks: [(&str, &str, &[&str], bool); 5] = [
         (
             "npm package metadata",
             "node",
             &["scripts/npm-package-utils.js", "validate", version],
+            false,
         ),
         (
             "cargo-binstall metadata",
             "node",
             &["scripts/check-binstall-metadata.js"],
+            true,
         ),
-        ("CLI assets", "scripts/check-cli-assets.sh", &[]),
+        ("CLI assets", "scripts/check-cli-assets.sh", &[], false),
         (
             "Homebrew formula mapping",
             "scripts/check-homebrew-formula.sh",
             &[],
+            false,
         ),
-        ("npm wrapper matrix", "scripts/npm-smoke.sh", &[]),
+        ("npm wrapper matrix", "scripts/npm-smoke.sh", &[], false),
     ];
 
-    for (label, program, args) in checks {
+    for (label, program, args, uses_cargo) in checks {
         let mut command = Command::new(root.join(program));
         if program == "node" {
             command = Command::new(program);
         }
         command.current_dir(root).args(args);
-        isolated_env(&mut command, temp);
+        if uses_cargo {
+            isolated_cargo_env(&mut command, temp, cargo_env);
+        } else {
+            isolated_env(&mut command, temp);
+        }
         let output = checked_output(command, label, PACKAGE_TIMEOUT)?;
         print_check_output(&output)?;
     }
@@ -1087,6 +1158,7 @@ fn create_isolated_homes(root: &Path) -> Result<(), String> {
         "xdg-data",
         "xdg-cache",
         "npm-cache",
+        "cargo-home",
         "tmp",
     ] {
         fs::create_dir_all(root.join(directory))
@@ -1110,12 +1182,20 @@ fn isolated_env(command: &mut Command, temp: &SmokeTemp) {
         )
         .env("npm_config_cache", temp.path().join("npm-cache"))
         .env("NPM_CONFIG_USERCONFIG", temp.path().join("npmrc"))
+        .env("CARGO_HOME", temp.path().join("cargo-home"))
         .env("TMPDIR", temp.path().join("tmp"))
         .env("CARGO_NET_OFFLINE", "true")
+        .env_remove("RUSTUP_HOME")
+        .env_remove("RUSTUP_TOOLCHAIN")
         .env_remove("BINDPORT_BINARY")
         .env_remove("BINDPORT_PROJECT")
         .env_remove("BINDPORT_SERVICE")
         .env_remove("BINDPORT_DASHBOARD_TOKEN");
+}
+
+fn isolated_cargo_env(command: &mut Command, temp: &SmokeTemp, cargo_env: &CargoToolchainEnv) {
+    isolated_env(command, temp);
+    cargo_env.apply(command);
 }
 
 fn checked_output(command: Command, label: &str, timeout: Duration) -> Result<Output, String> {
@@ -1313,6 +1393,54 @@ impl Drop for SmokeTemp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_cargo_metadata_uses_active_toolchain_with_isolated_home() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        let cargo_env = CargoToolchainEnv::capture();
+        let temp = SmokeTemp::new().expect("release smoke temp");
+        create_isolated_homes(temp.path()).expect("isolated homes");
+
+        assert!(!temp.path().join("home/.rustup/settings.toml").exists());
+        assert!(
+            !workspace_version(root, &temp, &cargo_env)
+                .expect("cargo metadata")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn cargo_toolchain_env_preserves_explicit_or_inferred_locations() {
+        let inferred = CargoToolchainEnv::from_values(
+            Some(OsString::from("/original-home")),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(
+            inferred.cargo_home,
+            Some(PathBuf::from("/original-home/.cargo"))
+        );
+        assert_eq!(
+            inferred.rustup_home,
+            Some(PathBuf::from("/original-home/.rustup"))
+        );
+
+        let explicit = CargoToolchainEnv::from_values(
+            Some(OsString::from("/original-home")),
+            Some(OsString::from("/cargo")),
+            Some(OsString::from("/toolchains")),
+            Some(OsString::from("active-toolchain")),
+        );
+        assert_eq!(explicit.cargo_home, Some(PathBuf::from("/cargo")));
+        assert_eq!(explicit.rustup_home, Some(PathBuf::from("/toolchains")));
+        assert_eq!(
+            explicit.rustup_toolchain,
+            Some(OsString::from("active-toolchain"))
+        );
+    }
 
     #[test]
     fn target_mappings_are_unique_and_complete() {
