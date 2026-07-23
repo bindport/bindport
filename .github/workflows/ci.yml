@@ -105,6 +105,9 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked
 
+      - name: Check wrapper startup regression ceiling
+        run: target/release/xtask startup-budget --ci
+
       - name: Validate cargo-binstall metadata
         run: node scripts/check-binstall-metadata.js
 
@@ -144,6 +147,9 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --locked
+
+      - name: Check wrapper startup regression ceiling
+        run: target/release/xtask startup-budget --ci
 
       - name: Smoke test npm wrapper
         run: scripts/npm-smoke.sh
