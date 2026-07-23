@@ -67,6 +67,12 @@ bindport status --json
 bindport doctor
 ```
 
+`status --json` reports schema `1.0`. Treat documented fields and closed enum
+values as the v1 contract, ignore unfamiliar additive object fields, and do not
+rely on object or array ordering. See [Status and Cleanup](../operations/status.md)
+and [Registry Migration Policy](registry-migrations.md) before writing direct
+registry/status tooling.
+
 Recommended service flow:
 
 ```sh

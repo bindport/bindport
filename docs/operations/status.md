@@ -6,7 +6,9 @@ output rendering, and cleanup.
 
 The registry is local machine state, not project config. By default it lives at
 `$XDG_STATE_HOME/bindport/registry.sqlite`, or
-`~/.local/state/bindport/registry.sqlite` when `XDG_STATE_HOME` is unset.
+`~/.local/state/bindport/registry.sqlite` when `XDG_STATE_HOME` is unset. See
+[Registry Migration Policy](../reference/registry-migrations.md) for supported
+schema upgrades, preservation guarantees, failure handling, and backups.
 
 ## Registry States
 

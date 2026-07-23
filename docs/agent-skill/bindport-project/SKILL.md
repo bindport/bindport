@@ -24,6 +24,11 @@ development ports when BindPort config or scripts already describe the service.
 7. Use `bindport registry export` only for debug/backup snapshots or output
    ownership investigations; prefer `status --json` for normal automation.
 
+`status --json` uses schema `1.0`. Ignore unfamiliar additive object fields,
+handle its documented enum values explicitly, and do not depend on JSON member
+or array ordering. Do not edit the SQLite registry directly to resolve a
+migration error; preserve it and follow `docs/reference/registry-migrations.md`.
+
 `reserve --all` is idempotent and scoped to the discovered project and current
 worktree; new reservations commit all-or-nothing, and it neither starts
 children nor owns sockets. `port` prints only the decimal port and newline, and

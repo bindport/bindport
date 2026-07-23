@@ -76,8 +76,10 @@ Operators and agents should read:
 
 - [Dashboard](integrations/dashboard.md) for local dashboard controls, API behavior, auth,
   and cleanup actions.
-- [Status and Cleanup](operations/status.md) for registry states, registry
-  export, URL lookup, reservations, and stale/stopped cleanup.
+- [Status and Cleanup](operations/status.md) for the status JSON 1.0 contract,
+  registry states, registry export, URL lookup, reservations, and cleanup.
+- [Registry Migration Policy](reference/registry-migrations.md) for supported
+  historical schemas, preservation guarantees, migration errors, and backups.
 - [Health and Troubleshooting](operations/troubleshooting.md) for diagnostics and common
   failure modes.
 - [Security Model](operations/security.md) for local-first defaults, config safety, output

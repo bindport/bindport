@@ -358,9 +358,11 @@ machine-readable counts. Active services are not removed.
 - [Dashboard](docs/integrations/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
-- [Status](docs/operations/status.md): `status --json` schema, grouped service
-  listing, registry export, service URL selection, and agent-oriented lookup
-  guidance.
+- [Status](docs/operations/status.md): stable `status --json` schema 1.0,
+  grouped service listing, registry export, service URL selection, and
+  agent-oriented lookup guidance.
+- [Registry Migrations](docs/reference/registry-migrations.md): supported
+  historical schemas, atomic upgrades, lease preservation, and backup policy.
 - [Templates](docs/integrations/templates.md): output template lookup, built-in
   proxy/env outputs, custom templates, render lifecycle, and troubleshooting.
 - [Proxy Outputs](docs/integrations/proxy-outputs.md): Traefik, Caddy, nginx,

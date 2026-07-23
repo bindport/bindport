@@ -34,6 +34,7 @@
 # Reference
 
 - [Configuration Stability](reference/config-stability.md)
+- [Registry Migration Policy](reference/registry-migrations.md)
 - [Platform Support](reference/platform-support.md)
 - [Agent and LLM Setup](reference/agents.md)
 

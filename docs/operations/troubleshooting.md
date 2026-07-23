@@ -3,6 +3,10 @@
 Use this page when a service does not appear where expected, a URL does not
 open, output files are missing, or hooks are not running.
 
+For registry schema/open failures, preserve the database and follow the
+[Registry Migration Policy](../reference/registry-migrations.md); do not delete
+active or reserved state as a first recovery step.
+
 ## Start With Doctor
 
 Run:
