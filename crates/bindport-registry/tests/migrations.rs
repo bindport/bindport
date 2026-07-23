@@ -3,9 +3,9 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Barrier},
+    sync::{Arc, Barrier, mpsc},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use bindport_registry::{REGISTRY_USER_VERSION, Registry, RegistryError, RegistryExportSnapshot};
@@ -224,6 +224,55 @@ fn newer_registry_version_is_rejected_without_rewriting_it() {
     assert_eq!(user_version(&connection), 10);
     assert_eq!(row_count(&connection, "future_marker"), 1);
     assert_eq!(row_count(&connection, "leases"), 0);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+            .expect("journal mode"),
+        "delete"
+    );
+    assert!(!sqlite_sidecar(&registry_path, "-wal").exists());
+    assert!(!sqlite_sidecar(&registry_path, "-shm").exists());
+}
+
+#[test]
+fn concurrent_fresh_opens_initialize_one_empty_registry() {
+    let root = fixture_root("concurrent-fresh-open");
+    let registry_path = root.join("registry.sqlite");
+    let clients = 8;
+    let barrier = Arc::new(Barrier::new(clients + 1));
+    let (sender, receiver) = mpsc::channel();
+    let handles = (0..clients)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let registry_path = registry_path.clone();
+            let sender = sender.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                sender
+                    .send(Registry::open(registry_path).map(|_| ()))
+                    .expect("send concurrent open result");
+            })
+        })
+        .collect::<Vec<_>>();
+    drop(sender);
+    barrier.wait();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for _ in 0..clients {
+        receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("concurrent open completion")
+            .expect("concurrent fresh registry open");
+    }
+    for handle in handles {
+        handle.join().expect("concurrent open thread");
+    }
+
+    let registry = Registry::open(&registry_path).expect("reopen fresh registry");
+    let export = registry.export_snapshot().expect("fresh registry export");
+    assert_eq!(export.user_version, REGISTRY_USER_VERSION);
+    assert!(export.leases.is_empty());
+    assert!(export.runs.is_empty());
 }
 
 #[test]
@@ -505,6 +554,12 @@ fn table_columns(connection: &Connection, table: &str) -> Vec<String> {
         .expect("table columns")
         .collect::<Result<Vec<_>, _>>()
         .expect("collect table columns")
+}
+
+fn sqlite_sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_owned();
+    sidecar.push(suffix);
+    PathBuf::from(sidecar)
 }
 
 fn row_count(connection: &Connection, table: &str) -> i64 {

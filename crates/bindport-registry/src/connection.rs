@@ -1,5 +1,35 @@
 use super::*;
 
+const WAL_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+
+fn enable_wal(connection: &Connection) -> rusqlite::Result<()> {
+    let deadline = std::time::Instant::now() + REGISTRY_BUSY_TIMEOUT;
+
+    loop {
+        match connection.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => return Ok(()),
+            Err(error) if is_sqlite_lock_contention(&error) => {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    return Err(error);
+                }
+                std::thread::sleep(remaining.min(WAL_RETRY_INTERVAL));
+                if std::time::Instant::now() >= deadline {
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn is_sqlite_lock_contention(error: &rusqlite::Error) -> bool {
+    matches!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    )
+}
+
 pub fn default_registry_directory_name() -> &'static str {
     SERVICE_NAME
 }
@@ -113,7 +143,7 @@ impl Registry {
                 supported: REGISTRY_USER_VERSION,
             });
         }
-        connection.pragma_update(None, "journal_mode", "WAL")?;
+        enable_wal(&connection)?;
         harden_registry_file(&path).map_err(|source| RegistryError::CreateDirectory {
             path: path.clone(),
             source,
