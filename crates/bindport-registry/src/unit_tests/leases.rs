@@ -132,6 +132,51 @@ fn registry_records_reserved_leases_for_status() {
 }
 
 #[test]
+fn failed_reserved_startup_records_exit_and_restores_reservation() {
+    let mut registry =
+        Registry::open(temp_registry_path("reserved-startup-failure")).expect("registry");
+    let identity = test_identity("v1:reserved-startup-failure");
+    let lease = registry
+        .record_reserved_lease(&ReserveLease {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity.clone()),
+            host: String::from("127.0.0.1"),
+            port: 29_504,
+            hostname: Some(String::from("reserved.localhost")),
+            route_url: Some(String::from("http://reserved.localhost")),
+            health_url: Some(String::from("http://reserved.localhost/health")),
+        })
+        .expect("reservation");
+    let started = registry
+        .promote_reserved_lease(&ReservedRunStart {
+            lease_id: lease.lease_id,
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: env::temp_dir(),
+        })
+        .expect("promotion");
+
+    registry
+        .record_reserved_run_failed(started, Some(98))
+        .expect("record failed startup");
+
+    let service = registry
+        .select_service(&identity)
+        .expect("reserved service");
+    assert_eq!(service.state, "reserved");
+    assert_eq!(service.port, 29_504);
+    assert_eq!(
+        service.route_url.as_deref(),
+        Some("http://reserved.localhost")
+    );
+    let snapshot = registry.status_snapshot().expect("status");
+    assert_eq!(snapshot.runs.len(), 1);
+    assert_eq!(snapshot.runs[0].exit_code, Some(98));
+    assert!(snapshot.runs[0].exited_at.is_some());
+}
+
+#[test]
 fn registry_releases_reserved_leases_by_identity_and_port() {
     let mut registry = Registry::open(temp_registry_path("release-reserved")).expect("registry");
     let first_identity = test_identity("v1:release-first");
