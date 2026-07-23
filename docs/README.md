@@ -54,6 +54,8 @@ New users should read:
   committing machine-local values.
 - [CLI Commands](daily-use/cli.md) to see the commands available from scripts, shells, and
   automation.
+- [CLI Stability Contract](reference/cli-stability.md) for v1-candidate names,
+  exit behavior, machine-output guarantees, and compatibility policy.
 
 Project maintainers should read:
 
@@ -82,10 +84,10 @@ Operators and agents should read:
   historical schemas, preservation guarantees, migration errors, and backups.
 - [Health and Troubleshooting](operations/troubleshooting.md) for diagnostics and common
   failure modes.
-- [Security Model](operations/security.md) for local-first defaults, config safety, output
-  ownership, dashboard auth, and hook trust.
-- [Platform Support](reference/platform-support.md) for supported operating systems,
-  package targets, process behavior, and CI gates.
+- [Security and Privacy](operations/security.md) for trust boundaries, local data,
+  subprocess/network behavior, output ownership, dashboard auth, and hook trust.
+- [Platform and MSRV Support](reference/platform-support.md) for the Rust build floor,
+  supported operating systems, package targets, process behavior, and CI gates.
 - [Agent and LLM Setup](reference/agents.md) for `AGENTS.md`, project scripts, and
   `llms.txt` discovery.
 

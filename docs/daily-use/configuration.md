@@ -162,10 +162,11 @@ tls = false
 middlewares = []
 ```
 
-Output `root` values must be relative to the config file and must not contain
-`..`. That rule applies to committed config and machine-local overrides. Point
-Traefik or another consumer at the generated project-relative directory instead
-of making BindPort render to an arbitrary absolute path. Output targets are
+Output `root` values must be relative and must not contain `..`. Project config
+and its machine-local override resolve output roots beside the project config.
+A user fallback config resolves outputs from the invoking cwd. Point Traefik or
+another consumer at the generated project-relative directory instead of making
+BindPort render to an arbitrary absolute path. Output targets are
 relative text file paths under the output root.
 
 Use built-in outputs for the common Traefik, Caddy, nginx, HAProxy, JSON
@@ -216,8 +217,10 @@ Supported events are `route_started`, `route_finished`, `routes_removed`,
 processes receive a minimal environment: `PATH` from the parent process plus
 BindPort lifecycle metadata through `BINDPORT_HOOK_EVENTS`,
 `BINDPORT_HOOK_SOURCES`, and `BINDPORT_HOOK_CONTEXT`. Other parent environment
-values are not inherited, and secret values are not copied into hook metadata or
-the registry.
+values are not inherited. BindPort does not copy ambient environment values
+into hook metadata or dedicated registry fields, but hook/config argv, expanded
+child command arguments, route URLs, and user template values are not
+secret-scrubbed. See [Security and Privacy](../operations/security.md).
 
 For output integrations, prefer tools that watch generated files. Add hooks only
 when the external tool needs an explicit reload or apply step, and keep that

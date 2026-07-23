@@ -42,9 +42,11 @@ bindport dashboard stop
 `start` runs the dashboard in the background and writes a small state file under
 the BindPort state directory. `status` reports the recorded PID and URL, and
 `stop` sends the dashboard process a termination signal. On Linux, BindPort
-checks the recorded PID against `/proc` before signaling it. On other platforms,
-`stop` can only check PID liveness, so stale state after PID reuse may need
-manual cleanup. Background dashboard stderr is written to `dashboard.log` in the
+checks recorded process start data and command shape through `/proc` before
+signaling it. On macOS, it uses PID liveness plus best-effort command inspection
+through `ps`, but cannot compare Linux-style process start data. If inspection
+is unavailable, PID reuse can still leave stale state that needs manual
+cleanup. Background dashboard stderr is written to `dashboard.log` in the
 same state directory, and startup failures include the first logged error.
 
 ## Port Selection
@@ -147,7 +149,9 @@ exists. The response also includes hook trust visibility under `hooks`.
 
 ## Security Posture
 
-The dashboard is local by default and has a narrow write surface:
+The canonical trust, token, disclosure, and network boundaries are in
+[Security and Privacy](../operations/security.md). The dashboard is local by
+default and has a narrow write surface:
 
 - binds only to loopback by default;
 - accepts `Host` headers for `127.0.0.1` and `localhost`;
@@ -184,7 +188,9 @@ BINDPORT_DASHBOARD_TOKEN="change-me" \
 ```
 
 Binding `0.0.0.0` with auth enabled accepts arbitrary Host headers so remote
-browser testing works with an IP address or forwarded hostname. BindPort refuses
+browser testing works with an IP address or forwarded hostname. The dashboard
+uses plain HTTP and does not provide TLS; use a trusted private network or
+authenticated tunnel for remote access. BindPort refuses
 non-loopback dashboard binds when auth is disabled. For loopback-only dashboards
 reached through a local hostname or tunnel, configure each non-local Host header
 explicitly with `allowed_hosts` or `--allowed-host`.

@@ -202,8 +202,12 @@ agents do not hardcode ports or edit local-only files:
 - Use `bindport run <service>` or existing project scripts instead of hardcoding
   development ports.
 - Run `bindport config validate` after changing `.bindport.*` config.
-- Use `bindport status --json` or `bindport open <service> --print` to discover
-  active service URLs.
+- Use `bindport status --json` and match identity/worktree fields to discover an
+  exact active URL. Use `bindport open <service> --print` only when
+  registry-wide selection is unambiguous; `--project` does not select a
+  worktree.
+- Use `bindport port <service>` for an exact active or reserved port in the
+  current project/worktree.
 - Do not edit `.bindport.local.*`, `bindport.local.*`, generated output files,
   or `.env.local` unless explicitly asked.
 - Do not run `bindport hooks trust`, `bindport hooks deny`, or hook commands
@@ -231,6 +235,8 @@ rules:
 
 - [Config](../daily-use/configuration.md): config discovery, supported fields, validation, hooks,
   and placeholders.
+- [CLI Stability Contract](../reference/cli-stability.md): exit behavior,
+  machine output, and safe non-interactive usage.
 - [Status](../operations/status.md): `status --json` schema and service URL lookup.
 - [Templates](../integrations/templates.md): output templates, render lifecycle, ownership, and
   Traefik file-provider setup.

@@ -357,7 +357,8 @@ Before committing Kubernetes output config, confirm:
   locally trusted hook.
 - The template documents whether it expects a Service, ExternalName Service,
   local cluster gateway, or proxy-specific CRD.
-- Generated manifests do not include secrets.
+- Generated manifests have been reviewed not to include secrets; BindPort does
+  not classify or scrub user-provided template vars or content.
 
 ## Traefik IngressRoute Candidates
 
@@ -425,7 +426,8 @@ Use JSON when:
 Optional outputs cross a boundary from BindPort's registry into another tool.
 Review that boundary before trusting the integration:
 
-- Generated files should contain route metadata, not secrets.
+- Generated files should contain route metadata, not secrets. BindPort does not
+  enforce that policy for custom templates or user-provided vars.
 - Output roots must stay project-relative and must not use `..`.
 - Output targets should be deterministic and under the output root.
 - Machine-specific hosts, namespaces, socket paths, and reload commands belong

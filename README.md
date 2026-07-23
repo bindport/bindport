@@ -108,7 +108,10 @@ It probes TCP loopback (IPv4 and IPv6) for a currently-free port from
 `29000-29999`, prefers the previous port for the same project/service/worktree
 identity when it is still free, otherwise scans from a stable identity-based
 offset, injects `PORT=<assigned>`, inherits child stdio, forwards Unix
-SIGINT/SIGTERM to the child, and exits with the child process exit code. The
+SIGINT/SIGTERM to the child, and returns normal child exit codes unchanged.
+Unix signal termination is reported as `128 + signal`; BindPort-owned failures
+use `1`, which is not reserved from children. See the
+[CLI stability contract](docs/reference/cli-stability.md). The
 runner is probe-then-spawn, so another process can still claim the port
 before the child binds. BindPort retries once with another port when the child
 fails immediately and the assigned port is then occupied; stronger lease-based
@@ -345,7 +348,9 @@ bindport clean
 `bindport clean` removes stopped and stale entries by default. Stale entries
 require confirmation before deletion; pass `--yes` for reviewed noninteractive
 cleanup. Use `--stopped` or `--stale` to scope cleanup, and `--json` for
-machine-readable counts. Active services are not removed.
+machine-readable counts. Active services are not removed. Destructive
+`clean --json` may be contaminated by approved hook stdout.
+`clean --dry-run --json` executes no hooks and is the safe parse-only preview.
 
 ## Documentation
 
@@ -358,6 +363,8 @@ machine-readable counts. Active services are not removed.
 - [Dashboard](docs/integrations/dashboard.md): local service dashboard, status API, scoped
   registry cleanup actions, service-style controls, configurable bind/auth
   options, dev modes, and security posture.
+- [CLI Stability](docs/reference/cli-stability.md): v1-candidate command and flag
+  names, exact exit behavior, machine-output guarantees, and agent-safe lookup.
 - [Status](docs/operations/status.md): stable `status --json` schema 1.0,
   grouped service listing, registry export, service URL selection, and
   agent-oriented lookup guidance.
@@ -372,8 +379,11 @@ machine-readable counts. Active services are not removed.
   manifests, container workflows, and JSON bridge patterns.
 - [Monorepos](docs/daily-use/monorepos.md): root config, path-scoped services, workspace
   inference, local overrides, and output examples for multi-package repos.
-- [Platform Support](docs/reference/platform-support.md): supported operating systems,
-  package targets, filesystem paths, process behavior, and verification gates.
+- [Security and Privacy](docs/operations/security.md): trust boundaries, local data,
+  network/subprocess behavior, dashboard controls, outputs, and hooks.
+- [Platform and MSRV Support](docs/reference/platform-support.md): Rust 1.96.0 policy,
+  supported operating systems, package targets, filesystem paths, process
+  behavior, and verification gates.
 - [Release](docs/project/release.md): release prep automation, GitHub release binaries,
   Cargo publish helpers, and npm packaging.
 - [Changelog](CHANGELOG.md): generated release notes from Conventional Commits.

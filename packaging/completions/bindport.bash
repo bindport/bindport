@@ -9,15 +9,15 @@ _bindport()
     local cur prev words cword
     _init_completion -n : || return
 
-    local commands="run reserve release status open port clean config hooks doctor dashboard render templates init"
-    local global_opts="--help -h --version"
-    local run_opts="--env --hostname --route-url --health-url --help -h"
-    local reserve_opts="$run_opts --all"
+    local commands="run reserve release status list registry open port clean config hooks doctor dashboard render templates init"
+    local global_opts="--help -h --version -V"
+    local run_opts="--env --hostname --route-url --health-url"
+    local reserve_opts="--hostname --route-url --health-url --all --help -h"
     local clean_opts="--dry-run --stopped --stale --all --json --yes -y --help -h"
     local dashboard_opts="serve start status stop --host --port --auth --auth-required --no-auth --register-service --no-register-service --token --token-env --allowed-host --static-dir --help -h"
     local hook_commands="status trust deny reset"
     local hook_opts="--scope --all --help -h"
-    local render_opts="--all --dry-run --repair --help -h"
+    local render_opts="--all --dry-run --diff --repair --verbose -v --help -h"
     local template_commands="list show export"
     local template_opts="--source --help -h"
     local source_values="project global built-in"
@@ -90,8 +90,17 @@ _bindport()
         init)
             COMPREPLY=($(compgen -W "--project --user --help -h" -- "$cur"))
             ;;
-        status | open)
-            COMPREPLY=($(compgen -W "--json --project --browser --print --help -h" -- "$cur"))
+        status)
+            COMPREPLY=($(compgen -W "--json" -- "$cur"))
+            ;;
+        list)
+            COMPREPLY=($(compgen -W "--json --help -h" -- "$cur"))
+            ;;
+        registry)
+            COMPREPLY=($(compgen -W "export --help -h" -- "$cur"))
+            ;;
+        open)
+            COMPREPLY=($(compgen -W "--project --browser --print --help -h" -- "$cur"))
             ;;
         port)
             COMPREPLY=($(compgen -W "--project --help -h" -- "$cur"))

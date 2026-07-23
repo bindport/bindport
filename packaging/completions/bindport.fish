@@ -3,12 +3,14 @@
 complete -c bindport -f
 
 complete -c bindport -l help -s h -d 'Show help'
-complete -c bindport -l version -d 'Print version'
+complete -c bindport -l version -s V -d 'Print version'
 
 complete -c bindport -n '__fish_use_subcommand' -a run -d 'Run a command or configured service command'
 complete -c bindport -n '__fish_use_subcommand' -a reserve -d 'Hold a port without running a child process'
 complete -c bindport -n '__fish_use_subcommand' -a release -d 'Release a reserved port'
 complete -c bindport -n '__fish_use_subcommand' -a status -d 'Show registry status'
+complete -c bindport -n '__fish_use_subcommand' -a list -d 'List projects and services in the registry'
+complete -c bindport -n '__fish_use_subcommand' -a registry -d 'Export registry debug JSON'
 complete -c bindport -n '__fish_use_subcommand' -a open -d 'Print or open the best service URL'
 complete -c bindport -n '__fish_use_subcommand' -a port -d 'Print an active or reserved service port'
 complete -c bindport -n '__fish_use_subcommand' -a clean -d 'Remove stopped and stale registry entries'
@@ -20,13 +22,15 @@ complete -c bindport -n '__fish_use_subcommand' -a render -d 'Render configured 
 complete -c bindport -n '__fish_use_subcommand' -a templates -d 'List, show, or export output templates'
 complete -c bindport -n '__fish_use_subcommand' -a init -d 'Create project or user config'
 
-complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l env -r -d 'Add a templated child environment variable'
+complete -c bindport -n '__fish_seen_subcommand_from run' -l env -r -d 'Add a templated child environment variable'
 complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l hostname -r -d 'Set route hostname metadata'
 complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l route-url -r -d 'Set route URL metadata'
 complete -c bindport -n '__fish_seen_subcommand_from run reserve' -l health-url -r -d 'Set service health check URL metadata'
 complete -c bindport -n '__fish_seen_subcommand_from reserve' -l all -d 'Reserve every named configured service'
 
 complete -c bindport -n '__fish_seen_subcommand_from status' -l json -d 'Print machine-readable status'
+complete -c bindport -n '__fish_seen_subcommand_from list' -l json -d 'Print grouped project/service JSON'
+complete -c bindport -n '__fish_seen_subcommand_from registry' -a export -d 'Print full registry debug JSON'
 
 complete -c bindport -n '__fish_seen_subcommand_from open' -l project -r -d 'Disambiguate services with the same name'
 complete -c bindport -n '__fish_seen_subcommand_from open' -l browser -d 'Open the URL with the system browser'
@@ -70,7 +74,9 @@ complete -c bindport -n '__fish_seen_subcommand_from dashboard' -l static-dir -r
 
 complete -c bindport -n '__fish_seen_subcommand_from render' -l all -d 'Render every enabled output'
 complete -c bindport -n '__fish_seen_subcommand_from render' -l dry-run -d 'Render templates and print targets without writing files'
+complete -c bindport -n '__fish_seen_subcommand_from render' -l diff -d 'Print content changes without writing files'
 complete -c bindport -n '__fish_seen_subcommand_from render' -l repair -d 'Re-render current routes and reconcile DB-owned files'
+complete -c bindport -n '__fish_seen_subcommand_from render' -l verbose -s v -d 'Print render diagnostics to stderr'
 
 complete -c bindport -n '__fish_seen_subcommand_from templates' -a list -d 'List resolved output templates'
 complete -c bindport -n '__fish_seen_subcommand_from templates' -a show -d 'Show a resolved output template'

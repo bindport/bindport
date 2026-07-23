@@ -94,7 +94,9 @@ then occupied, but it cannot prevent every external race.
 bindport open web --print
 ```
 
-If the printed URL is wrong, check:
+Selection is registry-wide; `--project` does not select a worktree. If several
+worktrees can be active, filter `status --json` by identity/worktree fields for
+an exact URL. If the printed URL is wrong, check:
 
 - service `hostname`, `route_url`, and `health_url`.
 - CLI overrides such as `--hostname` or `--route-url`.
