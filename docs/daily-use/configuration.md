@@ -228,7 +228,8 @@ command behind local trust.
 
 Unknown top-level keys are reported by `bindport config validate`, `bindport
 config explain`, and `bindport doctor`; unknown nested keys are currently
-ignored. `default_range` is the only supported port-range key. No config keys
+ignored. `default_range` is the only supported port-range key, and its start
+must be at least 1. No config keys
 are currently deprecated, so `config validate` has no deprecation warnings to
 emit. Service-level `health_url` is stored with each run. Active loopback `http://` health URLs are
 probed by `status`; non-loopback and unsupported destinations stay `unknown`.
@@ -271,10 +272,12 @@ narrow sibling syntax:
 ```
 
 Sibling lookup accepts exactly one active or reserved service with that name in
-the current project and exact current worktree. Missing, stopped, stale, and
-ambiguous matches fail before output preflight, hooks, or child spawn. BindPort
-captures the referenced values once during startup; a running child's argv and
-environment do not change when registry state changes.
+the current project and exact current worktree. Outside Git, the discovered
+project config root provides the equivalent project scope, so root-level
+preparation remains visible from configured service directories. Missing,
+stopped, stale, and ambiguous matches fail before output preflight, hooks, or
+child spawn. BindPort captures the referenced values once during startup; a
+running child's argv and environment do not change when registry state changes.
 
 `port` is decimal, `host` is the registered direct host, and `url` is the direct
 `http://<host>:<port>` URL. `hostname` and `health_url` require configured
@@ -284,8 +287,8 @@ does not mean the service is ready. BindPort does not start, order, supervise,
 wait for, or health-check a dependency graph.
 
 Sibling references do not apply to hostname, route URL, health URL, output,
-route metadata, hook, or CLI `--env` templates. This is a placeholder extension,
-not an expression language.
+route metadata, hook, or CLI `--env` templates. This is a narrow placeholder
+extension, not an expression language.
 
 Use `{{` and `}}` when a template value needs literal braces.
 `bindport run --hostname TEMPLATE`, `--route-url TEMPLATE`, and

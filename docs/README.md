@@ -99,11 +99,16 @@ Install mdBook:
 cargo install mdbook --locked
 ```
 
-From the repository root, serve the docs site on all interfaces for remote dev
-boxes:
+From the repository root, serve the docs site on loopback:
 
 ```sh
 scripts/docs-serve.sh
+```
+
+For a remote dev box, opt into a wider bind explicitly:
+
+```sh
+scripts/docs-serve.sh -n 0.0.0.0 -p 4321
 ```
 
 Build the static site:

@@ -101,8 +101,8 @@ the four checksummed GitHub Release binaries and installs:
 
 Ordinary pull-request CI generates and syntax-checks the formula but does not
 run `brew install`: an install would mutate the host Homebrew prefix and reach a
-published release. The authorized live-channel checklist is in
-[Release Process](../project/release.md#authorized-v100-rc1-live-channel-checklist).
+published release. Maintainer-side formula generation and live installation are
+documented under [Release Process](../project/release.md#homebrew-tap).
 Homebrew core submission remains post-1.0.
 
 ## mise / ubi
@@ -134,9 +134,9 @@ Each release uses these raw binary and checksum names:
 - `bindport-macos-x64` and `bindport-macos-x64.sha256`
 - `bindport-macos-arm64` and `bindport-macos-arm64.sha256`
 
-It also contains versioned npm tarballs and checksums,
-`bindport-completions.tar.gz` with its checksum, and
-`bindport-manpage.tar.gz` with its checksum.
+It also contains the canonical `LICENSE`, versioned npm tarballs,
+`bindport-completions.tar.gz`, and `bindport-manpage.tar.gz`, each with its
+checksum.
 
 Example for Linux x64:
 

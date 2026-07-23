@@ -240,7 +240,9 @@ HTTPS URLs; use `--print` in headless or machine workflows.
 
 Reserved services come from `bindport reserve [service]`. They hold a port for
 an externally managed process and appear in `services`, but they do not run a
-child process.
+child process. Single-service reservation is idempotent in the exact scope: if
+the service is already active or reserved, BindPort reports and reuses that
+existing service instead of creating an ambiguous second lease.
 
 Use reservations when Docker Compose, another process supervisor, or a manually
 started app needs a port chosen by BindPort:

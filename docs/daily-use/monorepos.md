@@ -40,8 +40,10 @@ bindport run api
 ```
 
 The web service references the active or reserved API in the same project and
-worktree. Reservation makes its address available, but does not start the API or
-indicate readiness; applications remain responsible for retry behavior.
+worktree. Outside Git, the discovered root config supplies the shared project
+scope, so the prepared addresses remain visible from service subdirectories.
+Reservation makes an address available, but does not start the API or indicate
+readiness; applications remain responsible for retry behavior.
 
 Run from a service directory and BindPort selects the deepest matching path:
 

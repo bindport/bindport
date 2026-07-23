@@ -7,7 +7,10 @@
   "properties": {
     "project": {"$ref": "#/$defs/nullableString"},
     "service": {"$ref": "#/$defs/nullableString"},
-    "default_range": {"$ref": "#/$defs/nullableString"},
+    "default_range": {
+      "description": "Inclusive decimal START-END port range parsed by BindPort. Whitespace around each value and leading zeroes are accepted. START must be at least 1; both values must fit in 1-65535 and START must not exceed END.",
+      "type": ["string", "null"]
+    },
     "skip_ports": {
       "type": ["array", "null"],
       "items": {"$ref": "#/$defs/port"}

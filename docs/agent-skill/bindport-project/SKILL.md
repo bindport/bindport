@@ -35,8 +35,11 @@ to resolve a migration error; preserve it and follow
 `docs/reference/registry-migrations.md`.
 
 `reserve --all` is idempotent and scoped to the discovered project and current
-worktree; new reservations commit all-or-nothing, and it neither starts
-children nor owns sockets. `port` prints only the decimal port and newline, and
+worktree; new reservations commit all-or-nothing. Single-service `reserve`
+reuses an exact scoped active or reserved service and rejects `--env` because
+reservations neither start children nor own sockets. Outside Git, the
+discovered project config root supplies the equivalent shared scope. `port`
+prints only the decimal port and newline, and
 fails for missing, stopped, stale, or ambiguous matches. Use `open --print`,
 never `--browser`, in non-interactive automation. Preview cleanup with
 `bindport clean --dry-run --json`; do not add `--yes` without explicit approval.

@@ -34,7 +34,9 @@ hostname = "{branch}.example-web.localhost"
 
 For a monorepo, keep one config at the repo root and scope services by relative
 path. Running BindPort from inside `apps/api` selects the `api` service unless a
-CLI or environment service override is provided. If the repo also has npm/yarn
+CLI or environment service override is provided. Outside Git, that discovered
+config root also keeps reservations and sibling lookup in one shared project
+scope. If the repo also has npm/yarn
 `package.json#workspaces` or `pnpm-workspace.yaml`, BindPort uses that workspace
 root package as the inferred project and the nearest package as the inferred
 service when explicit config does not provide them.
