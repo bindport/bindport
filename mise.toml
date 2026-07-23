@@ -47,6 +47,11 @@ run = "cargo check --all-targets"
 description = "Build the release binary"
 run = "cargo build --release --locked"
 
+[tasks.startup-budget]
+description = "Check release wrapper startup overhead against the local budget"
+depends = ["build"]
+run = "target/release/xtask startup-budget"
+
 [tasks.binstall-metadata]
 description = "Validate cargo-binstall release asset metadata"
 run = "node scripts/check-binstall-metadata.js"
@@ -382,6 +387,7 @@ mise run security-scan
 mise run test
 mise run coverage
 mise run build
+mise run startup-budget
 mise run binstall-metadata
 mise run cli-assets
 mise run homebrew-formula-check

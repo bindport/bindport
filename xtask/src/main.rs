@@ -7,9 +7,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use startup::startup_budget;
+
 const DESCRIPTION_LIMIT: usize = 170;
 const SKIP_DESCRIPTIONS: &[&str] = &["print.html", "toc.html"];
 const SITEMAP_SKIP: &[&str] = &["404.html", "print.html", "toc.html"];
+
+mod startup;
 
 fn main() -> ExitCode {
     match run(env::args().skip(1).collect()) {
@@ -24,6 +28,9 @@ fn main() -> ExitCode {
 fn run(args: Vec<String>) -> Result<(), String> {
     match args.as_slice() {
         [command] if command == "platform-guard" => platform_guard().map_err(|error| error.to_string()),
+        [command] if command == "startup-budget" => startup_budget(false),
+        [command, flag] if command == "startup-budget" && flag == "--ci" => startup_budget(true),
+        [command] if command == "__startup-child" => Ok(()),
         [command, out_dir] if command == "docs-postprocess" => {
             docs_postprocess(Path::new(out_dir)).map_err(|error| error.to_string())
         }
@@ -31,7 +38,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             docs_sitemap(Path::new(out_dir), base_url).map_err(|error| error.to_string())
         }
         _ => Err(
-            "usage: xtask <platform-guard|docs-postprocess <out-dir>|docs-sitemap <out-dir> <base-url>>"
+            "usage: xtask <platform-guard|startup-budget [--ci]|docs-postprocess <out-dir>|docs-sitemap <out-dir> <base-url>>"
                 .to_owned(),
         ),
     }
