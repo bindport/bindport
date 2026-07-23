@@ -8,6 +8,8 @@ mod allocation;
 mod basic;
 #[path = "run/configured.rs"]
 mod configured;
+#[path = "run/cross_service.rs"]
+mod cross_service;
 #[path = "run/package.rs"]
 mod package;
 #[path = "run/reserved.rs"]

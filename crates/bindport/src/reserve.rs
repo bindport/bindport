@@ -108,7 +108,7 @@ fn reserve_command(args: &[String]) -> Result<ReservedLease, ReserveCommandError
         scan_start: identity.port_scan_start(config.port_range),
     };
     let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
-    let metadata = resolve_run_metadata(&identity, port, &templates)?;
+    let metadata = resolve_reservation_metadata(&identity, port, &templates)?;
 
     if has_blocking_auto_outputs(&config)? {
         let pending_route = pending_route_record(&identity, port, &metadata, "reserved", &cwd);
@@ -179,7 +179,7 @@ fn reserve_all_command(args: &[String]) -> Result<Vec<RegistryService>, ReserveC
             let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
             let service_config = configured_service(&config, identity);
             let templates = resolve_run_templates(&[], &RunOptions::default(), service_config);
-            let metadata = resolve_run_metadata(identity, port, &templates)?;
+            let metadata = resolve_reservation_metadata(identity, port, &templates)?;
 
             Ok::<_, ReserveCommandError>(ReservationCandidate {
                 host: String::from("127.0.0.1"),

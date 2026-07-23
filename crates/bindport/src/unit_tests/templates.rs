@@ -125,6 +125,66 @@ fn template_values_include_git_and_fallback_context() {
 }
 
 #[test]
+fn sibling_template_values_preserve_direct_and_optional_field_semantics() {
+    let identity = ServiceIdentity {
+        project: String::from("demo"),
+        service: String::from("web"),
+        git: None,
+        identity_key: String::from("v1:test"),
+    };
+    let mut siblings = SiblingServices::new();
+    siblings.insert(
+        String::from("api.v2"),
+        RegistryService {
+            lease_id: 1,
+            project: String::from("demo"),
+            service: String::from("api.v2"),
+            identity_key: String::from("v1:api"),
+            state: String::from("reserved"),
+            host: String::from("127.0.0.2"),
+            port: 29_200,
+            hostname: Some(String::from("api.localhost")),
+            route_url: Some(String::from("https://api.localhost")),
+            health_url: Some(String::from("https://api.localhost/health")),
+        },
+    );
+    siblings.insert(
+        String::from("direct"),
+        RegistryService {
+            lease_id: 2,
+            project: String::from("demo"),
+            service: String::from("direct"),
+            identity_key: String::from("v1:direct"),
+            state: String::from("active"),
+            host: String::from("127.0.0.1"),
+            port: 29_201,
+            hostname: None,
+            route_url: None,
+            health_url: None,
+        },
+    );
+    let values =
+        TemplateValues::new(&identity, 29_100, None, None, None).with_sibling_services(&siblings);
+
+    assert_eq!(
+        expand_template(
+            "{services.api.v2.port}|{services.api.v2.host}|{services.api.v2.url}|{services.api.v2.hostname}|{services.api.v2.route_url}|{services.api.v2.health_url}",
+            &values,
+        )
+        .expect("sibling fields"),
+        "29200|127.0.0.2|http://127.0.0.2:29200|api.localhost|https://api.localhost|https://api.localhost/health"
+    );
+    assert_eq!(
+        expand_template("{services.direct.route_url}", &values).expect("direct route fallback"),
+        "http://127.0.0.1:29201"
+    );
+    assert!(matches!(
+        expand_template("{services.direct.hostname}", &values),
+        Err(TemplateError::UnavailableSiblingField { .. })
+    ));
+}
+
+#[test]
 fn template_command_parser_validates_sources_and_names() {
     let (command, options) = parse_template_command(&strings([
         "show",

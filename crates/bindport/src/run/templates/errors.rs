@@ -10,6 +10,10 @@ pub(crate) enum TemplateError {
         placeholder: String,
         template: String,
     },
+    UnavailableSiblingField {
+        service: String,
+        field: String,
+    },
 }
 
 impl std::fmt::Display for TemplateError {
@@ -30,6 +34,10 @@ impl std::fmt::Display for TemplateError {
                     "unknown or unavailable template placeholder `{placeholder}` in `{template}`"
                 )
             }
+            Self::UnavailableSiblingField { service, field } => write!(
+                f,
+                "sibling service `{service}` has no configured `{field}` value in the startup registry snapshot"
+            ),
         }
     }
 }

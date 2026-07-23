@@ -75,6 +75,69 @@ fn selector_accepts_only_active_or_reserved_exact_scope() {
 }
 
 #[test]
+fn selector_returns_one_active_reserved_metadata_snapshot() {
+    let mut registry = Registry::open(temp_registry_path("selector-snapshot")).expect("registry");
+    let reserved = scoped_identity("example", "api", "worktree");
+    let active = scoped_identity("example", "web", "worktree");
+    registry
+        .record_reserved_lease(&ReserveLease {
+            project: reserved.project.clone(),
+            service: reserved.service.clone(),
+            identity: Some(reserved.clone()),
+            host: String::from("127.0.0.2"),
+            port: 29_540,
+            hostname: Some(String::from("api.localhost")),
+            route_url: Some(String::from("https://api.localhost")),
+            health_url: Some(String::from("https://api.localhost/health")),
+        })
+        .expect("reservation");
+    registry
+        .record_run_started(&RunStart {
+            project: active.project.clone(),
+            service: active.service.clone(),
+            identity: Some(active.clone()),
+            host: String::from("127.0.0.3"),
+            port: 29_541,
+            hostname: Some(String::from("web.localhost")),
+            route_url: Some(String::from("https://web.localhost")),
+            health_url: Some(String::from("https://web.localhost/health")),
+            pid: std::process::id(),
+            command: current_process_command(),
+            cwd: env::temp_dir(),
+        })
+        .expect("active run");
+
+    let services = registry
+        .select_services(&[reserved, active])
+        .expect("service snapshot");
+
+    assert_eq!(services[0].state, "reserved");
+    assert_eq!(services[0].host, "127.0.0.2");
+    assert_eq!(services[0].port, 29_540);
+    assert_eq!(services[0].hostname.as_deref(), Some("api.localhost"));
+    assert_eq!(
+        services[0].route_url.as_deref(),
+        Some("https://api.localhost")
+    );
+    assert_eq!(
+        services[0].health_url.as_deref(),
+        Some("https://api.localhost/health")
+    );
+    assert_eq!(services[1].state, "active");
+    assert_eq!(services[1].host, "127.0.0.3");
+    assert_eq!(services[1].port, 29_541);
+    assert_eq!(services[1].hostname.as_deref(), Some("web.localhost"));
+    assert_eq!(
+        services[1].route_url.as_deref(),
+        Some("https://web.localhost")
+    );
+    assert_eq!(
+        services[1].health_url.as_deref(),
+        Some("https://web.localhost/health")
+    );
+}
+
+#[test]
 fn selector_rejects_ambiguous_exact_scope() {
     let mut registry = Registry::open(temp_registry_path("ambiguous-selector")).expect("registry");
     let identity = scoped_identity("example", "web", "worktree");
