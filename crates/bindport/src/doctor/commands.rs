@@ -40,10 +40,11 @@ pub(crate) fn print_doctor() -> ExitCode {
 
     print_identity_diagnostics(&identity);
     print_git_diagnostics(&cwd);
+    let hostname_ok = print_effective_hostname_diagnostics(&identity, &config);
     let allocation_ok = print_allocation_diagnostics(&config, &identity, registry.as_mut());
 
     println!("first proxy adapter: {}", AdapterKind::Traefik.as_str());
-    if allocation_ok {
+    if hostname_ok && allocation_ok {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

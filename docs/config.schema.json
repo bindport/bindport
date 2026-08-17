@@ -79,7 +79,10 @@
           "type": ["object", "null"],
           "additionalProperties": {"type": "string"}
         },
-        "hostname": {"$ref": "#/$defs/nullableString"},
+        "hostname": {
+          "description": "Single-brace template for the route hostname. After expansion, otherwise-valid ASCII DNS labels over 63 bytes are hash-shortened; malformed labels and full hostnames over 253 bytes are rejected.",
+          "$ref": "#/$defs/nullableString"
+        },
         "route_url": {"$ref": "#/$defs/nullableString"},
         "health_url": {"$ref": "#/$defs/nullableString"}
       },

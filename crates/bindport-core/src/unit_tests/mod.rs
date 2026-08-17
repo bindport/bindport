@@ -8,6 +8,7 @@ use std::{
 
 mod config;
 mod config_contract;
+mod hostname;
 mod identity;
 mod outputs;
 mod ports;

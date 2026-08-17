@@ -463,6 +463,43 @@ fn concurrent_batch_reservations_reuse_one_atomic_result() {
 }
 
 #[test]
+fn promotion_can_refresh_reservation_route_metadata() {
+    let mut registry = Registry::open(temp_registry_path("promotion-metadata")).expect("registry");
+    let identity = scoped_identity("example", "web", "worktree");
+    let reserved = registry
+        .record_reserved_lease(&ReserveLease {
+            project: identity.project.clone(),
+            service: identity.service.clone(),
+            identity: Some(identity.clone()),
+            host: String::from("127.0.0.1"),
+            port: 29_520,
+            hostname: Some(String::from("old.localhost")),
+            route_url: Some(String::from("http://old.localhost")),
+            health_url: Some(String::from("http://old.localhost/health")),
+        })
+        .expect("reservation");
+
+    registry
+        .promote_reserved_lease_with_metadata(
+            &ReservedRunStart {
+                lease_id: reserved.lease_id,
+                pid: std::process::id(),
+                command: current_process_command(),
+                cwd: env::temp_dir(),
+            },
+            Some("new.localhost"),
+            Some("https://new.localhost"),
+            None,
+        )
+        .expect("promotion");
+
+    let active = registry.select_service(&identity).expect("active service");
+    assert_eq!(active.hostname.as_deref(), Some("new.localhost"));
+    assert_eq!(active.route_url.as_deref(), Some("https://new.localhost"));
+    assert_eq!(active.health_url, None);
+}
+
+#[test]
 fn promotion_is_atomic_and_preserves_reservation_identity_and_metadata() {
     let mut registry = Registry::open(temp_registry_path("promotion")).expect("registry");
     let identity = scoped_identity("example", "web", "worktree");

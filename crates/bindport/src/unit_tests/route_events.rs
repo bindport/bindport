@@ -116,6 +116,7 @@ fn render_route_helpers_preserve_status_and_pending_metadata() {
         hostname: Some(String::from("feature-tree.demo.localhost")),
         route_url: Some(String::from("https://feature-tree.demo.localhost")),
         health_url: Some(String::from("https://feature-tree.demo.localhost/health")),
+        hostname_changes: Vec::new(),
         env: Vec::new(),
     };
     let pending = pending_route_record(

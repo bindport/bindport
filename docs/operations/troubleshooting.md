@@ -19,6 +19,7 @@ bindport doctor
 
 - discovered config and registry paths.
 - effective project/service identity.
+- effective hostname validation and any DNS label shortening.
 - active registry ports.
 - obvious registry/listener conflicts.
 - unknown OS listener conflicts.
@@ -101,6 +102,10 @@ an exact URL. If the printed URL is wrong, check:
 - service `hostname`, `route_url`, and `health_url`.
 - CLI overrides such as `--hostname` or `--route-url`.
 - environment overrides such as `BINDPORT_ROUTE_URL`.
+- warnings from `config validate`, `doctor`, `reserve`, or `run` that show an
+  overlong DNS label and its hash-shortened replacement.
+- whether a custom `route_url` derives its host from `{hostname}`; expanding the
+  branch independently can make it disagree with the normalized proxy host.
 - whether the external proxy is watching the generated output directory.
 
 ## Health Issues

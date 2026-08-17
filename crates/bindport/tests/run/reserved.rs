@@ -141,6 +141,60 @@ command = ["sh", "-c", "printf '%s|%s' \"$PORT\" \"$(pwd -P)\""]
 }
 
 #[test]
+fn reserved_run_refreshes_route_metadata_after_hostname_normalization() {
+    let registry_path = temp_registry_path("reserved-hostname-refresh-registry");
+    let root = temp_test_dir("reserved-hostname-refresh-root")
+        .canonicalize()
+        .expect("canonical root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"reserved-hostname-refresh\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"old.localhost\"\n"
+        ),
+    )
+    .expect("write initial config");
+    reserve_all_port(&registry_path, &root);
+
+    let long_label = format!("{}-branch", "feature".repeat(10));
+    let raw_hostname = format!("{long_label}.localhost");
+    let expected = bindport_core::normalize_dns_hostname(&raw_hostname)
+        .expect("normalized hostname")
+        .value;
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"reserved-hostname-refresh\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"{raw_hostname}\"\nroute_url = \"https://{{hostname}}\"\ncommand = [\"true\"]\n"
+        ),
+    )
+    .expect("write updated config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["run", "web"])
+        .output()
+        .expect("run reserved service");
+
+    assert!(
+        output.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let snapshot = Registry::open(&registry_path)
+        .expect("registry")
+        .export_snapshot()
+        .expect("snapshot");
+    assert_eq!(
+        snapshot.leases[0].hostname.as_deref(),
+        Some(expected.as_str())
+    );
+    assert_eq!(
+        snapshot.leases[0].route_url.as_deref(),
+        Some(format!("https://{expected}").as_str())
+    );
+}
+
+#[test]
 fn reserved_run_spawn_failure_keeps_reservation() {
     let registry_path = temp_registry_path("reserved-spawn-failure-registry");
     let root = temp_test_dir("reserved-spawn-failure-root")

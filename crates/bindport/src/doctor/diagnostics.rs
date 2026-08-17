@@ -27,6 +27,41 @@ pub(crate) fn print_identity_diagnostics(identity: &ServiceIdentity) {
     println!("identity key: {}", identity.identity_key);
 }
 
+pub(crate) fn print_effective_hostname_diagnostics(
+    identity: &ServiceIdentity,
+    config: &ResolvedConfig,
+) -> bool {
+    let service_config = configured_service(config, identity);
+    let resolved_templates = resolve_run_templates(&[], &RunOptions::default(), service_config);
+    let templates = RunTemplates {
+        hostname: resolved_templates.hostname,
+        ..RunTemplates::default()
+    };
+
+    match resolve_run_route_metadata(identity, config.port_range.start, &templates) {
+        Ok(metadata) => {
+            match metadata.hostname.as_deref() {
+                Some(hostname) => println!("effective hostname: {hostname}"),
+                None => println!("effective hostname: none"),
+            }
+            for change in metadata.hostname_changes {
+                println!(
+                    "hostname label shortened: {} -> {} (DNS 63-byte label limit)",
+                    change.original, change.replacement
+                );
+            }
+            true
+        }
+        Err(error) => {
+            println!(
+                "effective hostname: invalid for service `{}` ({error})",
+                identity.service
+            );
+            false
+        }
+    }
+}
+
 pub(crate) fn print_git_diagnostics(cwd: &Path) {
     match detect_git_identity(cwd) {
         Some(git) => {

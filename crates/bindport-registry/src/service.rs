@@ -225,18 +225,45 @@ impl Registry {
         &mut self,
         run: &ReservedRunStart,
     ) -> Result<StartedRun, RegistryError> {
+        self.promote_reserved_lease_inner(run, None)
+    }
+
+    pub fn promote_reserved_lease_with_metadata(
+        &mut self,
+        run: &ReservedRunStart,
+        hostname: Option<&str>,
+        route_url: Option<&str>,
+        health_url: Option<&str>,
+    ) -> Result<StartedRun, RegistryError> {
+        self.promote_reserved_lease_inner(run, Some((hostname, route_url, health_url)))
+    }
+
+    fn promote_reserved_lease_inner(
+        &mut self,
+        run: &ReservedRunStart,
+        metadata: Option<(Option<&str>, Option<&str>, Option<&str>)>,
+    ) -> Result<StartedRun, RegistryError> {
         let now = utc_now(&self.connection)?;
         let cwd = run.cwd.display().to_string();
         let process_start_time = process_start_time(run.pid);
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let updated = transaction.execute(
-            "UPDATE leases
-             SET state = 'active', last_seen_at = ?1
-             WHERE id = ?2 AND state = 'reserved'",
-            params![now, run.lease_id],
-        )?;
+        let updated = match metadata {
+            Some((hostname, route_url, health_url)) => transaction.execute(
+                "UPDATE leases
+                 SET state = 'active', last_seen_at = ?1, hostname = ?3,
+                     route_url = ?4, health_url = ?5
+                 WHERE id = ?2 AND state = 'reserved'",
+                params![now, run.lease_id, hostname, route_url, health_url],
+            )?,
+            None => transaction.execute(
+                "UPDATE leases
+                 SET state = 'active', last_seen_at = ?1
+                 WHERE id = ?2 AND state = 'reserved'",
+                params![now, run.lease_id],
+            )?,
+        };
         if updated == 0 {
             return Err(RegistryError::ReservationNotFound {
                 lease_id: run.lease_id,

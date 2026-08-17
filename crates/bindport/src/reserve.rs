@@ -128,6 +128,7 @@ fn reserve_command(args: &[String]) -> Result<RegistryService, ReserveCommandErr
         };
         let port = allocate_port_with_hints(config.port_range, &skip_ports, allocation_hints)?;
         let metadata = resolve_reservation_metadata(&identity, port, &templates)?;
+        let hostname_changes = metadata.hostname_changes.clone();
 
         if has_blocking_auto_outputs(&config)? {
             let pending_route = pending_route_record(&identity, port, &metadata, "reserved", &cwd);
@@ -158,6 +159,7 @@ fn reserve_command(args: &[String]) -> Result<RegistryService, ReserveCommandErr
         };
 
         if newly_reserved {
+            print_hostname_change_warnings(&identity.service, &hostname_changes);
             let events = RouteEventCollector::single(
                 RouteEventSource::CliReserve,
                 RouteEventKind::RouteStarted,
@@ -212,6 +214,7 @@ fn reserve_all_command(args: &[String]) -> Result<Vec<RegistryService>, ReserveC
         Err(error) => print_registry_warning("failed to prune stale registry leases", &error),
     }
 
+    let mut hostname_changes = BTreeMap::new();
     let services =
         registry.reserve_services(&identities, |identity, occupied_ports, previous_port| {
             let mut skip_ports = config.skip_ports.clone();
@@ -224,6 +227,10 @@ fn reserve_all_command(args: &[String]) -> Result<Vec<RegistryService>, ReserveC
             let service_config = configured_service(&config, identity);
             let templates = resolve_run_templates(&[], &RunOptions::default(), service_config);
             let metadata = resolve_reservation_metadata(identity, port, &templates)?;
+            hostname_changes.insert(
+                identity.identity_key.clone(),
+                (metadata.hostname.clone(), metadata.hostname_changes.clone()),
+            );
 
             Ok::<_, ReserveCommandError>(ReservationCandidate {
                 host: String::from("127.0.0.1"),
@@ -238,6 +245,14 @@ fn reserve_all_command(args: &[String]) -> Result<Vec<RegistryService>, ReserveC
         Err(BatchReservationError::Registry(error)) => return Err(error.into()),
         Err(BatchReservationError::Plan(error)) => return Err(error),
     };
+
+    for (identity, service) in identities.iter().zip(&services) {
+        if let Some((hostname, changes)) = hostname_changes.get(&identity.identity_key)
+            && service.hostname == *hostname
+        {
+            print_hostname_change_warnings(&identity.service, changes);
+        }
+    }
 
     let events =
         RouteEventCollector::single(RouteEventSource::CliReserve, RouteEventKind::RouteStarted);

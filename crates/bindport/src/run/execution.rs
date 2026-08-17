@@ -268,6 +268,7 @@ pub(crate) fn run_wrapped_command_result(
                 .any(|hook| hook.events.contains(&HookEvent::RouteStarted))
         });
     let mut retries = 0;
+    let mut warned_hostnames = BTreeSet::new();
 
     loop {
         let port = if let Some(reserved) = reserved_lease.as_ref() {
@@ -286,6 +287,14 @@ pub(crate) fn run_wrapped_command_result(
         };
         let run_metadata =
             resolve_run_metadata(&identity, port, &run_templates, &sibling_services)?;
+        if !run_metadata.hostname_changes.is_empty()
+            && run_metadata
+                .hostname
+                .as_ref()
+                .is_some_and(|hostname| warned_hostnames.insert(hostname.clone()))
+        {
+            print_hostname_change_warnings(&identity.service, &run_metadata.hostname_changes);
+        }
         let child_command = resolved_child_command(command, &run_metadata)?;
         let child_env = child_environment(&run_metadata.env, &execution_context.local_bin_dirs)?;
         let command_display = child_command.join(" ");
@@ -322,12 +331,17 @@ pub(crate) fn run_wrapped_command_result(
         let mut disable_registry_after_claim = false;
         let started_claim = if let Some(registry) = registry.as_mut() {
             let claim_result = if let Some(reserved) = reserved_lease.as_ref() {
-                registry.promote_reserved_lease(&ReservedRunStart {
-                    lease_id: reserved.lease_id,
-                    pid: std::process::id(),
-                    command: claim_command,
-                    cwd: execution_context.cwd.clone(),
-                })
+                registry.promote_reserved_lease_with_metadata(
+                    &ReservedRunStart {
+                        lease_id: reserved.lease_id,
+                        pid: std::process::id(),
+                        command: claim_command,
+                        cwd: execution_context.cwd.clone(),
+                    },
+                    run_metadata.hostname.as_deref(),
+                    run_metadata.route_url.as_deref(),
+                    run_metadata.health_url.as_deref(),
+                )
             } else {
                 registry.record_run_started(&claim)
             };

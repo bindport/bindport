@@ -20,5 +20,6 @@ pub(crate) struct RunMetadata {
     pub(crate) hostname: Option<String>,
     pub(crate) route_url: Option<String>,
     pub(crate) health_url: Option<String>,
+    pub(crate) hostname_changes: Vec<bindport_core::HostnameLabelChange>,
     pub(crate) env: Vec<(String, String)>,
 }
