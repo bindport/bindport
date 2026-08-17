@@ -23,11 +23,17 @@ pub fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration) -> S
     }
 }
 
-pub fn wait_for_open_url(registry_path: &Path, args: &[&str], timeout: Duration) -> String {
+pub fn wait_for_open_url(
+    registry_path: &Path,
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> String {
     let deadline = Instant::now() + timeout;
 
     loop {
         let output = bindport_with_registry(registry_path)
+            .current_dir(cwd)
             .args(args)
             .output()
             .expect("run bindport open");

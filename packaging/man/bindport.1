@@ -57,12 +57,19 @@ is versioned separately from status.
 Print a full registry debug/backup JSON snapshot. Its schema and SQLite user
 version are separate from status schema 1.0.
 .TP
-.B open [service]
-Print or open the best URL for a service.
+.B open [service] [--project PROJECT] [--registry-wide]
+Print or open the best URL for an active or reserved service. A named service
+uses the current project and worktree scope unless
+.B --registry-wide
+is supplied.
 .TP
 .B port <service> [--project PROJECT]
 Print only the decimal port for one active or reserved service in the current
 project and worktree scope.
+.TP
+.B hostname <service> [--project PROJECT]
+Print only the configured hostname for one active or reserved service in the
+current project and worktree scope.
 .TP
 .B clean [options]
 Remove stopped and stale registry entries. Stale cleanup requires confirmation

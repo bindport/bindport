@@ -5,6 +5,7 @@ pub(crate) struct OpenOptions {
     pub(crate) service: Option<String>,
     pub(crate) project: Option<String>,
     pub(crate) browser: bool,
+    pub(crate) registry_wide: bool,
     pub(crate) help: bool,
 }
 
@@ -16,6 +17,7 @@ pub(crate) fn parse_open_options(args: &[String]) -> Result<OpenOptions, OpenCom
         match args[index].as_str() {
             "--browser" => options.browser = true,
             "--print" => {}
+            "--registry-wide" => options.registry_wide = true,
             "--project" => {
                 index += 1;
                 options.project = Some(

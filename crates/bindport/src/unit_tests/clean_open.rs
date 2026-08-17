@@ -40,9 +40,11 @@ fn open_option_parser_and_selection_handle_agent_url_lookup() {
     assert_eq!(options.project.as_deref(), Some("demo"));
     assert!(!options.browser);
 
-    let options = parse_open_options(&strings(["api", "--browser"])).expect("browser open");
+    let options = parse_open_options(&strings(["api", "--browser", "--registry-wide"]))
+        .expect("browser open");
     assert_eq!(options.service.as_deref(), Some("api"));
     assert!(options.browser);
+    assert!(options.registry_wide);
 
     assert!(parse_open_options(&strings(["web", "api"])).is_err());
     assert!(parse_open_options(&strings(["--project"])).is_err());
@@ -93,6 +95,18 @@ fn open_option_parser_and_selection_handle_agent_url_lookup() {
             },
         )
         .is_err()
+    );
+
+    let reserved_web = status_service("open-reserved", "reserved", None);
+    assert!(
+        select_open_service(
+            &[reserved_web],
+            &OpenOptions {
+                service: Some(String::from("web")),
+                ..OpenOptions::default()
+            },
+        )
+        .is_ok()
     );
 }
 
@@ -153,7 +167,9 @@ fn open_command_result_handles_help_registry_errors_and_success() {
             ("XDG_CONFIG_HOME", Some(config_value.as_str())),
         ],
         || {
-            assert!(run_open_command_result(&strings(["web", "--print"])).is_ok());
+            assert!(
+                run_open_command_result(&strings(["web", "--print", "--registry-wide"])).is_ok()
+            );
             assert_eq!(print_status(), ExitCode::SUCCESS);
             assert_eq!(print_status_json(), ExitCode::SUCCESS);
         },

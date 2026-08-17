@@ -323,6 +323,7 @@ fn render_builtin_caddy_template_writes_caddyfile_snippet() {
         .expect("spawn bindport");
     wait_for_open_url(
         &registry_path,
+        &root,
         &["open", "web", "--print"],
         Duration::from_secs(5),
     );
@@ -368,6 +369,7 @@ fn render_builtin_nginx_template_writes_server_snippet() {
         .expect("spawn bindport");
     wait_for_open_url(
         &registry_path,
+        &root,
         &["open", "web", "--print"],
         Duration::from_secs(5),
     );
@@ -413,6 +415,7 @@ fn render_builtin_haproxy_template_writes_route_config() {
         .expect("spawn bindport");
     wait_for_open_url(
         &registry_path,
+        &root,
         &["open", "web", "--print"],
         Duration::from_secs(5),
     );
@@ -461,6 +464,7 @@ fn render_builtin_json_snapshot_template_writes_route_snapshot() {
         .expect("spawn bindport");
     wait_for_open_url(
         &registry_path,
+        &root,
         &["open", "web", "--print"],
         Duration::from_secs(5),
     );

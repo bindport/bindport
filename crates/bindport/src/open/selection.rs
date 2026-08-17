@@ -6,7 +6,7 @@ pub(crate) fn select_open_service<'a>(
 ) -> Result<&'a StatusService, OpenCommandError> {
     let matches = services
         .iter()
-        .filter(|service| service.state == "active")
+        .filter(|service| matches!(service.state.as_str(), "active" | "reserved"))
         .filter(|service| {
             options
                 .service
@@ -33,31 +33,59 @@ pub(crate) fn select_open_service<'a>(
 pub(crate) fn open_not_found_message(options: &OpenOptions) -> String {
     match (&options.project, &options.service) {
         (Some(project), Some(service)) => {
-            format!("no active BindPort service matched `{project}/{service}`")
+            format!("no active or reserved BindPort service matched `{project}/{service}`")
         }
-        (None, Some(service)) => format!("no active BindPort service matched `{service}`"),
-        (Some(project), None) => format!("no active BindPort service matched project `{project}`"),
-        (None, None) => String::from("no active BindPort services recorded"),
+        (None, Some(service)) => {
+            format!("no active or reserved BindPort service matched `{service}`")
+        }
+        (Some(project), None) => {
+            format!("no active or reserved BindPort service matched project `{project}`")
+        }
+        (None, None) => String::from("no active or reserved BindPort services recorded"),
     }
 }
 
 pub(crate) fn open_ambiguous_message(options: &OpenOptions, services: &[&StatusService]) -> String {
     let matches = services
         .iter()
-        .map(|service| format!("{}/{}", service.project, service.service))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
+        .map(|service| {
+            let scope = service
+                .worktree_path
+                .as_deref()
+                .map(|path| format!("worktree {path}"))
+                .or_else(|| {
+                    service
+                        .identity_key
+                        .as_deref()
+                        .map(|identity| format!("identity {identity}"))
+                })
+                .unwrap_or_else(|| String::from("unscoped"));
+            format!("{}/{} ({scope})", service.project, service.service)
+        })
         .collect::<Vec<_>>()
         .join(", ");
 
     match &options.service {
         Some(service) => {
-            format!(
-                "multiple active services matched `{service}`; pass --project. matches: {matches}"
-            )
+            let project_count = services
+                .iter()
+                .map(|service| service.project.as_str())
+                .collect::<BTreeSet<_>>()
+                .len();
+            if options.project.is_none() && project_count > 1 {
+                format!(
+                    "multiple active or reserved services matched `{service}`; pass --project or omit --registry-wide to select the current worktree. matches: {matches}"
+                )
+            } else {
+                format!(
+                    "multiple active or reserved services matched `{service}`; omit --registry-wide to select the current worktree. matches: {matches}"
+                )
+            }
         }
         None => {
-            format!("multiple active services recorded; pass a service name. matches: {matches}")
+            format!(
+                "multiple active or reserved services recorded; pass a service name to select the current worktree. matches: {matches}"
+            )
         }
     }
 }
@@ -69,4 +97,13 @@ pub(crate) fn best_service_url(service: &StatusService) -> String {
         .filter(|url| !url.trim().is_empty())
         .unwrap_or(&service.url)
         .to_string()
+}
+
+pub(crate) fn best_registry_service_url(service: &RegistryService) -> String {
+    service
+        .route_url
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("http://{}:{}", service.host, service.port))
 }
