@@ -2,6 +2,19 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.8.3 - 2026-08-17
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.8.2...v0.8.3)
+
+### Fixes
+
+- Scope route lookups to the current worktree (06bccce)
+
+
+### Documentation
+
+- Document worktree-scoped route lookup (0a0c5e7)
+
 ## v0.8.2 - 2026-08-17
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.8.1...v0.8.2)
