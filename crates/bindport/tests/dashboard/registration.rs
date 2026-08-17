@@ -5,16 +5,9 @@ use crate::support::*;
 #[test]
 fn dashboard_can_register_itself_as_a_service() {
     let registry_path = temp_registry_path("dashboard-register-service-registry");
-    let port = free_loopback_port();
     let dashboard = start_dashboard_with_args(
         bindport_with_registry(&registry_path),
-        &[
-            "dashboard",
-            "serve",
-            "--port",
-            &port.to_string(),
-            "--register-service",
-        ],
+        &["dashboard", "serve", "--port", "0", "--register-service"],
     );
     let response = http_get(dashboard.port, "/api/status");
 
@@ -30,10 +23,10 @@ fn dashboard_can_register_itself_as_a_service() {
 
     assert_eq!(dashboard_service["state"], "active");
     assert_eq!(dashboard_service["host"], "127.0.0.1");
-    assert_eq!(dashboard_service["port"], u64::from(port));
+    assert_eq!(dashboard_service["port"], u64::from(dashboard.port));
     assert_eq!(
         dashboard_service["route_url"],
-        format!("http://127.0.0.1:{port}")
+        format!("http://127.0.0.1:{}", dashboard.port)
     );
     assert_eq!(dashboard_service["health"], "unknown");
     assert_eq!(dashboard_service["proxy"], Value::Null);
