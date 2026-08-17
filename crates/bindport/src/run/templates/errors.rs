@@ -10,6 +10,10 @@ pub(crate) enum TemplateError {
         placeholder: String,
         template: String,
     },
+    InvalidHostname {
+        hostname: String,
+        source: bindport_core::DnsHostnameError,
+    },
     UnavailableSiblingField {
         service: String,
         field: String,
@@ -38,6 +42,9 @@ impl std::fmt::Display for TemplateError {
                     "unknown or unavailable template placeholder `{placeholder}` in `{template}`"
                 )
             }
+            Self::InvalidHostname { hostname, source } => {
+                write!(f, "invalid resolved hostname `{hostname}`: {source}")
+            }
             Self::UnavailableSiblingField { service, field } => write!(
                 f,
                 "sibling service `{service}` has no configured `{field}` value in the startup registry snapshot"
@@ -53,4 +60,11 @@ impl std::fmt::Display for TemplateError {
     }
 }
 
-impl std::error::Error for TemplateError {}
+impl std::error::Error for TemplateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidHostname { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}

@@ -126,6 +126,71 @@ fn run_metadata_expands_route_and_env_templates() {
     );
 }
 
+#[test]
+fn run_metadata_normalizes_hostname_before_dependent_templates() {
+    let long_label = format!("{}-branch", "feature".repeat(10));
+    let identity = ServiceIdentity {
+        project: String::from("example-app"),
+        service: String::from("web"),
+        git: None,
+        identity_key: String::from("v1:test"),
+    };
+    let templates = RunTemplates {
+        command: Some(vec![String::from("echo"), String::from("{hostname}")]),
+        hostname: Some(format!("{long_label}.example.localhost")),
+        route_url: Some(String::from("https://{hostname}")),
+        health_url: Some(String::from("{route_url}/health")),
+        env: vec![EnvTemplate {
+            name: String::from("ROUTE_HOST"),
+            value: String::from("{hostname}"),
+            configured: true,
+        }],
+    };
+
+    let metadata = resolve_run_metadata(&identity, 29100, &templates, &SiblingServices::new())
+        .expect("metadata");
+    let hostname = metadata.hostname.as_deref().expect("hostname");
+    let label = hostname.split('.').next().expect("first label");
+
+    assert_eq!(label.len(), 63);
+    assert_eq!(metadata.hostname_changes.len(), 1);
+    assert_eq!(metadata.hostname_changes[0].original, long_label);
+    assert_eq!(metadata.hostname_changes[0].replacement, label);
+    assert_eq!(metadata.route_url, Some(format!("https://{hostname}")));
+    assert_eq!(
+        metadata.health_url,
+        Some(format!("https://{hostname}/health"))
+    );
+    assert_eq!(
+        metadata.env,
+        vec![(String::from("ROUTE_HOST"), hostname.to_string())]
+    );
+    assert_eq!(
+        metadata.command,
+        Some(vec![String::from("echo"), hostname.to_string()])
+    );
+}
+
+#[test]
+fn run_metadata_rejects_invalid_resolved_hostnames() {
+    let identity = ServiceIdentity {
+        project: String::from("example-app"),
+        service: String::from("web"),
+        git: None,
+        identity_key: String::from("v1:test"),
+    };
+    let templates = RunTemplates {
+        hostname: Some(String::from("invalid_name.localhost")),
+        ..RunTemplates::default()
+    };
+
+    let error = resolve_run_metadata(&identity, 29100, &templates, &SiblingServices::new())
+        .expect_err("invalid hostname");
+
+    assert!(matches!(error, TemplateError::InvalidHostname { .. }));
+    assert!(error.to_string().contains("invalid character `_`"));
+}
+
 #[cfg(unix)]
 #[test]
 fn exit_status_helpers_preserve_process_codes_and_retry_conditions() {

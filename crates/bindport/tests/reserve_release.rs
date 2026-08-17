@@ -74,6 +74,44 @@ fn reserve_records_reserved_service_and_reuses_identity_port() {
     );
 }
 
+#[test]
+fn reserve_normalizes_hostname_before_recording_route_metadata() {
+    let registry_path = temp_registry_path("reserve-hostname");
+    let root = temp_test_dir("reserve-hostname-root");
+    let port = free_loopback_port();
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"reserve-hostname\"\nservice = \"web\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n"
+        ),
+    )
+    .expect("write project config");
+    let long_label = format!("{}-branch", "feature".repeat(10));
+    let raw_hostname = format!("{long_label}.localhost");
+    let expected = bindport_core::normalize_dns_hostname(&raw_hostname)
+        .expect("normalized hostname")
+        .value;
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["reserve", "--hostname", &raw_hostname])
+        .output()
+        .expect("reserve port");
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("DNS 63-byte label limit"));
+    let status = bindport_with_registry(&registry_path)
+        .args(["status", "--json"])
+        .output()
+        .expect("status");
+    let status = serde_json::from_slice::<Value>(&status.stdout).expect("status json");
+    assert_eq!(status["services"][0]["hostname"], expected);
+    assert_eq!(
+        status["services"][0]["route_url"],
+        format!("http://{expected}")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn reserve_reuses_an_active_scoped_service_without_creating_ambiguity() {

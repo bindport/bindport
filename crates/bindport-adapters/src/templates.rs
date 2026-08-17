@@ -1,5 +1,4 @@
 use super::*;
-use crate::hash::sha256_hex;
 
 pub(crate) const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
 pub(crate) const BUILT_IN_CADDY: &str = include_str!("../templates/bindport-caddy.caddy.j2");
@@ -12,7 +11,6 @@ pub const BUILT_IN_HAPROXY_NAME: &str = "bindport-haproxy";
 pub const BUILT_IN_JSON_SNAPSHOT_NAME: &str = "bindport-json-snapshot";
 pub(crate) const TEMPLATE_FUEL: u64 = 200_000;
 pub(crate) const MAX_RENDERED_TEMPLATE_BYTES: usize = 1024 * 1024;
-const TRUNCATE_WITH_HASH_SUFFIX_LENGTH: usize = 9;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TemplateSource {
     Project,
@@ -136,22 +134,9 @@ pub(crate) fn truncate_with_hash(
     value: String,
     max_length: usize,
 ) -> Result<String, minijinja::Error> {
-    if max_length <= TRUNCATE_WITH_HASH_SUFFIX_LENGTH {
-        return Err(minijinja::Error::new(
-            minijinja::ErrorKind::InvalidOperation,
-            "truncate_with_hash max_length must be at least 10",
-        ));
-    }
-
-    if value.chars().count() <= max_length {
-        return Ok(value);
-    }
-
-    let prefix_length = max_length - TRUNCATE_WITH_HASH_SUFFIX_LENGTH;
-    let prefix = value.chars().take(prefix_length).collect::<String>();
-    let hash = sha256_hex(value.as_bytes());
-
-    Ok(format!("{prefix}-{}", &hash[..8]))
+    bindport_core::truncate_with_hash(&value, max_length).map_err(|error| {
+        minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, error.to_string())
+    })
 }
 
 pub(crate) fn validate_template_name(name: &str) -> Result<(), TemplateError> {

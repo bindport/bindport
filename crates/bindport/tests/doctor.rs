@@ -208,6 +208,48 @@ fn doctor_outputs_reports_render_plan_errors() {
     assert!(!root.join(".bindport/generated/traefik/same.yml").exists());
 }
 #[test]
+fn doctor_reports_effective_hostname_normalization_and_errors() {
+    let registry_path = temp_registry_path("doctor-hostname-registry");
+    let root = temp_test_dir("doctor-hostname-root");
+    let long_label = format!("{}-branch", "feature".repeat(10));
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"{long_label}\"\nservice = \"web\"\n[[services]]\nname = \"web\"\nhostname = \"{{project}}.localhost\"\n"
+        ),
+    )
+    .expect("write long hostname config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor"])
+        .output()
+        .expect("run hostname doctor");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.contains("effective hostname:"));
+    assert!(stdout.contains("hostname label shortened:"));
+    assert!(stdout.contains("DNS 63-byte label limit"));
+
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"doctor-hostname\"\nservice = \"web\"\n[[services]]\nname = \"web\"\nhostname = \"bad_name.localhost\"\n",
+    )
+    .expect("write invalid hostname config");
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["doctor"])
+        .output()
+        .expect("run invalid hostname doctor");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.contains("effective hostname: invalid for service `web`"));
+    assert!(stdout.contains("invalid character `_`"));
+}
+
+#[test]
 fn doctor_reports_unknown_config_keys() {
     let registry_path = temp_registry_path("doctor-unknown-config-registry");
     let root = temp_test_dir("doctor-unknown-config-root");

@@ -26,6 +26,50 @@ fn config_validate_reports_ok_for_valid_config() {
 }
 
 #[test]
+fn config_validate_reports_effective_hostname_corrections_and_errors() {
+    let registry_path = temp_registry_path("config-validate-hostname-registry");
+    let root = temp_test_dir("config-validate-hostname-root");
+    let long_label = format!("{}-branch", "feature".repeat(10));
+    fs::write(
+        root.join(".bindport.toml"),
+        format!(
+            "project = \"{long_label}\"\n[[services]]\nname = \"web\"\nhostname = \"{{project}}.localhost\"\n"
+        ),
+    )
+    .expect("write long hostname config");
+
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["config", "validate"])
+        .output()
+        .expect("validate long hostname");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.contains("warning: services[0].hostname: service `web` resolved label"));
+    assert!(stdout.contains("DNS 63-byte label limit"));
+    assert!(stdout.contains("validation: ok"));
+
+    fs::write(
+        root.join(".bindport.toml"),
+        "project = \"hostname-project\"\n[[services]]\nname = \"web\"\nhostname = \"bad_name.localhost\"\n",
+    )
+    .expect("write invalid hostname config");
+    let output = bindport_with_registry(&registry_path)
+        .current_dir(&root)
+        .args(["config", "validate"])
+        .output()
+        .expect("validate invalid hostname");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(
+        stdout.contains("error: services[0].hostname: service `web` invalid resolved hostname")
+    );
+    assert!(stdout.contains("invalid character `_`"));
+}
+
+#[test]
 fn config_validate_reports_port_range_minimum_in_every_format() {
     for (extension, contents) in [
         (

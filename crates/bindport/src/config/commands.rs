@@ -47,21 +47,101 @@ pub(crate) fn print_config_validate() -> ExitCode {
         .as_ref()
         .map(|loaded| loaded.config.validate())
         .unwrap_or_default();
+    let (hostname_warnings, hostname_errors) = configured_hostname_diagnostics(&cwd, &config);
 
-    if issues.is_empty() {
-        println!("validation: ok");
+    let error_count = issues.len() + hostname_errors.len();
+    if error_count == 0 {
+        if hostname_warnings.is_empty() {
+            println!("validation: ok");
+        } else {
+            println!(
+                "validation: ok with {} {}",
+                hostname_warnings.len(),
+                plural(hostname_warnings.len(), "warning")
+            );
+        }
+        for warning in hostname_warnings {
+            println!("  warning: {warning}");
+        }
         ExitCode::SUCCESS
     } else {
-        println!(
-            "validation: {} {}",
-            issues.len(),
-            plural(issues.len(), "error")
-        );
+        println!("validation: {error_count} {}", plural(error_count, "error"));
         for issue in issues {
             println!("  error: {issue}");
         }
+        for error in hostname_errors {
+            println!("  error: {error}");
+        }
+        for warning in hostname_warnings {
+            println!("  warning: {warning}");
+        }
         ExitCode::FAILURE
     }
+}
+
+fn configured_hostname_diagnostics(
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> (Vec<String>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+    let Some(services) = config
+        .loaded
+        .as_ref()
+        .and_then(|loaded| loaded.config.services.as_deref())
+    else {
+        return (warnings, errors);
+    };
+
+    for (index, service) in services.iter().enumerate() {
+        let Some(name) = service
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let Some(hostname) = service.hostname.as_ref() else {
+            continue;
+        };
+        let config_project = config
+            .loaded
+            .as_ref()
+            .and_then(|loaded| loaded.config.project.as_deref());
+        let identity = resolve_identity_in_scope(
+            IdentitySources {
+                cwd,
+                command: &[],
+                cli_project: None,
+                cli_service: Some(name),
+                env_project: None,
+                env_service: None,
+                config_project,
+                config_service: None,
+            },
+            project_identity_scope(cwd, config),
+        );
+        let templates = RunTemplates {
+            hostname: Some(hostname.clone()),
+            ..RunTemplates::default()
+        };
+        let field = format!("services[{index}].hostname");
+
+        match resolve_run_route_metadata(&identity, config.port_range.start, &templates) {
+            Ok(metadata) => {
+                for change in metadata.hostname_changes {
+                    warnings.push(format!(
+                        "{field}: service `{name}` resolved label `{}` is shortened to `{}` to satisfy the DNS 63-byte label limit",
+                        change.original, change.replacement
+                    ));
+                }
+            }
+            Err(error) => errors.push(format!("{field}: service `{name}` {error}")),
+        }
+    }
+
+    (warnings, errors)
 }
 
 pub(crate) fn print_config_explain() -> ExitCode {

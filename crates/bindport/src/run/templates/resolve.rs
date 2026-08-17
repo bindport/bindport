@@ -171,11 +171,24 @@ pub(crate) fn resolve_run_route_metadata(
     }
 
     let base_values = TemplateValues::new(identity, port, None, None, None);
-    let hostname = templates
+    let expanded_hostname = templates
         .hostname
         .as_deref()
         .map(|template| expand_template(template, &base_values))
         .transpose()?;
+    let (hostname, hostname_changes) = match expanded_hostname {
+        Some(hostname) => {
+            let normalized =
+                bindport_core::normalize_dns_hostname(&hostname).map_err(|source| {
+                    TemplateError::InvalidHostname {
+                        hostname: hostname.clone(),
+                        source,
+                    }
+                })?;
+            (Some(normalized.value), normalized.changes)
+        }
+        None => (None, Vec::new()),
+    };
     let route_values = TemplateValues::new(identity, port, hostname.as_deref(), None, None);
     let route_url = templates
         .route_url
@@ -205,8 +218,21 @@ pub(crate) fn resolve_run_route_metadata(
         hostname,
         route_url,
         health_url,
+        hostname_changes,
         env: Vec::new(),
     })
+}
+
+pub(crate) fn print_hostname_change_warnings(
+    service: &str,
+    changes: &[bindport_core::HostnameLabelChange],
+) {
+    for change in changes {
+        eprintln!(
+            "bindport: warning: service `{service}` hostname label `{}` was shortened to `{}` to satisfy the DNS 63-byte label limit",
+            change.original, change.replacement
+        );
+    }
 }
 
 fn reject_sibling_route_metadata(
