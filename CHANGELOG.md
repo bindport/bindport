@@ -2,6 +2,31 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.8.1 - 2026-08-17
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.8.0...v0.8.1)
+
+### Features
+
+- Add hash-preserving template truncation (a58d004)
+
+
+### Documentation
+
+- Explain hash-preserving identifier truncation (403f49f)
+
+
+### CI
+
+- Bump jdx/mise-action from 4.2.1 to 4.2.3 in the github-actions group (a32b4b9)
+- Bump jdx/mise-action from 4.2.3 to 4.2.4 in the github-actions group (388ae81)
+
+
+### Dependencies
+
+- Bump toml in the cargo-dependencies group (bbaf3d7)
+- Update project dependencies and toolchains (7e7eca2)
+
 ## v0.8.0 - 2026-07-23
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.7.0...v0.8.0)
