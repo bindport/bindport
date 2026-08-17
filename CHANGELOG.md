@@ -2,6 +2,24 @@
 
 All notable changes are generated from git tags and Conventional Commit subjects.
 
+## v0.8.2 - 2026-08-17
+
+[Compare changes](https://github.com/bindport/bindport/compare/v0.8.1...v0.8.2)
+
+### Fixes
+
+- Enforce DNS hostname label limits (de28171)
+
+
+### Documentation
+
+- Explain automatic hostname normalization (733be89)
+
+
+### Tests
+
+- Avoid dashboard ephemeral port races (79c7a3d)
+
 ## v0.8.1 - 2026-08-17
 
 [Compare changes](https://github.com/bindport/bindport/compare/v0.8.0...v0.8.1)
