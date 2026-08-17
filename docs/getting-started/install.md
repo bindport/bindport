@@ -53,7 +53,7 @@ launcher.
 
 ## Cargo
 
-Build the published source package on a supported host with Rust 1.96.0 or
+Build the published source package on a supported host with Rust 1.97.1 or
 newer:
 
 ```sh

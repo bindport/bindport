@@ -19,8 +19,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
 
       - name: Install cargo-audit
         run: |

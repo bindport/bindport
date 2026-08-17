@@ -4,8 +4,8 @@ lockfile = true
 [tools]
 # `default` rustup profile is NOT used; mise installs minimal. rustfmt and
 # clippy are needed by local checks and CI.
-rust = { version = "1.96.0", components = "rustfmt,clippy" }
-node = "26.5.0"
+rust = { version = "1.97.1", components = "rustfmt,clippy" }
+node = "26.7.0"
 "cargo:cargo-audit" = "0.22.2"
 "cargo:cargo-edit" = "0.13.13"
 "aqua:taiki-e/cargo-llvm-cov" = "0.8.7"
@@ -13,7 +13,7 @@ node = "26.5.0"
 "github:rust-lang/mdBook" = "0.5.4"
 actionlint = "1.7.12"
 gitleaks = "8.30.1"
-trivy = "0.72.0"
+trivy = "0.74.0"
 watchexec = "2.5.1"
 # actionlint shells out to shellcheck for `run:` blocks. Pin it so local
 # workflow linting matches CI.
