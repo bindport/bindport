@@ -70,6 +70,12 @@ never `--browser`, in non-interactive automation. Preview cleanup with
 - Run `bindport render --dry-run` before writing output files.
 - Run `bindport render --diff` before replacing DB-owned output files when the
   content change matters.
+- In output templates, use `value | truncate_with_hash(max_length)` for
+  length-limited external identifiers when prefix truncation could collide.
+  Use `route.branch_label | default(route.slug, true)` when the branch label can
+  be null. Reserve room for appended suffixes: use 58 when a Kubernetes name
+  later adds `-http` and must remain within 63 characters. The filter limits
+  length but does not sanitize the input.
 - Treat hooks as disabled until trusted by the user through the CLI.
 - Do not run `bindport hooks trust`, `bindport hooks deny`, or hook commands
   without explicit user approval.

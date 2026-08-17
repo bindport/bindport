@@ -165,9 +165,14 @@ values and hook context payloads.
 Custom templates are the extension point for file-based integrations. They can
 feed TCP forwarder config, Kubernetes or IngressRoute manifests, container
 helper input, env files, or JSON bridge files when another local tool owns the
-actual watch, reload, apply, or forwarding behavior. BindPort should not be
-treated as the TCP proxy, Kubernetes reconciler, Docker mutator, certificate
-manager, DNS manager, or secret transport.
+actual watch, reload, apply, or forwarding behavior. For length-limited
+external identifiers, `value | truncate_with_hash(max_length)` leaves values
+within the limit unchanged and shortens longer values with a deterministic
+eight-character hexadecimal hash suffix. Reserve room for suffixes, such as
+using 58 before appending `-http` under a 63-character Kubernetes limit. The
+filter limits length but does not sanitize input. BindPort should not be treated
+as the TCP proxy, Kubernetes reconciler, Docker mutator, certificate manager,
+DNS manager, or secret transport.
 
 ## Hooks
 
