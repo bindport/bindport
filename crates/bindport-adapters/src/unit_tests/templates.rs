@@ -225,6 +225,95 @@ fn render_template_is_strict_and_unescaped() {
 }
 
 #[test]
+fn truncate_with_hash_preserves_values_within_limit() {
+    let template = "{{ value | truncate_with_hash(12) }}";
+    let rendered = render_template(
+        template,
+        minijinja::context! {
+            value => "short-name",
+        },
+    )
+    .expect("short value renders");
+    let exact = render_template(
+        template,
+        minijinja::context! {
+            value => "exact-length",
+        },
+    )
+    .expect("exact-length value renders");
+
+    assert_eq!(rendered, "short-name");
+    assert_eq!(exact, "exact-length");
+}
+
+#[test]
+fn truncate_with_hash_limits_long_values_deterministically() {
+    let template = "{{ value | truncate_with_hash(20) }}";
+    let value = "feature-this-is-a-very-long-branch-name";
+    let rendered = render_template(template, minijinja::context! { value }).expect("first render");
+    let repeated =
+        render_template(template, minijinja::context! { value }).expect("repeated render");
+    let different = render_template(
+        template,
+        minijinja::context! {
+            value => "feature-this-is-a-very-long-branch-name-two",
+        },
+    )
+    .expect("different render");
+
+    assert_eq!(rendered, "feature-thi-c89948b5");
+    assert_eq!(rendered.chars().count(), 20);
+    assert_eq!(rendered, repeated);
+    assert_ne!(rendered, different);
+
+    let (prefix, hash) = rendered.rsplit_once('-').expect("hash suffix");
+    assert!(value.starts_with(prefix));
+    assert_eq!(hash.len(), 8);
+    assert!(hash.chars().all(|character| character.is_ascii_hexdigit()));
+}
+
+#[test]
+fn truncate_with_hash_counts_unicode_characters() {
+    let rendered = render_template(
+        "{{ value | truncate_with_hash(10) }}",
+        minijinja::context! {
+            value => "ééééééééééé",
+        },
+    )
+    .expect("template renders");
+
+    assert_eq!(rendered.chars().count(), 10);
+    assert!(rendered.starts_with("é-"));
+}
+
+#[test]
+fn truncate_with_hash_can_reserve_room_for_a_kubernetes_suffix() {
+    let rendered = render_template(
+        "{{ value | truncate_with_hash(58) }}-http",
+        minijinja::context! {
+            value => "bp-marketing-feature-this-is-a-very-long-branch-name-that-exceeds-the-limit",
+        },
+    )
+    .expect("template renders");
+
+    assert_eq!(rendered.chars().count(), 63);
+    assert!(rendered.ends_with("-http"));
+}
+
+#[test]
+fn truncate_with_hash_rejects_limits_too_short_for_its_suffix() {
+    let error = render_template(
+        "{{ value | truncate_with_hash(9) }}",
+        minijinja::context! {
+            value => "short",
+        },
+    )
+    .expect_err("limit is rejected");
+
+    assert!(error.to_string().contains("at least 10"));
+}
+
+#[test]
 fn built_in_traefik_template_renders_active_route() {
     let template = TemplateResolver::new(None, None)
         .resolve("bindport-traefik", None)
