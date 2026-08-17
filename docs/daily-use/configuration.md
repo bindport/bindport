@@ -288,7 +288,16 @@ wait for, or health-check a dependency graph.
 
 Sibling references do not apply to hostname, route URL, health URL, output,
 route metadata, hook, or CLI `--env` templates. This is a narrow placeholder
-extension, not an expression language.
+extension, not an expression language. MiniJinja output filters such as
+`truncate_with_hash` are not valid inside these single-brace placeholders.
+
+After expanding `hostname`, BindPort validates it before deriving `route_url`
+or `health_url`. Otherwise-valid ASCII DNS labels over 63 bytes are shortened
+with a deterministic `-<8-hex-character-hash>` suffix. Short labels remain
+unchanged. Empty labels, non-ASCII labels, invalid DNS characters, labels that
+start or end with `-`, and full hostnames over 253 bytes fail before reservation
+or child spawn. Use `{hostname}` in a configured `route_url` when both values
+must stay aligned.
 
 Use `{{` and `}}` when a template value needs literal braces.
 `bindport run --hostname TEMPLATE`, `--route-url TEMPLATE`, and

@@ -317,7 +317,13 @@ exist before startup. References use one active/reserved registry snapshot in
 the current project and worktree; outside Git, the discovered project config
 root supplies the shared scope. Assignment does not imply process readiness.
 Use `{{` and `}}` when a template value needs literal braces, for example a
-JSON-valued environment variable.
+JSON-valued environment variable. Run templates are intentionally not an
+expression language, so MiniJinja output filters are not available inside
+single-brace placeholders. BindPort validates the expanded hostname before
+using it elsewhere. Otherwise-valid ASCII DNS labels over 63 bytes receive a
+deterministic hash-preserving suffix, while malformed hostnames fail before
+reservation or child spawn. Derive custom route URLs from `{hostname}` to keep
+the registered URL and proxy hostname aligned.
 `bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, `--route-url TEMPLATE`,
 and `--health-url TEMPLATE` override service config for a single run.
 `BINDPORT_HOSTNAME`, `BINDPORT_ROUTE_URL`, and

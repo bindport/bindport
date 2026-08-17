@@ -485,8 +485,14 @@ render.
 
 ### Hash-preserving truncation
 
-Use `truncate_with_hash(max_length)` when an external format limits identifier
-length and simple prefix truncation could create collisions. Values already
+Use the MiniJinja output filter `truncate_with_hash(max_length)` when an
+external format limits identifier length and simple prefix truncation could
+create collisions. This filter is available to output templates; it is not
+syntax for the separate single-brace placeholders used by service hostname,
+env, command, args, route URL, or health URL templates. BindPort enforces DNS
+label limits on the final expanded service hostname itself.
+
+Values already
 within the limit are unchanged. Longer values become a prefix followed by `-`
 and the first eight lowercase hexadecimal characters of the value's SHA-256
 digest. The result contains at most `max_length` characters. The minimum

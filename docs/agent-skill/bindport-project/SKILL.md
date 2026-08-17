@@ -54,6 +54,11 @@ never `--browser`, in non-interactive automation. Preview cleanup with
   CLI flag, for example `args = ["--port", "{port}"]`.
 - Use service `env` templates for app-level values such as `PORT`,
   `HOSTNAME`, public route URLs, or framework-specific URL variables.
+- Keep route URL templates based on `{hostname}` when the proxy hostname and
+  user-facing URL must agree. BindPort automatically hash-shortens each
+  otherwise-valid expanded DNS label over 63 bytes and rejects malformed
+  hostnames before reservation or child spawn. Do not try to use MiniJinja
+  filters inside single-brace run placeholders; they are separate engines.
 - Configured `env`, `command`, and `args` can reference an active or reserved
   sibling in the same project and exact worktree as
   `{services.<name>.<field>}`, where `field` is `port`, `host`, `url`,

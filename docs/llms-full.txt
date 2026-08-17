@@ -69,7 +69,15 @@ Service config supports `name`, `path`, `command`, `args`, `env`, `hostname`,
 `route_url`, and `health_url`. Own-service template placeholders include
 `{port}`, `{host}`, `{url}`, `{project}`, `{service}`, `{hostname}`,
 `{route_url}`, `{health_url}`, `{branch}`, `{branch_label}`, `{git_branch}`,
-`{worktree}`, `{worktree_label}`, and `{worktree_hash}`.
+`{worktree}`, `{worktree_label}`, and `{worktree_hash}`. This single-brace
+placeholder engine is not MiniJinja and does not accept output filters.
+
+BindPort validates `hostname` after placeholder expansion and before deriving
+route and health URLs. Each otherwise-valid ASCII DNS label over 63 bytes is
+shortened with the same deterministic eight-character SHA-256 suffix used by
+the output filter. Short labels are unchanged. Malformed labels and full
+hostnames over 253 bytes fail before reservation or child spawn. A custom
+`route_url` should use `{hostname}` when route and proxy hostnames must agree.
 
 Configured service `env`, `command`, and `args` additionally support exactly
 `{services.<name>.<field>}` for `port`, `host`, `url`, `hostname`, `route_url`,
@@ -166,8 +174,9 @@ Custom templates are the extension point for file-based integrations. They can
 feed TCP forwarder config, Kubernetes or IngressRoute manifests, container
 helper input, env files, or JSON bridge files when another local tool owns the
 actual watch, reload, apply, or forwarding behavior. For length-limited
-external identifiers, `value | truncate_with_hash(max_length)` leaves values
-within the limit unchanged and shortens longer values with a deterministic
+external identifiers, the MiniJinja output filter
+`value | truncate_with_hash(max_length)` leaves values within the limit
+unchanged and shortens longer values with a deterministic
 eight-character hexadecimal hash suffix. Reserve room for suffixes, such as
 using 58 before appending `-http` under a 63-character Kubernetes limit. The
 filter limits length but does not sanitize input. BindPort should not be treated
