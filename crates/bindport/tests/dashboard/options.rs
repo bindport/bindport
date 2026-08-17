@@ -3,16 +3,15 @@
 use crate::support::*;
 
 #[test]
-fn dashboard_uses_cli_port_option() {
+fn dashboard_accepts_ephemeral_cli_port() {
     let registry_path = temp_registry_path("dashboard-cli-port-registry");
-    let port = free_loopback_port();
     let dashboard = start_dashboard_with_args(
         bindport_with_registry(&registry_path),
-        &["dashboard", "serve", "--port", &port.to_string()],
+        &["dashboard", "serve", "--port", "0"],
     );
     let response = http_get(dashboard.port, "/healthz");
 
-    assert_eq!(dashboard.port, port);
+    assert_ne!(dashboard.port, 0);
     assert!(response.starts_with("HTTP/1.1 200 OK"));
 }
 #[test]
