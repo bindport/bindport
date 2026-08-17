@@ -18,10 +18,10 @@ instruction file:
 - Use `bindport reserve --all` to prepare every configured service without
   starting children, including before a configured `env`, `command`, or `args`
   value reads `{services.<name>.<field>}`.
-- Use `bindport port <service>` for an exact current-worktree active or reserved
-  port. Use `bindport status --json` and match identity/worktree fields for an
-  exact URL; use `bindport open <service> --print` only when registry-wide
-  service selection is unambiguous.
+- Use `bindport port <service>`, `bindport hostname <service>`, and `bindport
+  open <service> --print` for exact current-worktree active or reserved values.
+  Use `bindport status --json` for detailed registry state and `bindport open
+  <service> --registry-wide` only for explicit cross-worktree lookup.
 - Do not edit `.bindport.local.*`, `bindport.local.*`, generated output files,
   or `.env.local` unless explicitly asked.
 - Do not run `bindport hooks trust`, `bindport hooks deny`, or hook commands
@@ -82,6 +82,7 @@ Recommended service flow:
 ```sh
 bindport reserve --all
 bindport port web
+bindport hostname web
 bindport run web
 bindport open web --print
 ```
@@ -95,10 +96,10 @@ supplies the equivalent shared scope. Configured sibling references resolve
 active or reserved services once at child startup in that exact scope;
 they do not imply readiness or create an ordered dependency graph. `port` prints
 only a decimal port and newline for one active or reserved service in that
-scope; missing, stopped, stale, and ambiguous matches fail. `open --project`
-filters the registry-wide active set by project but not worktree; use status
-identity fields when multiple worktrees can be active. Always use `--print`, not
-`--browser`, in non-interactive runs.
+scope; missing, stopped, stale, and ambiguous matches fail. `hostname` and a
+named `open` lookup use the same exact scope. `--registry-wide` opts `open` into
+cross-worktree selection. Always use `--print`, not `--browser`, in
+non-interactive runs.
 
 Recommended cleanup flow:
 

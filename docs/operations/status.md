@@ -217,9 +217,9 @@ Review and redact it before sharing in a bug report.
 
 ## URL Lookup
 
-`bindport open [service]` resolves the best active service URL from the
-registry-wide snapshot. It prints `route_url` when configured, otherwise the
-direct loopback `url`.
+`bindport open <service>` resolves the best active or reserved service URL in
+the current project and worktree. It prints `route_url` when configured,
+otherwise the direct loopback `url`.
 
 Examples:
 
@@ -230,11 +230,15 @@ bindport open web --print
 bindport open web --browser
 ```
 
-Use `--project PROJECT` when multiple active services share the same service
-name. Project filtering does not select the current worktree, so duplicate
-active worktrees can remain ambiguous. For exact-worktree automation, filter
-`status --json` by identity/worktree fields. `--browser` only launches HTTP or
-HTTPS URLs; use `--print` in headless or machine workflows.
+`--project PROJECT` overrides the project while retaining current-worktree
+identity. Use `--registry-wide` for explicit cross-worktree or cross-project
+lookup. Registry-wide selection can remain ambiguous, in which case BindPort
+lists each matching worktree. `--browser` only launches HTTP or HTTPS URLs; use
+`--print` in headless or machine workflows.
+
+`bindport hostname <service>` selects the same exact active or reserved service
+and prints only its effective hostname. It fails when hostname metadata is not
+configured.
 
 ## Reservations
 
@@ -322,6 +326,7 @@ bindport registry export
 bindport open web
 bindport open web --project example
 bindport open web --browser
+bindport hostname web
 bindport clean --dry-run
 bindport reserve api
 bindport release api

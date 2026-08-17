@@ -27,9 +27,9 @@ state:
 - Existing proxies can watch generated files instead of requiring BindPort to
   become the proxy.
 - Dashboards, scripts, and AI agents can ask `bindport status --json`,
-  `bindport list --json`, or `bindport open <service> --print` instead of
-  guessing where a service is. Use `bindport registry export` only when a debug
-  or backup workflow needs raw registry rows.
+  `bindport list --json`, `bindport open <service> --print`, or `bindport
+  hostname <service>` instead of guessing where a service is. Use `bindport
+  registry export` only when a debug or backup workflow needs raw registry rows.
 - Hook execution is explicit and locally trusted, so checked-in config cannot
   silently run commands on a new machine.
 

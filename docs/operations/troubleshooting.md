@@ -95,9 +95,11 @@ then occupied, but it cannot prevent every external race.
 bindport open web --print
 ```
 
-Selection is registry-wide; `--project` does not select a worktree. If several
-worktrees can be active, filter `status --json` by identity/worktree fields for
-an exact URL. If the printed URL is wrong, check:
+A named service is selected in the current project and worktree, including
+reserved services. Use `bindport hostname web` when a script needs only the
+effective hostname. `--registry-wide` opts into cross-worktree and cross-project
+selection and fails with a detailed match list when ambiguity remains. If the
+printed URL is wrong, check:
 
 - service `hostname`, `route_url`, and `health_url`.
 - CLI overrides such as `--hostname` or `--route-url`.
