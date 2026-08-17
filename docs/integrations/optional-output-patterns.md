@@ -345,6 +345,23 @@ Avoid a template that embeds cluster-specific names, namespaces, or gateway
 addresses in committed config. Put those values in `.bindport.local.toml` or in
 the external tool's local configuration.
 
+Kubernetes names and label values can have 63-character limits. Use the
+hash-preserving template filter instead of dropping the end of a long branch
+name, because simple prefix truncation can make distinct routes collide. Reserve
+space for suffixes before applying the filter:
+
+```jinja2
+{%- set raw_label = route.branch_label | default(route.slug, true) -%}
+{%- set label = raw_label | truncate_with_hash(63) -%}
+{%- set raw_name = "bp-" ~ route.service ~ "-" ~ raw_label -%}
+{%- set name = raw_name | truncate_with_hash(58) -%}
+```
+
+Here `name` is limited to 58 characters so `{{ name }}-http` remains within 63.
+Also filter independently constrained values such as `route.slug` when using
+them as Kubernetes label values. The filter does not sanitize inputs, so build
+names from already normalized values.
+
 ## Kubernetes Checklist
 
 Before committing Kubernetes output config, confirm:

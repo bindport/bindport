@@ -1,4 +1,5 @@
 use super::*;
+use crate::hash::sha256_hex;
 
 pub(crate) const BUILT_IN_TRAEFIK: &str = include_str!("../templates/bindport-traefik.yml.j2");
 pub(crate) const BUILT_IN_CADDY: &str = include_str!("../templates/bindport-caddy.caddy.j2");
@@ -11,6 +12,7 @@ pub const BUILT_IN_HAPROXY_NAME: &str = "bindport-haproxy";
 pub const BUILT_IN_JSON_SNAPSHOT_NAME: &str = "bindport-json-snapshot";
 pub(crate) const TEMPLATE_FUEL: u64 = 200_000;
 pub(crate) const MAX_RENDERED_TEMPLATE_BYTES: usize = 1024 * 1024;
+const TRUNCATE_WITH_HASH_SUFFIX_LENGTH: usize = 9;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TemplateSource {
     Project,
@@ -113,6 +115,7 @@ pub fn render_template<S: serde::Serialize>(
     environment.set_auto_escape_callback(|_| AutoEscape::None);
     environment.set_fuel(Some(TEMPLATE_FUEL));
     environment.add_filter("dotenv", dotenv_escape);
+    environment.add_filter("truncate_with_hash", truncate_with_hash);
 
     let rendered = environment.render_str(template, context)?;
     if rendered.len() > MAX_RENDERED_TEMPLATE_BYTES {
@@ -128,6 +131,29 @@ pub fn render_template<S: serde::Serialize>(
 pub(crate) fn dotenv_escape(value: String) -> String {
     serde_json::to_string(&value).unwrap_or_else(|_| String::from("\"\""))
 }
+
+pub(crate) fn truncate_with_hash(
+    value: String,
+    max_length: usize,
+) -> Result<String, minijinja::Error> {
+    if max_length <= TRUNCATE_WITH_HASH_SUFFIX_LENGTH {
+        return Err(minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            "truncate_with_hash max_length must be at least 10",
+        ));
+    }
+
+    if value.chars().count() <= max_length {
+        return Ok(value);
+    }
+
+    let prefix_length = max_length - TRUNCATE_WITH_HASH_SUFFIX_LENGTH;
+    let prefix = value.chars().take(prefix_length).collect::<String>();
+    let hash = sha256_hex(value.as_bytes());
+
+    Ok(format!("{prefix}-{}", &hash[..8]))
+}
+
 pub(crate) fn validate_template_name(name: &str) -> Result<(), TemplateError> {
     let invalid = name.is_empty()
         || name.trim() != name

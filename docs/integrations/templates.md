@@ -483,6 +483,28 @@ Rendered output is limited to 1 MiB per file. Templates also run with a bounded
 MiniJinja fuel budget so accidental runaway templates fail instead of hanging a
 render.
 
+### Hash-preserving truncation
+
+Use `truncate_with_hash(max_length)` when an external format limits identifier
+length and simple prefix truncation could create collisions. Values already
+within the limit are unchanged. Longer values become a prefix followed by `-`
+and the first eight lowercase hexadecimal characters of the value's SHA-256
+digest. The result contains at most `max_length` characters. The minimum
+accepted limit is 10.
+
+```jinja2
+{%- set raw_label = route.branch_label | default(route.slug, true) -%}
+{%- set label = raw_label | truncate_with_hash(63) -%}
+{%- set raw_name = "bp-" ~ route.service ~ "-" ~ raw_label -%}
+{%- set name = raw_name | truncate_with_hash(58) -%}
+```
+
+The example limits `name` to 58 characters so an appended `-http` suffix still
+fits a 63-character Kubernetes limit. Apply the filter to each independently
+limited value, including Kubernetes label values such as `route.slug`.
+`truncate_with_hash` limits length only; it does not lowercase or sanitize the
+input for a target format.
+
 ## Custom Templates
 
 Export the built-in template when you want a project-local starting point:
