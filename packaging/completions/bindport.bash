@@ -9,7 +9,7 @@ _bindport()
     local cur prev words cword
     _init_completion -n : || return
 
-    local commands="run reserve release status list registry open port clean config hooks doctor dashboard render templates init"
+    local commands="run reserve release status list registry open port hostname clean config hooks doctor dashboard render templates init"
     local global_opts="--help -h --version -V"
     local run_opts="--env --hostname --route-url --health-url"
     local reserve_opts="--hostname --route-url --health-url --all --help -h"
@@ -100,9 +100,9 @@ _bindport()
             COMPREPLY=($(compgen -W "export --help -h" -- "$cur"))
             ;;
         open)
-            COMPREPLY=($(compgen -W "--project --browser --print --help -h" -- "$cur"))
+            COMPREPLY=($(compgen -W "--project --registry-wide --browser --print --help -h" -- "$cur"))
             ;;
-        port)
+        port | hostname)
             COMPREPLY=($(compgen -W "--project --help -h" -- "$cur"))
             ;;
         *)

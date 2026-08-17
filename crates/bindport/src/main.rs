@@ -75,6 +75,7 @@ mod doctor;
 mod errors;
 mod help;
 mod hooks;
+mod hostname;
 mod list;
 mod logging;
 mod open;
@@ -85,6 +86,7 @@ mod render;
 mod reserve;
 mod route_events;
 mod run;
+mod service_lookup;
 mod status;
 mod templates;
 
@@ -95,6 +97,7 @@ pub(crate) use doctor::*;
 pub(crate) use errors::*;
 pub(crate) use help::*;
 pub(crate) use hooks::*;
+pub(crate) use hostname::*;
 pub(crate) use list::*;
 pub(crate) use logging::*;
 pub(crate) use open::*;
@@ -105,6 +108,7 @@ pub(crate) use render::*;
 pub(crate) use reserve::*;
 pub(crate) use route_events::*;
 pub(crate) use run::*;
+pub(crate) use service_lookup::*;
 pub(crate) use status::*;
 pub(crate) use templates::*;
 
@@ -139,6 +143,7 @@ fn dispatch(args: impl IntoIterator<Item = String>) -> ExitCode {
         Some("registry") => run_registry_command(&args[1..]),
         Some("open") => run_open_command(&args[1..]),
         Some("port") => run_port_command(&args[1..]),
+        Some("hostname") => run_hostname_command(&args[1..]),
         Some("reserve") => run_reserve_command(&args[1..]),
         Some("release") => run_release_command(&args[1..]),
         Some("clean") => clean_registry(&args[1..]),

@@ -202,10 +202,9 @@ agents do not hardcode ports or edit local-only files:
 - Use `bindport run <service>` or existing project scripts instead of hardcoding
   development ports.
 - Run `bindport config validate` after changing `.bindport.*` config.
-- Use `bindport status --json` and match identity/worktree fields to discover an
-  exact active URL. Use `bindport open <service> --print` only when
-  registry-wide selection is unambiguous; `--project` does not select a
-  worktree.
+- Use `bindport open <service> --print` for the exact current-worktree active or
+  reserved URL, and `bindport hostname <service>` when only the hostname is
+  needed. Use `--registry-wide` only for explicit cross-worktree lookup.
 - Use `bindport port <service>` for an exact active or reserved port in the
   current project/worktree.
 - Do not edit `.bindport.local.*`, `bindport.local.*`, generated output files,

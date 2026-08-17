@@ -29,10 +29,14 @@ BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
 - `bindport release [service|port]` releases a reserved port.
 - `bindport status [--json]` reads registry state.
 - `bindport list [--json]` groups registry services by project.
-- `bindport open [service]` prints or opens the best URL.
+- `bindport open [service]` prints or opens the best URL. A named service uses
+  exact current-worktree active-or-reserved scope unless `--registry-wide` is
+  supplied.
 - `bindport port <service> [--project PROJECT]` prints only the decimal port and
   newline for one active or reserved service in the current worktree scope.
   Missing, stopped, stale, and ambiguous matches fail.
+- `bindport hostname <service> [--project PROJECT]` prints only the configured
+  hostname and newline from that same exact scope.
 - `bindport clean` removes stopped and stale registry entries.
 - `bindport init` creates project or user fallback config.
 - `bindport config explain` explains config discovery and identity sources.
@@ -103,8 +107,9 @@ Machine modes write their own payloads to stdout and diagnostics/warnings to
 stderr. `status --json` alone is frozen as schema 1.0. `list --json` and
 `registry export` each currently report their separate schema 0.1; `clean
 --json` is unversioned, and destructive cleanup hook stdout can contaminate its
-stream (`--dry-run` runs no hooks). `port` is the exact decimal-port scalar, and
-`open --print` is the registry-wide URL scalar. No JSON member or array ordering is guaranteed. Config and hook
+stream (`--dry-run` runs no hooks). `port` is the exact decimal-port scalar, `hostname` is the exact hostname
+scalar, and a named `open --print` lookup is the exact best-URL scalar. No JSON
+member or array ordering is guaranteed. Config and hook
 status surfaces are human output, not JSON contracts.
 
 ## Registry State
@@ -117,11 +122,10 @@ Agents and scripts should use `bindport port <service>` for exact decimal port
 output, `bindport status --json` for normal registry detail, or
 `bindport list --json` for grouped project/service inventory instead of parsing
 human output or hardcoding ports. Status and list are registry-wide; select by
-identity or exact worktree rather than array position. Port lookup considers
-only active or reserved services in the selected project and current worktree.
-Outside Git, a discovered project config root supplies the shared scope.
-`open --project` is registry-wide and can remain ambiguous across worktrees; use
-status identity fields for an exact current-worktree URL. Use
+identity or exact worktree rather than array position. Port, hostname, and named open lookup consider only active or reserved services
+in the selected project and current worktree. Outside Git, a discovered project
+config root supplies the shared scope. `open --registry-wide` opts into
+cross-worktree selection and can remain ambiguous after project filtering. Use
 `bindport registry export` for debug/backup snapshots that need raw lease, run,
 output ownership, and render state rows.
 
@@ -225,9 +229,9 @@ separate processes that may use broader networks.
 Agents should use existing project scripts or `bindport run <service>`, use
 `bindport reserve --all` when all configured addresses are needed before
 startup, run `bindport config validate` after config changes, discover ports
-through `bindport port <service>`, and discover exact-worktree URLs by filtering
-`bindport status --json` identity fields (using `bindport open <service>
---print` only when registry-wide selection is unambiguous). Avoid editing
+through `bindport port <service>`, discover effective hostnames through
+`bindport hostname <service>`, and discover exact-worktree URLs through
+`bindport open <service> --print`. Avoid editing
 machine-local overrides or generated files unless explicitly asked. Agents
 should not run hook trust, deny, reset, or hook commands without user approval.
 

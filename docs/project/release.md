@@ -540,8 +540,12 @@ status/open behavior from a fresh checkout or clean worktree:
 4. Run `bindport status --json` and confirm the payload matches
    [status.schema.json](../status.schema.json), including `services`, `runs`,
    `hooks`, route metadata, health, outputs, and proxy fields.
-5. Run `bindport open <service> --print` and confirm it prints `route_url` when
-   configured, otherwise the direct loopback URL.
+5. From two worktrees with the same project and service, run `bindport open
+   <service> --print`, `bindport hostname <service>`, and `bindport port
+   <service>` and confirm each selects the current worktree for both active and
+   reserved services. Confirm `open` prints `route_url` when configured,
+   otherwise the direct loopback URL. Confirm `open --registry-wide` reports
+   both worktree paths when ambiguous.
 6. Run `bindport open <service> --browser` against an HTTP or HTTPS URL and
    confirm non-HTTP(S) route URLs are rejected before launching a browser.
 7. Configure a local hook and run `bindport hooks status`; confirm the hook is

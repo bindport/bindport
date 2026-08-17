@@ -3,9 +3,16 @@ use super::*;
 #[derive(Debug)]
 pub(crate) enum OpenCommandError {
     InvalidArgument(String),
+    Config(ConfigError),
     Registry(RegistryError),
     Browser(io::Error),
     Selection(String),
+}
+
+impl From<ConfigError> for OpenCommandError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(error)
+    }
 }
 
 impl From<RegistryError> for OpenCommandError {

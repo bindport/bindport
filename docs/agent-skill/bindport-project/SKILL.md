@@ -18,19 +18,20 @@ development ports when BindPort config or scripts already describe the service.
 4. Use `bindport reserve --all` when every named configured service needs a
    stable port before any child starts.
 5. Use `bindport run <service>` to run configured services.
-6. Use `bindport port <service>` for an exact current-worktree active or
-   reserved port. Use `bindport status --json` and match identity/worktree
-   fields for an exact URL; use `bindport list --json` for inventory and
-   `bindport open <service> --print` only when registry-wide selection is
-   unambiguous.
+6. Use `bindport port <service>`, `bindport hostname <service>`, and
+   `bindport open <service> --print` for exact current-worktree active or
+   reserved values. Use `bindport list --json` for inventory and
+   `bindport open <service> --registry-wide` only for explicit cross-worktree
+   lookup.
 7. Use `bindport registry export` only for debug/backup snapshots or output
    ownership investigations; prefer `status --json` for normal automation.
 
 `status --json` uses schema `1.0`. Ignore unfamiliar additive object fields,
 handle its documented enum values explicitly, and do not depend on JSON member
 or array ordering. Status and list are registry-wide: select by `identity_key`
-or exact project/service/worktree fields, never array position. `open
---project` does not select a worktree. Do not edit the SQLite registry directly
+or exact project/service/worktree fields, never array position. A named `open`
+lookup is exact-scope unless `--registry-wide` is supplied. Do not edit the
+SQLite registry directly
 to resolve a migration error; preserve it and follow
 `docs/reference/registry-migrations.md`.
 
@@ -39,9 +40,10 @@ worktree; new reservations commit all-or-nothing. Single-service `reserve`
 reuses an exact scoped active or reserved service and rejects `--env` because
 reservations neither start children nor own sockets. Outside Git, the
 discovered project config root supplies the equivalent shared scope. `port`
-prints only the decimal port and newline, and
-fails for missing, stopped, stale, or ambiguous matches. Use `open --print`,
-never `--browser`, in non-interactive automation. Preview cleanup with
+prints only the decimal port and newline, and `hostname` prints only configured
+hostname metadata and newline. Both fail for missing, stopped, stale, or
+ambiguous matches. Use `open --print`, never `--browser`, in non-interactive
+automation. Preview cleanup with
 `bindport clean --dry-run --json`; do not add `--yes` without explicit approval.
 
 ## Config Rules
@@ -99,6 +101,7 @@ bindport registry export
 bindport clean --dry-run --json
 bindport reserve --all
 bindport port <service>
+bindport hostname <service>
 bindport open <service> --print
 bindport run <service>
 bindport render --dry-run

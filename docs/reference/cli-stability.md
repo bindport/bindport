@@ -16,7 +16,7 @@ brackets are arguments, not literal command names.
 | Run | `run [service]`, `--env`, `--hostname`, `--route-url`, `--health-url`, and `--` |
 | Reserve | `reserve [service]`, `reserve --all`, `--hostname`, `--route-url`, and `--health-url` |
 | Release | `release [service\|port]` |
-| Inspect | `status [--json]`, `list [--json]`, `registry export`, `open [service]`, `open --project`, `open --print`, `open --browser`, `port <service>`, and `port --project` |
+| Inspect | `status [--json]`, `list [--json]`, `registry export`, `open [service]`, `open --project`, `open --registry-wide`, `open --print`, `open --browser`, `port <service>`, `port --project`, `hostname <service>`, and `hostname --project` |
 | Cleanup | `clean`, `--dry-run`, `--stopped`, `--stale`, `--all`, `--json`, `--yes`, and `-y` |
 | Config | `init`, `init --project`, `init --user`, `config explain`, and `config validate` |
 | Diagnostics | `doctor` and `doctor outputs` |
@@ -43,7 +43,7 @@ BindPort has no separately reserved range of numeric exit codes.
 | Case | Exit behavior |
 |---|---|
 | No arguments, `--help`/`-h`, or `--version`/`-V` | Prints to stdout and exits `0`. The version line is `bindport <version>`. |
-| Implemented subcommand help | `reserve`, `release`, `list`, `registry`, `registry export`, `open`, `port`, `clean`, `config`, `doctor`, `dashboard`, `hooks`, `render`, `templates`, and `init` accept their documented `--help`/`-h` form, print to stdout, and exit `0`. Use top-level `bindport --help` as the uniform stable entry point. |
+| Implemented subcommand help | `reserve`, `release`, `list`, `registry`, `registry export`, `open`, `port`, `hostname`, `clean`, `config`, `doctor`, `dashboard`, `hooks`, `render`, `templates`, and `init` accept their documented `--help`/`-h` form, print to stdout, and exit `0`. Use top-level `bindport --help` as the uniform stable entry point. |
 | Unknown command, invalid arguments, rejected non-interactive cleanup, or fatal config/registry/render/spawn/startup failure | Prints a diagnostic and exits `1`. |
 | Wrapped child exits normally | On supported Unix platforms, returns the child's `0`-`255` exit code unchanged, including `0` and `1`. |
 | Wrapped child terminates from a Unix signal | Records and returns the conventional `128 + signal` status, such as `130` for SIGINT or `143` for SIGTERM. BindPort forwards SIGINT and SIGTERM to the child on supported Unix platforms. This numeric convention is not a portable signal identity on every shell or operating system. |
@@ -91,7 +91,8 @@ a successful exit and should not require stderr to be empty.
 | `registry export` | Valid debug/backup JSON with its own current `schema_version` of `0.1` plus SQLite `user_version`. It is not status schema 1.0, a restore format, or a stable raw-database API. |
 | `clean --json` | BindPort emits one currently unversioned JSON object after any required confirmation: boolean `dry_run`, integer `leases` and `runs`, and integer `states.stopped`/`states.stale`. It has no status-schema compatibility promise. Destructive cleanup can run an approved lifecycle hook whose inherited stdout can contaminate this stream; `--dry-run` executes no hooks and remains the safe parse-only preview. Use `--yes` only after authorizing stale cleanup. |
 | `port <service> [--project PROJECT]` | Exactly one decimal port followed by `\n` for one active or reserved match in the current worktree identity. A discovered project config supplies the equivalent root scope outside Git. Missing, stopped, stale, cross-worktree, and ambiguous matches fail without a fallback value. |
-| `open [service] --print` | One selected active service URL followed by `\n`. Selection is registry-wide, optionally filtered by project; it is not current-worktree scoped. `--browser` may add launcher output and is not the automation mode. |
+| `hostname <service> [--project PROJECT]` | Exactly one configured hostname followed by `\n` for the same exact active-or-reserved scope as `port`. Missing hostname metadata fails without a fallback value. |
+| `open <service> --print` | One best active-or-reserved service URL followed by `\n` from the same exact scope as `port`. `route_url` wins over the direct host and port URL. `--registry-wide` opts into cross-worktree/project selection and fails when filters remain ambiguous. An omitted service keeps registry-wide selection. `--browser` may add launcher output and is not the automation mode. |
 | `--version` | `bindport <version>\n`. |
 | `templates export ...` | Raw resolved template contents, with no added trailing newline. Built-in template content is allowed to evolve and is not a schema contract. |
 
@@ -119,14 +120,15 @@ Use this non-interactive flow from the intended project/worktree directory:
 bindport config validate
 bindport reserve --all
 bindport port web
+bindport hostname web
 bindport status --json
 bindport open web --print
 ```
 
-- Use `port` for an exact current-worktree active or reserved port.
-- Use `status --json` for exact current-worktree URL selection when duplicate
-  project/service names can exist. `open --project` narrows only by project and
-  can still be ambiguous across worktrees.
+- Use `port`, `hostname`, and named `open --print` lookups for exact
+  current-worktree active or reserved scalar values.
+- Use `status --json` for detailed registry state. Use `open --registry-wide`
+  only when cross-worktree or cross-project URL selection is intended.
 - Use `open --print`, never `--browser`, in headless automation.
 - Treat reservations as registry coordination, not readiness or socket
   ownership.

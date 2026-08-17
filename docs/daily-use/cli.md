@@ -19,8 +19,9 @@ Human help and table formatting are not machine interfaces.
 | `bindport status [--json]` | Show active, reserved, stopped, and stale registry state. |
 | `bindport list [--json]` | Group registry services by project for inventory views. |
 | `bindport registry export` | Print a full registry debug/backup JSON snapshot. |
-| `bindport open [service]` | Print or open the best URL for an active service. |
+| `bindport open [service]` | Print or open the best URL for an active or reserved service. |
 | `bindport port <service> [--project PROJECT]` | Print an active or reserved service port. |
+| `bindport hostname <service> [--project PROJECT]` | Print an active or reserved service hostname. |
 | `bindport clean` | Remove stopped and stale registry entries. |
 | `bindport init` | Create project or user fallback config. |
 | `bindport config explain` | Show discovered config, local overrides, and identity sources. |
@@ -130,7 +131,7 @@ It can contain sensitive local data, including full command lines that may
 include tokens or passwords passed as arguments, plus filesystem paths. Review
 and redact it before sharing in a bug report.
 
-Resolve the best active service URL from the registry-wide snapshot:
+Resolve the best active or reserved service URL in the current worktree:
 
 ```sh
 bindport open web --print
@@ -138,10 +139,11 @@ bindport open web --browser
 bindport open web --project example
 ```
 
-`--project` does not select a worktree. If duplicate worktrees can be active,
-filter `status --json` by `identity_key` or exact worktree fields instead of
-assuming `open` selects the current checkout. Use `--print`, not `--browser`,
-for non-interactive automation.
+A named service uses the same exact project and worktree identity as `port`.
+Use `--registry-wide` only for explicit cross-worktree or cross-project lookup;
+that mode fails when its filters still match multiple services and reports each
+matching worktree. Use `--print`, not `--browser`, for non-interactive
+automation.
 
 Reserve and release a port for an external process:
 
@@ -182,6 +184,16 @@ reserved services. Outside Git, a discovered project config root supplies the
 shared scope. On success, stdout is exactly the decimal port followed by a
 newline. Missing, stopped, stale, or ambiguous matches fail instead of printing
 a fallback port or selecting another project or worktree.
+
+Print the effective hostname from that same scope:
+
+```sh
+bindport hostname web
+bindport hostname web --project example
+```
+
+`hostname` prints exactly the hostname and newline. It fails when the selected
+active or reserved service has no hostname metadata.
 
 Clean stopped and stale entries:
 

@@ -231,6 +231,8 @@ that service instead of creating a second lease. `reserve` does not accept
 `--env`, because it never spawns a child. `bindport port <service>` prints the
 port of the exact active or reserved service in the current project scope,
 including the worktree and branch when Git metadata is available. `bindport
+hostname <service>` prints its effective hostname, and `bindport open <service>
+--print` prints its best route or direct URL from that same scope. `bindport
 release [service|port]` releases a reserved lease and marks it stopped so normal
 cleanup can remove it. Dashboard defaults
 are local-only (`127.0.0.1:27080`) with auth disabled; non-loopback dashboard
@@ -336,6 +338,8 @@ process:
 ```sh
 bindport reserve web
 bindport port web
+bindport hostname web
+bindport open web --print
 bindport release web
 ```
 

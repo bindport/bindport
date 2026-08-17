@@ -10,6 +10,7 @@ commands=(
   'registry:export registry debug JSON'
   'open:print or open the best service URL'
   'port:print an active or reserved service port'
+  'hostname:print an active or reserved service hostname'
   'clean:remove stopped and stale registry entries'
   'config:explain or validate configuration'
   'hooks:inspect or manage hook trust'
@@ -86,9 +87,9 @@ case "$state" in
         _arguments '1:registry command:(export)'
         ;;
       open)
-        _arguments '--project[disambiguate project]:project:' '--browser[open the URL with the system browser]' '--print[print without launching a browser]' '1:service:'
+        _arguments '--project[select the project in the current worktree]:project:' '--registry-wide[search all recorded worktrees and projects]' '--browser[open the URL with the system browser]' '--print[print without launching a browser]' '1:service:'
         ;;
-      port)
+      port|hostname)
         _arguments '--project[select the project in the current worktree]:project:' '1:service:'
         ;;
       clean)

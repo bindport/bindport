@@ -14,6 +14,7 @@ pub(crate) fn print_help() {
     println!("  bindport registry export     Export registry debug JSON");
     println!("  bindport open [service]      Print or open the best service URL");
     println!("  bindport port <service>      Print the scoped active or reserved port");
+    println!("  bindport hostname <service>  Print the scoped active or reserved hostname");
     println!("  bindport clean [--dry-run]   Remove stopped and stale registry entries");
     println!("  bindport config explain      Explain resolved config and identity sources");
     println!("  bindport config validate     Validate config structure");
@@ -67,10 +68,13 @@ pub(crate) fn print_open_help() {
     println!("BindPort service URL lookup");
     println!();
     println!("Usage:");
-    println!("  bindport open [service] [--project PROJECT] [--browser] [--print]");
+    println!(
+        "  bindport open [service] [--project PROJECT] [--registry-wide] [--browser] [--print]"
+    );
     println!();
     println!("Options:");
-    println!("  --project <project>    Disambiguate services with the same name");
+    println!("  --project <project>    Select the project in the current worktree");
+    println!("  --registry-wide        Search all recorded worktrees and projects");
     println!("  --browser              Open the URL with the system browser and print it");
     println!("  --print                Print the URL without launching a browser (default)");
 }
@@ -80,6 +84,16 @@ pub(crate) fn print_port_help() {
     println!();
     println!("Usage:");
     println!("  bindport port <service> [--project PROJECT]");
+    println!();
+    println!("Options:");
+    println!("  --project <project>    Select the project in the current worktree");
+}
+
+pub(crate) fn print_hostname_help() {
+    println!("BindPort service hostname lookup");
+    println!();
+    println!("Usage:");
+    println!("  bindport hostname <service> [--project PROJECT]");
     println!();
     println!("Options:");
     println!("  --project <project>    Select the project in the current worktree");
