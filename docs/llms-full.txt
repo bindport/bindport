@@ -5,7 +5,7 @@
 > becoming the user's proxy, process manager, DNS layer, or secret manager.
 
 BindPort is for local development on Linux and macOS. Its supported Rust build
-floor is 1.96.0; prebuilt assets cover GNU/Linux and macOS on x64/arm64, while
+floor is 1.97.1; prebuilt assets cover GNU/Linux and macOS on x64/arm64, while
 Windows is unsupported through v1. It wraps commands, assigns stable ports from
 a configured range, records project/service/worktree
 ownership in a local SQLite registry, exposes status through CLI JSON and a

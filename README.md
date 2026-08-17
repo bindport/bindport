@@ -391,7 +391,7 @@ machine-readable counts. Active services are not removed. Destructive
   inference, local overrides, and output examples for multi-package repos.
 - [Security and Privacy](docs/operations/security.md): trust boundaries, local data,
   network/subprocess behavior, dashboard controls, outputs, and hooks.
-- [Platform and MSRV Support](docs/reference/platform-support.md): Rust 1.96.0 policy,
+- [Platform and MSRV Support](docs/reference/platform-support.md): Rust 1.97.1 policy,
   supported operating systems, package targets, filesystem paths, process
   behavior, and verification gates.
 - [Release](docs/project/release.md): local staged release smoke, deferred live-channel

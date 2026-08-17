@@ -5,13 +5,13 @@ post-v1 and is not a supported build, install, CI, or runtime target.
 
 ## Rust Version Policy
 
-The supported Rust build floor (MSRV policy) is **Rust 1.96.0**. That is the
+The supported Rust build floor (MSRV policy) is **Rust 1.97.1**. That is the
 version pinned by `mise.toml`, used by Linux CI through the locked mise toolset,
 installed explicitly by macOS CI, and used for all release artifact builds.
-Release and compatibility changes must continue to compile and test on 1.96.0
+Release and compatibility changes must continue to compile and test on 1.97.1
 until an announced MSRV increase.
 
-The workspace uses Rust edition 2024 and declares `rust-version = "1.96"` for
+The workspace uses Rust edition 2024 and declares `rust-version = "1.97"` for
 every published crate. Cargo metadata, local tooling, CI, and release builds
 therefore enforce the same documented floor.
 
@@ -24,7 +24,7 @@ therefore enforce the same documented floor.
 | GitHub Release binaries | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, and `aarch64-apple-darwin` |
 | npm native packages | Linux/macOS x64/arm64, selected by a POSIX shell wrapper |
 | cargo-binstall, Homebrew, mise/ubi | The same four GitHub Release binary targets |
-| Cargo install | Source build on a supported Linux or macOS host using Rust 1.96.0 or newer |
+| Cargo install | Source build on a supported Linux or macOS host using Rust 1.97.1 or newer |
 | Windows and other operating systems | Unsupported through v1 |
 
 Architecture support for prebuilt channels is narrower than source-build
@@ -141,7 +141,7 @@ Homebrew formula checks, then executes the host-compatible staged npm package
 through the v0.8 reservation, wiring, render, dashboard, and cleanup flow. The
 other three targets are metadata-mapped; only a separately authorized live
 installation verifies a public channel. The release matrix builds and packages
-all four prebuilt targets listed above with Rust 1.96.0.
+all four prebuilt targets listed above with Rust 1.97.1.
 
 The platform-cfg guard catches Linux-only conditional-compilation shapes that a
 Linux clippy run can miss but macOS would report as unused. There is no Windows,
