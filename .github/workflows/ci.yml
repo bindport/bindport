@@ -27,8 +27,8 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.8.6
-          sha256: 96f6f1f416d868b78addd22746eefc7f4bf7820c6a3afa392a9f653f708c1644
+          version: 2026.9.2
+          sha256: 2950f8e1c59f3d9716bc3ee7d9242de94f9ab4054d97e65e12f2e67867c5f8fd
           install: true
           install_args: --locked --jobs=4 rust node github:rust-lang/mdBook actionlint gitleaks trivy shellcheck
           cache: true
@@ -51,8 +51,8 @@ jobs:
           tar -xzf "$tmp/cargo-audit.tgz" -C "$tmp"
           install -m 0755 "$tmp/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit" "$HOME/.cargo/bin/cargo-audit"
 
-          curl -fsSLo "$tmp/cargo-llvm-cov.tar.gz" https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.8.7/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz
-          echo "9a75fe29538d3800b3da57f6f6efb64cba5c720a257bf0cb8b51f39d495a9168  $tmp/cargo-llvm-cov.tar.gz" | sha256sum -c -
+          curl -fsSLo "$tmp/cargo-llvm-cov.tar.gz" https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.0/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz
+          echo "b068f7c98841aacb9c4f382b4a0c184ae82f49b56a32d442b429b2961c73be15  $tmp/cargo-llvm-cov.tar.gz" | sha256sum -c -
           tar -xzf "$tmp/cargo-llvm-cov.tar.gz" -C "$tmp"
           install -m 0755 "$tmp/cargo-llvm-cov" "$HOME/.cargo/bin/cargo-llvm-cov"
 
@@ -127,8 +127,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.97.1 --profile minimal --component clippy
-          rustup default 1.97.1
+          rustup toolchain install 1.98.0 --profile minimal --component clippy
+          rustup default 1.98.0
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
