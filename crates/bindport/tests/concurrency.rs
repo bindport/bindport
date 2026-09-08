@@ -131,7 +131,7 @@ fn concurrent_reserve_all_clients_are_idempotent_and_worktree_isolated() {
     for output in &outputs {
         assert_client_succeeded(output, "reserve --all");
     }
-    for pair in outputs.chunks_exact(2) {
+    for pair in outputs.as_chunks::<2>().0 {
         assert_eq!(pair[0].stdout, pair[1].stdout);
     }
 
