@@ -158,9 +158,14 @@ user-provided `vars.*`.
 Output roots must be relative and must not contain `..`. Project-config roots
 resolve beside that config; fallback-config outputs resolve from the invoking
 cwd. BindPort tracks output ownership in the registry and refuses to overwrite
-unowned or externally modified files during normal render. Ownership is scoped
-to the resolved output root and config root, so separate worktrees can render
-the same output and route without overwriting each other's registry row.
+unowned or externally modified files during normal render. Each output's
+planned targets are checked before changing files for that output; earlier
+outputs may already have changed. Files written before a later filesystem write
+failure keep their ownership rows. A changed `target` supersedes its old path;
+the next render removes an unmodified old file and preserves and reports a
+modified one. Ownership is scoped to the resolved output root and config root,
+so separate worktrees can render the same output and route without overwriting
+each other's registry row.
 Legacy unscoped rows are considered only when their path is inside the current
 output root. `bindport render --diff` previews content changes against
 DB-owned files without writing files or updating ownership rows.

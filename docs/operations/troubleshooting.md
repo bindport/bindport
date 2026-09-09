@@ -176,6 +176,8 @@ Common causes:
 - Output `root` is not relative to the config file.
 - Output `target` escapes the output root.
 - Existing file is unowned or externally modified.
+- A changed output `target` left an externally modified file at the old path.
+  Restore its recorded content or delete it, then render again.
 - Foreign or stale ownership rows belong to another output root or worktree and
   are shown for diagnosis without blocking current-scope rendering.
 - `outside_output_root` means a stale ownership row pointed at a generated file

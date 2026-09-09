@@ -34,6 +34,10 @@ pub(crate) fn run_render_command(args: &[String]) -> ExitCode {
             eprintln!("bindport: {error}");
             ExitCode::FAILURE
         }
+        Err(error @ RenderCommandError::SupersededOutputModified { .. }) => {
+            eprintln!("bindport: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 

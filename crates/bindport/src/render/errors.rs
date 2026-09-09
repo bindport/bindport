@@ -9,6 +9,7 @@ pub(crate) enum RenderCommandError {
     Template(AdapterTemplateError),
     Render(RenderError),
     File(OutputFileError),
+    SupersededOutputModified { path: PathBuf },
 }
 
 impl std::fmt::Display for RenderCommandError {
@@ -21,6 +22,11 @@ impl std::fmt::Display for RenderCommandError {
             Self::Template(error) => write!(f, "{error}"),
             Self::Render(error) => write!(f, "{error}"),
             Self::File(error) => write!(f, "{error}"),
+            Self::SupersededOutputModified { path } => write!(
+                f,
+                "refusing to abandon externally modified output file `{}` after its target changed",
+                path.display()
+            ),
         }
     }
 }

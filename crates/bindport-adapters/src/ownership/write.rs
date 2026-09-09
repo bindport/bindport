@@ -14,6 +14,10 @@ pub fn write_render_plan(
         .collect::<BTreeMap<_, _>>();
     let mut written = Vec::with_capacity(plan.files.len());
 
+    for planned in &planned_files {
+        verify_existing_target(&planned.path, &owned_hashes)?;
+    }
+
     for (file, planned) in plan.files.iter().zip(planned_files) {
         let path = planned.path;
         verify_existing_target(&path, &owned_hashes)?;

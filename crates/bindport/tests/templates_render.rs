@@ -10,3 +10,6 @@ mod manual;
 
 #[path = "templates_render/auto.rs"]
 mod auto;
+
+#[path = "templates_render/ownership.rs"]
+mod ownership;

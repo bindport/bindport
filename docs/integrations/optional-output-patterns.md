@@ -182,7 +182,9 @@ delete_on = ["stopped", "stale", "removed"]
 
 Deletion is still ownership-checked. BindPort removes only files it previously
 rendered and only when the current file hash matches the registry record.
-Externally modified files are preserved and reported as output errors.
+Externally modified files are preserved and reported as output errors. Old
+paths left behind by a changed `target` are cleaned the same way on the next
+render, independent of `delete_on`.
 
 ## Hooks With Optional Outputs
 

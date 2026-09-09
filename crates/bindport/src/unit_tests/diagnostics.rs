@@ -281,6 +281,9 @@ fn command_error_conversions_format_underlying_errors() {
         RenderCommandError::from(OutputFileError::UnsafeRoot {
             root: String::from("../out"),
         }),
+        RenderCommandError::SupersededOutputModified {
+            path: PathBuf::from("/workspace/demo/generated/old.yml"),
+        },
     ];
 
     for error in render_errors {

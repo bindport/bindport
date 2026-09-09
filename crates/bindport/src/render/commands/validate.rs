@@ -51,7 +51,24 @@ pub(crate) fn validate_render_outputs(
             })
             .collect::<Vec<_>>();
 
-        verify_render_plan_targets(&plan, &base_dir, &write_ownership)?;
+        let planned_paths = verify_render_plan_targets(&plan, &base_dir, &write_ownership)?
+            .into_iter()
+            .map(|file| (file.route_key, file.path))
+            .collect::<BTreeMap<_, _>>();
+        let superseded = ownership
+            .iter()
+            .filter(|owned| is_superseded_output_file(owned, &planned_paths))
+            .map(removable_output_file)
+            .collect::<Vec<_>>();
+        if let Some(modified) =
+            diff_removable_output_files(&superseded, &base_dir, &render_config.context)?
+                .into_iter()
+                .find(|file| file.status == AdapterOutputFileRemovalStatus::ExternalModified)
+        {
+            return Err(RenderCommandError::SupersededOutputModified {
+                path: modified.path,
+            });
+        }
     }
 
     Ok(())

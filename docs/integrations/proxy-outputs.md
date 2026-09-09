@@ -257,6 +257,9 @@ hostname.
   not behave as expected.
 - If generated files are not removed, check `delete_on`, cleanup state, and
   whether the files are still DB-owned and unmodified.
+- If you change an output `target`, the next render removes the old generated
+  file when it is unmodified. A modified old file blocks the render until it is
+  restored or deleted.
 - If the proxy returns 404, check the generated hostname and route state.
 - If the proxy returns 502, check `target_host` from the proxy's network
   namespace.

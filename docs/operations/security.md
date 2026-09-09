@@ -155,8 +155,12 @@ the invoking cwd as their base. Targets must remain under their resolved root,
 and target paths may not traverse symlink components. BindPort writes via a
 sibling temporary file and rename and creates output temp files with mode
 `0600` on Unix. Normal rendering refuses to overwrite an unowned file or a
-DB-owned file whose content no longer matches its recorded hash. Repair can
-adopt only content-identical planned files.
+DB-owned file whose content no longer matches its recorded hash. Normal
+rendering checks each output's planned targets before changing files for that
+output; earlier outputs may already have changed. Repair can adopt only
+content-identical planned files. When a target changes, the superseded file is
+removed only if its content still matches the recorded hash; a modified file is
+preserved and blocks the new target.
 
 Ownership hashes prevent accidental overwrite; they are not signatures or
 protection against a malicious process running as the same user. BindPort does

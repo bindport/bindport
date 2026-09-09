@@ -217,6 +217,9 @@ files for stopped/stale/removed routes, and CLI or dashboard cleanup triggers
 removed-route output cleanup. Hooks can subscribe to the same lifecycle events,
 but checked-in project config cannot enable hook execution by itself. Approve
 or deny configured hooks per machine with `bindport hooks trust|deny|reset`.
+Changing an output `target` supersedes its old path; the next render removes
+the old file when it still matches its recorded hash and preserves and reports
+a modified one.
 `bindport render --diff` previews content changes against DB-owned output files
 without writing files or updating registry ownership.
 `bindport render --repair` reconciles DB-owned files and can adopt
