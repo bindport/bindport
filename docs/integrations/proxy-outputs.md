@@ -39,7 +39,7 @@ delete_on = ["removed"]
 [[outputs]]
 name = "traefik"
 template = "bindport-traefik"
-target = "traefik/{{ route.slug }}.yml"
+target = "traefik/{{ route.unique_slug }}.yml"
 ```
 
 The `hostname` is the browser-facing route. The generated proxy target is built
@@ -98,7 +98,7 @@ BindPort output:
 [[outputs]]
 name = "traefik"
 template = "bindport-traefik"
-target = "traefik/{{ route.slug }}.yml"
+target = "traefik/{{ route.unique_slug }}.yml"
 
 [outputs.vars]
 entrypoints = ["web"]
@@ -120,6 +120,13 @@ and make the file provider watch the mounted path. The rendered service target
 still needs to be reachable from inside that container. If routes render but
 Traefik returns 502, the first thing to check is whether `target_host` is still
 `127.0.0.1` while Traefik is running in a different network namespace.
+
+The built-in uses `route.unique_slug` for its router and service IDs. The target
+pattern above also uses it so same-slug routes from different worktrees have
+distinct filenames as well as distinct internal IDs. Host rules and target URLs
+do not change. Existing config and copied templates are not rewritten on
+upgrade; if you reference the old IDs externally, follow the
+[Traefik template upgrade notes](templates.md#bindport-traefik).
 
 Useful checks:
 

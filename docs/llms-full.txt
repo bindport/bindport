@@ -153,7 +153,12 @@ project templates, global templates, and built-ins. The built-in templates are
 `bindport-traefik`, `bindport-caddy`, `bindport-nginx`, `bindport-haproxy`,
 `bindport-json-snapshot`, and `bindport-env-local`. Per-route templates receive
 `snapshot.generated_at`, `snapshot.route_count`, `route.*`, `output.*`, and
-user-provided `vars.*`.
+user-provided `vars.*`. The built-in Traefik template uses `route.unique_slug`
+for router and service IDs and their references, replacing the earlier
+`route.slug` IDs. Update external references and any project/global template
+copies when adopting this change. Host rules and upstream URLs are unchanged.
+Existing target patterns are not rewritten; use `route.unique_slug` in Traefik
+filenames too when same-slug routes share an output directory.
 
 Output roots must be relative and must not contain `..`. Project-config roots
 resolve beside that config; fallback-config outputs resolve from the invoking

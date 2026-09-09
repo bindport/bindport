@@ -8,6 +8,7 @@ mod cleanup;
 mod plan;
 mod render;
 mod templates;
+mod traefik;
 
 fn temp_test_dir(name: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()

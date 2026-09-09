@@ -35,7 +35,7 @@ health_url = "http://127.0.0.1:{port}/"
 [[outputs]]
 name = "traefik"
 template = "bindport-traefik"
-target = "traefik/{{ route.slug }}.yml"
+target = "traefik/{{ route.unique_slug }}.yml"
 
 [outputs.vars]
 entrypoints = ["web"]

@@ -112,7 +112,23 @@ middlewares = []
 
 For an active route with a hostname, the template renders Traefik routers and
 services pointing at `route.target_url`. For stopped, stale, or missing-hostname
-routes, it renders comment-only YAML.
+routes, it renders comment-only YAML. Router IDs, service IDs, and the router's
+service reference use `route.unique_slug`, which adds a short worktree hash (or
+a route-key hash outside Git) to the readable slug. This distinguishes routes
+from different worktrees or directories that share project, service, and branch
+labels. Host rules and upstream URLs are unchanged.
+
+Earlier built-in templates used `route.slug` for these IDs. Preview the change
+with `bindport render --diff traefik`, then re-render and update any external
+references to the old router or service names, including service references
+ending in `@file`. Project or global copies of the template are not updated by
+upgrading BindPort and still take precedence over the built-in. Compare them
+with `bindport templates export --source built-in bindport-traefik` and update
+all three ID uses if needed.
+
+Internal IDs and filenames are separate. Existing `target` patterns are not
+rewritten; use `traefik/{{ route.unique_slug }}.yml` when same-slug routes share
+an output directory. A render plan still rejects duplicate filename targets.
 
 ### `bindport-caddy`
 
@@ -262,7 +278,7 @@ target_scheme = "http"
 [[outputs]]
 name = "traefik"
 template = "bindport-traefik"
-target = "traefik/{{ route.slug }}.yml"
+target = "traefik/{{ route.unique_slug }}.yml"
 
 [outputs.vars]
 entrypoints = ["web"]
@@ -553,7 +569,7 @@ Then point an output at the new logical template name:
 [[outputs]]
 name = "traefik"
 template = "my-traefik"
-target = "traefik/{{ route.slug }}.yml"
+target = "traefik/{{ route.unique_slug }}.yml"
 ```
 
 Custom templates receive the same `route`, `output`, and `vars` context as the
