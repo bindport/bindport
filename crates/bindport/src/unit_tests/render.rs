@@ -53,3 +53,120 @@ fn diagnostic_log_env_values_are_explicit() {
     assert!(!diagnostic_log_env_value_enabled("info"));
     assert!(!diagnostic_log_env_value_enabled("false"));
 }
+
+#[test]
+fn lifecycle_removal_candidates_include_superseded_paths_for_planned_routes() {
+    let mut output = test_output_config("routes");
+    let base_dir = PathBuf::from("/workspace/demo");
+    let generated = base_dir.join("generated");
+    let render_config = OutputRenderConfig::from(&output);
+    let scope = OutputFileScope::new(generated.clone(), base_dir.clone(), None, None);
+    let ownership = vec![
+        bindport_registry::OutputFileOwnership {
+            route_key: String::from("route-a"),
+            path: generated.join("old-a.txt"),
+            content_hash: String::from("hash-a"),
+        },
+        bindport_registry::OutputFileOwnership {
+            route_key: String::from("route-b"),
+            path: generated.join("b.txt"),
+            content_hash: String::from("hash-b"),
+        },
+        bindport_registry::OutputFileOwnership {
+            route_key: String::from("route-gone"),
+            path: generated.join("gone.txt"),
+            content_hash: String::from("hash-gone"),
+        },
+    ];
+    let current_route_keys = BTreeSet::from([String::from("route-a"), String::from("route-b")]);
+    let planned_paths = BTreeMap::from([
+        (String::from("route-a"), generated.join("new-a.txt")),
+        (String::from("route-b"), generated.join("b.txt")),
+    ]);
+    let delete_route_keys = BTreeSet::new();
+    let candidates = |output: &EffectiveOutputConfig| {
+        lifecycle_removal_candidates(&LifecycleRemoval {
+            output,
+            scope: &scope,
+            ownership: &ownership,
+            current_route_keys: &current_route_keys,
+            planned_paths: &planned_paths,
+            delete_route_keys: &delete_route_keys,
+            base_dir: &base_dir,
+            render_config: &render_config,
+        })
+    };
+
+    let superseded_only = candidates(&output);
+    assert_eq!(superseded_only.len(), 1);
+    assert_eq!(superseded_only[0].route_key, "route-a");
+    assert_eq!(superseded_only[0].path, generated.join("old-a.txt"));
+    assert_eq!(superseded_only[0].content_hash, "hash-a");
+
+    output.delete_on = vec![OutputDeleteState::Removed];
+    let with_removed = candidates(&output);
+    assert_eq!(
+        with_removed
+            .iter()
+            .map(|candidate| candidate.route_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["route-a", "route-gone"]
+    );
+}
+
+#[test]
+fn lifecycle_diff_candidates_skip_paths_the_new_plan_still_writes() {
+    let mut output = test_output_config("routes");
+    output.delete_on = vec![OutputDeleteState::Removed];
+    let base_dir = PathBuf::from("/workspace/demo");
+    let generated = base_dir.join("generated");
+    let render_config = OutputRenderConfig::from(&output);
+    let scope = OutputFileScope::new(generated.clone(), base_dir.clone(), None, None);
+    let ownership = vec![
+        bindport_registry::OutputFileOwnership {
+            route_key: String::from("route-a"),
+            path: generated.join("a.txt"),
+            content_hash: String::from("hash-a"),
+        },
+        bindport_registry::OutputFileOwnership {
+            route_key: String::from("route-b"),
+            path: generated.join("b.txt"),
+            content_hash: String::from("hash-b"),
+        },
+        bindport_registry::OutputFileOwnership {
+            route_key: String::from("route-gone"),
+            path: generated.join("gone.txt"),
+            content_hash: String::from("hash-gone"),
+        },
+    ];
+    let current_route_keys = BTreeSet::from([String::from("route-a"), String::from("route-b")]);
+    let planned_paths = BTreeMap::from([
+        (String::from("route-a"), generated.join("b.txt")),
+        (String::from("route-b"), generated.join("a.txt")),
+    ]);
+    let delete_route_keys = BTreeSet::new();
+    let removal = LifecycleRemoval {
+        output: &output,
+        scope: &scope,
+        ownership: &ownership,
+        current_route_keys: &current_route_keys,
+        planned_paths: &planned_paths,
+        delete_route_keys: &delete_route_keys,
+        base_dir: &base_dir,
+        render_config: &render_config,
+    };
+
+    let runtime = lifecycle_removal_candidates(&removal);
+    assert_eq!(
+        runtime
+            .iter()
+            .map(|candidate| candidate.route_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["route-a", "route-b", "route-gone"]
+    );
+
+    let diffed = lifecycle_diff_candidates(&removal);
+    assert_eq!(diffed.len(), 1);
+    assert_eq!(diffed[0].route_key, "route-gone");
+    assert_eq!(diffed[0].path, generated.join("gone.txt"));
+}

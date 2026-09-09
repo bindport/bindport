@@ -338,7 +338,13 @@ templates render one file per route; `bindport-haproxy` and
 files are overwritten only when BindPort previously rendered the same output
 file and the on-disk content still matches the recorded hash. Unowned or
 externally modified files cause the render to fail instead of being
-overwritten.
+overwritten. Normal rendering checks each output's planned targets before
+changing files for that output. Conflicts found by this check leave that
+output's files unchanged, but earlier outputs may already have changed. Later
+failures can also occur after safe removals within an output; rendering is not
+all-or-nothing. If a later filesystem write fails, such as with a permission
+error, the files written before it keep their ownership rows and the error is
+still reported.
 
 Ownership is scoped to the resolved output root and config root. This lets two
 worktrees or monorepo checkouts render the same output name and route key into
@@ -370,7 +376,9 @@ proxy reloads or hook events even when route data is otherwise unchanged.
 `bindport render --diff` uses the normal render plan and ownership checks, then
 prints added, modified, removed, and unchanged counts plus content hunks for
 changed files. It does not write files, delete lifecycle-managed files, update
-registry ownership rows, or execute hooks. Approved hooks that would match the
+registry ownership rows, or execute hooks. Superseded paths from a changed
+`target` are listed as removals; a path that another route still writes appears
+once as added, modified, or unchanged. Approved hooks that would match the
 render request are printed in dry-run mode.
 
 `bindport render --repair` uses the same safety checks, but treats recoverable
@@ -382,7 +390,9 @@ deleted only when their current hash still matches the registry record. Missing
 DB-owned files in the current output scope are marked removed, current-scope
 rows outside the current output root are marked removed with
 `outside_output_root`, and externally modified DB-owned files are preserved and
-marked with `external_modified`.
+marked with `external_modified`. Superseded files that still match their
+recorded hash are deleted; a modified superseded file is preserved, marked with
+`external_modified`, and its route's new target is not written.
 Unknown files with different content are never adopted.
 
 `delete_on` controls when DB-owned output files are removed. The default is
@@ -402,6 +412,22 @@ Deletion is conservative: BindPort removes only files recorded in SQLite as
 rendered output files, and only when the current on-disk hash matches the
 recorded hash. Missing files are marked removed. Externally modified files are
 preserved and marked as output errors.
+
+Changing an output `target` so that a route renders to a different path inside
+the same output root supersedes the old path. The next render removes the old
+file when its content still matches the recorded hash, records the removal, and
+then writes the new target. This happens on every render, independent of
+`delete_on`, and also covers targets that depend on route state. If the
+planned-target checks pass, cleanup preserves a modified superseded file and
+records `external_modified` while retaining its old path and expected hash.
+Normal rendering then fails with `refusing to abandon externally modified
+output file` instead of writing the new target. If the modified old path is
+also a planned target for another route, the planned-target check can instead
+fail earlier with the ordinary overwrite refusal, leaving its ownership row
+unchanged. The `on_failure = "block"` preflight checks planned targets before
+superseded files too, without changing output ownership, before a wrapped
+command starts. Restore the file's recorded content or delete it, then render
+again. Files in another output root or worktree scope are never touched.
 
 `bindport doctor outputs` checks the same configured outputs, target host
 syntax, resolved output roots, template lookup, target planning, output path
@@ -564,6 +590,10 @@ extension patterns and review checklist are covered in
   modified. Use `bindport render --repair` to adopt content-identical planned
   files whose ownership row was lost, or to record externally modified DB-owned
   files without overwriting them.
+- If BindPort refuses to abandon a file, the output's `target` changed and the
+  old generated file was modified externally. Restore its recorded content or
+  delete it, then render again. `bindport render --repair` records the file as
+  `external_modified` and leaves that route's new target unwritten.
 - If render reports `outside_output_root`, a stale ownership row pointed at a
   generated file outside the current output root, usually from a deleted
   worktree or old output location. Repair or the next render marks that row

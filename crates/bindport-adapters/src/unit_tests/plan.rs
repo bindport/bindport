@@ -301,3 +301,29 @@ fn write_render_plan_creates_output_files_private() {
         & 0o777;
     assert_eq!(mode, 0o600);
 }
+
+#[test]
+fn write_render_plan_verifies_all_targets_before_writing() {
+    let root = temp_test_dir("write-plan-prevalidate");
+    let unowned = root.join(".bindport/out/routes/second.yml");
+    fs::create_dir_all(unowned.parent().expect("parent")).expect("parent dir");
+    fs::write(&unowned, "external").expect("external file");
+    let mut plan = test_render_plan("routes/first.yml", "first");
+    let mut second = plan.files[0].clone();
+    second.route_key = String::from("route-2");
+    second.target = String::from("routes/second.yml");
+    second.contents = String::from("second");
+    plan.files.push(second);
+
+    let error = write_render_plan(&plan, &root, &[]).expect_err("unowned second target");
+
+    assert!(matches!(
+        error,
+        OutputFileError::UnownedTarget { path: error_path } if error_path == unowned
+    ));
+    assert!(!root.join(".bindport/out/routes/first.yml").exists());
+    assert_eq!(
+        fs::read_to_string(&unowned).expect("external file remains"),
+        "external"
+    );
+}

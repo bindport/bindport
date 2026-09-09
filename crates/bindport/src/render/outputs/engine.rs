@@ -79,12 +79,7 @@ fn render_outputs(
         let scope = output_file_scope(&base_dir, &render_config)?;
         let delete_route_keys = delete_route_keys(&output, snapshot.routes());
         let render_snapshot = filtered_output_route_snapshot(&snapshot, &delete_route_keys);
-        let plan = render_output_plan(&render_config, &template.contents, &render_snapshot)?;
-        let planned_route_keys = plan
-            .files
-            .iter()
-            .map(|file| file.route_key.clone())
-            .collect::<BTreeSet<_>>();
+        let mut plan = render_output_plan(&render_config, &template.contents, &render_snapshot)?;
         let scope_root = scope
             .output_root
             .as_deref()
@@ -115,6 +110,10 @@ fn render_outputs(
             continue;
         }
 
+        let planned_paths = render_plan_paths(&plan, &base_dir)?
+            .into_iter()
+            .map(|file| (file.route_key, file.path))
+            .collect::<BTreeMap<_, _>>();
         let ownership = registry.output_file_ownership(&output.name, &scope)?;
         request.log.debug(format_args!(
             "render ownership output={} rows={}",
@@ -133,14 +132,14 @@ fn render_outputs(
             scope: &scope,
             ownership: &ownership,
             current_route_keys: &current_route_keys,
-            planned_route_keys: &planned_route_keys,
+            planned_paths: &planned_paths,
             delete_route_keys: &delete_route_keys,
             base_dir: &base_dir,
             render_config: &render_config,
         };
 
         if request.mode == RenderMode::Diff {
-            let removal_candidates = lifecycle_removal_candidates(&lifecycle_removal);
+            let removal_candidates = lifecycle_diff_candidates(&lifecycle_removal);
             let removals = diff_removable_output_files(
                 &removal_candidates,
                 &base_dir,
@@ -158,31 +157,50 @@ fn render_outputs(
             continue;
         }
 
-        let removed = remove_output_files_for_lifecycle(registry, lifecycle_removal)?;
-        if removed > 0 {
+        if request.mode == RenderMode::Normal {
+            verify_render_plan_targets(&plan, &base_dir, &write_ownership)?;
+        }
+        let removal = remove_output_files_for_lifecycle(registry, lifecycle_removal)?;
+        if removal.removed > 0 {
             request.log.debug(format_args!(
-                "render lifecycle output={} removed={removed}",
-                output.name
+                "render lifecycle output={} removed={}",
+                output.name, removal.removed
             ));
         }
         let write_summary = match request.mode {
             RenderMode::Normal => {
-                let written = write_render_plan(&plan, &base_dir, &write_ownership)?;
-                record_written_output_files(registry, &output, &scope, &written)?;
-                RenderWriteSummary {
-                    written: written.len(),
-                    adopted: 0,
-                    external_modified: 0,
+                if let Some(preserved) = removal.preserved.first() {
+                    return Err(RenderCommandError::SupersededOutputModified {
+                        path: preserved.path.clone(),
+                    });
                 }
+                write_normal_render_plan(
+                    registry,
+                    &output,
+                    &scope,
+                    &plan,
+                    &base_dir,
+                    &write_ownership,
+                )?
             }
-            RenderMode::Repair => write_repair_render_plan(
-                registry,
-                &output,
-                &scope,
-                &plan,
-                &base_dir,
-                &write_ownership,
-            )?,
+            RenderMode::Repair => {
+                plan.files.retain(|file| {
+                    !removal
+                        .preserved
+                        .iter()
+                        .any(|preserved| preserved.route_key == file.route_key)
+                });
+                let mut summary = write_repair_render_plan(
+                    registry,
+                    &output,
+                    &scope,
+                    &plan,
+                    &base_dir,
+                    &write_ownership,
+                )?;
+                summary.external_modified += removal.preserved.len();
+                summary
+            }
             RenderMode::Diff => unreachable!("diff mode returns before writing"),
         };
 
@@ -190,7 +208,7 @@ fn render_outputs(
             "render finish output={} written={} removed={} adopted={} external_modified={}",
             output.name,
             write_summary.written,
-            removed,
+            removal.removed,
             write_summary.adopted,
             write_summary.external_modified
         ));
@@ -202,8 +220,8 @@ fn render_outputs(
                 "rendered"
             };
             println!("{verb} {}: {} files", output.name, write_summary.written);
-            if removed > 0 {
-                println!("removed {}: {} files", output.name, removed);
+            if removal.removed > 0 {
+                println!("removed {}: {} files", output.name, removal.removed);
             }
             if write_summary.adopted > 0 {
                 println!("adopted {}: {} files", output.name, write_summary.adopted);
