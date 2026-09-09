@@ -9,11 +9,13 @@ use std::{
 };
 
 mod cleanup;
+mod contention;
 mod export;
 mod health;
 mod leases;
 mod outputs;
 mod registry;
+mod scheduling;
 mod service;
 mod status;
 

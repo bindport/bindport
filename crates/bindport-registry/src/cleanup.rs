@@ -43,7 +43,12 @@ impl Registry {
     ) -> Result<CleanSummary, RegistryError> {
         self.reconcile_stale_active_leases()?;
 
-        let transaction = self.connection.transaction()?;
+        let behavior = if dry_run {
+            TransactionBehavior::Deferred
+        } else {
+            TransactionBehavior::Immediate
+        };
+        let transaction = self.connection.transaction_with_behavior(behavior)?;
         let mut summary = CleanSummary::default();
 
         for state in [CleanState::Stopped, CleanState::Stale] {
@@ -111,7 +116,13 @@ impl Registry {
 
         self.reconcile_stale_active_leases()?;
 
-        let total_leases = self.connection.query_row(
+        let behavior = if dry_run {
+            TransactionBehavior::Deferred
+        } else {
+            TransactionBehavior::Immediate
+        };
+        let transaction = self.connection.transaction_with_behavior(behavior)?;
+        let total_leases = transaction.query_row(
             "SELECT COUNT(*)
              FROM leases
              WHERE port BETWEEN ?1 AND ?2",
@@ -124,7 +135,6 @@ impl Registry {
         }
 
         let prune_count = total_leases - max_total_leases;
-        let transaction = self.connection.transaction()?;
         let stale_lease_ids = {
             let mut statement = transaction.prepare(
                 "SELECT id
