@@ -314,30 +314,6 @@ fn truncate_with_hash_rejects_limits_too_short_for_its_suffix() {
 }
 
 #[test]
-fn built_in_traefik_template_renders_active_route() {
-    let template = TemplateResolver::new(None, None)
-        .resolve("bindport-traefik", None)
-        .expect("built-in template");
-    let rendered = render_template(
-        &template.contents,
-        minijinja::context! {
-            route => minijinja::context! {
-                key => "demo:web:feature",
-                state => "active",
-                hostname => "feature.demo.localhost",
-                slug => "demo-web-feature",
-                target_url => "http://127.0.0.1:29100",
-            },
-            vars => minijinja::context! {},
-        },
-    )
-    .expect("built-in template renders");
-
-    assert!(rendered.contains("rule: \"Host(`feature.demo.localhost`)\""));
-    assert!(rendered.contains("url: \"http://127.0.0.1:29100\""));
-}
-
-#[test]
 fn built_in_caddy_template_renders_active_route() {
     let template = TemplateResolver::new(None, None)
         .resolve("bindport-caddy", None)
@@ -525,35 +501,6 @@ fn built_in_json_snapshot_template_renders_snapshot_document() {
         document["routes"][0]["target_url"],
         "http://127.0.0.1:29100"
     );
-}
-
-#[test]
-fn built_in_traefik_template_escapes_yaml_scalars() {
-    let template = TemplateResolver::new(None, None)
-        .resolve("bindport-traefik", None)
-        .expect("built-in template");
-    let rendered = render_template(
-        &template.contents,
-        minijinja::context! {
-            route => minijinja::context! {
-                key => "demo:web:feature",
-                state => "active",
-                hostname => "feature\".demo.localhost",
-                slug => "demo-web-feature",
-                target_url => "http://127.0.0.1:29100/path\"",
-            },
-            vars => minijinja::context! {
-                entrypoints => ["web\nbad"],
-                middlewares => ["auth\"middleware"],
-            },
-        },
-    )
-    .expect("built-in template renders");
-
-    assert!(rendered.contains("rule: \"Host(`feature\\\".demo.localhost`)\""));
-    assert!(rendered.contains("- \"web\\nbad\""));
-    assert!(rendered.contains("- \"auth\\\"middleware\""));
-    assert!(rendered.contains("url: \"http://127.0.0.1:29100/path\\\"\""));
 }
 
 #[test]

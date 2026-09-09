@@ -143,7 +143,7 @@ target_scheme = "http"
 [[outputs]]
 name = "traefik"
 template = "bindport-traefik"
-target = "traefik/{{ route.slug }}.yml"
+target = "traefik/{{ route.unique_slug }}.yml"
 
 [[outputs]]
 name = "env-local"

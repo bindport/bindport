@@ -5,13 +5,13 @@
 {% if route.state == "active" and route.hostname %}
 http:
   routers:
-    {{ route.slug }}:
+    {{ route.unique_slug }}:
       rule: {{ ("Host(`" ~ route.hostname ~ "`)") | tojson }}
       entryPoints:
 {% for entrypoint in entrypoints %}
         - {{ entrypoint | tojson }}
 {% endfor %}
-      service: {{ route.slug | tojson }}
+      service: {{ route.unique_slug | tojson }}
 {% if tls %}
       tls: {}
 {% endif %}
@@ -22,7 +22,7 @@ http:
 {% endfor %}
 {% endif %}
   services:
-    {{ route.slug }}:
+    {{ route.unique_slug }}:
       loadBalancer:
         servers:
           - url: {{ route.target_url | tojson }}

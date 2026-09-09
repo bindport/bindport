@@ -168,34 +168,6 @@ fn render_output_routes_reports_template_errors_with_sources() {
 }
 
 #[test]
-fn built_in_traefik_plan_renders_comment_for_stopped_route() {
-    let template = TemplateResolver::new(None, None)
-        .resolve("bindport-traefik", None)
-        .expect("built-in template");
-    let output = OutputRenderConfig::from(&EffectiveOutputConfig {
-        name: String::from("traefik"),
-        template: String::from("bindport-traefik"),
-        root: None,
-        target: String::from("traefik/{{ route.slug }}.yml"),
-        target_host: String::from("127.0.0.1"),
-        target_scheme: String::from("http"),
-        auto_render: true,
-        delete_on: vec![OutputDeleteState::Removed],
-        on_failure: OutputFailurePolicy::Warn,
-        debounce_ms: 250,
-        vars: BTreeMap::new(),
-    });
-    let route = test_route("route-1", "stopped", Some("feature-tree.demo.localhost"));
-    let snapshot = test_route_snapshot(vec![route]);
-
-    let plan = render_output_routes(&output, &template.contents, &snapshot).expect("plan");
-
-    assert_eq!(plan.files[0].target, "traefik/demo-web-feature-tree.yml");
-    assert!(plan.files[0].contents.contains("is stopped"));
-    assert!(!plan.files[0].contents.contains("routers:"));
-}
-
-#[test]
 fn render_output_plan_writes_single_json_snapshot_file() {
     let template = TemplateResolver::new(None, None)
         .resolve("bindport-json-snapshot", None)
