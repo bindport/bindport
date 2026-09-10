@@ -239,8 +239,19 @@ config values must not contain control characters.
 
 ## Template Placeholders
 
-Wrapped commands always receive `PORT=<assigned>`. Service `command`, `args`,
-env, hostname, route URL, and health URL templates can use:
+Wrapped commands always receive `PORT=<assigned>`, overriding inherited `PORT`,
+service `env.PORT`, and CLI `--env PORT=...` values. Conflicting values are
+replaced without a warning or a conflict error; they do not change the assigned
+port or registry metadata. `env.PORT = "{port}"` remains valid but is optional.
+Environment templates are still validated and expanded before spawning, even
+for `PORT`.
+
+BindPort sets the child's environment; it cannot force an app to honor `PORT`
+or rewrite an explicit application port flag. Use `{port}` in configured
+`command` or `args` for apps that require a port flag.
+
+Service `command`, `args`, env, hostname, route URL, and health URL templates
+can use:
 
 ```text
 {port}

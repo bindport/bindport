@@ -21,8 +21,14 @@ The child receives:
 
 - `PORT`: the assigned port.
 - inherited stdio.
-- inherited parent environment, except values overridden by service config or
-  `--env`.
+- inherited parent environment, except values overridden by service config,
+  `--env`, or BindPort's assigned `PORT`.
+
+The assigned `PORT` always wins over inherited `PORT`, service `env.PORT`, and
+CLI `--env PORT=...`. Conflicting values are replaced without a warning or a
+conflict error, not used to select a different port. `env.PORT = "{port}"` is
+valid but optional. For example, if BindPort assigns 29123, `--env PORT=3000`
+still gives the child `PORT=29123`, matching the registry.
 
 Use a shell only when shell expansion is intentional:
 
@@ -150,8 +156,10 @@ readiness behavior.
 
 ## Framework Port Flags
 
-Some frameworks honor `PORT`; others require a CLI flag. BindPort supports both
-patterns through templates.
+Some frameworks honor `PORT`; others require a CLI flag. BindPort cannot force
+an app to use its assigned port or rewrite an explicit application port flag.
+Use `{port}` in configured arguments, or expand `$PORT` in a child shell, rather
+than hardcoding a port.
 
 Next.js:
 
