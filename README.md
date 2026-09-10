@@ -274,9 +274,14 @@ path = "apps/api"
 hostname = "{branch}.example-api.localhost"
 ```
 
-Wrapped commands always receive `PORT=<assigned>`. Service command, argument,
-and env templates can pass the assigned port as an argv value for tools that do
-not read `PORT` from the environment:
+Wrapped commands always receive `PORT=<assigned>`, overriding inherited `PORT`,
+service `env.PORT`, and CLI `--env PORT=...` values. Conflicting values are
+replaced without a warning; they do not change the assignment. Setting
+`env.PORT = "{port}"` is valid but optional.
+
+BindPort cannot force an app to honor `PORT` or override its own port flags.
+Service command and argument templates can pass the assigned port as an argv
+value for tools that do not read `PORT` from the environment:
 
 ```toml
 [[services]]
@@ -330,7 +335,8 @@ deterministic hash-preserving suffix, while malformed hostnames fail before
 reservation or child spawn. Derive custom route URLs from `{hostname}` to keep
 the registered URL and proxy hostname aligned.
 `bindport run --env NAME=VALUE`, `--hostname TEMPLATE`, `--route-url TEMPLATE`,
-and `--health-url TEMPLATE` override service config for a single run.
+and `--health-url TEMPLATE` override service config for a single run, except
+that `PORT` always receives the assigned port.
 `BINDPORT_HOSTNAME`, `BINDPORT_ROUTE_URL`, and
 `BINDPORT_HEALTH_URL` can also override the matching service config values for
 wrapper scripts.

@@ -92,6 +92,15 @@ project config root supplies the equivalent shared scope. They do not apply to
 CLI, route metadata, outputs, or hooks. Port assignment does not imply readiness;
 BindPort does not start, order, supervise, or wait for dependencies.
 
+Wrapped children always receive `PORT=<assigned>`, overriding inherited `PORT`,
+service `env.PORT`, and CLI `--env PORT=...`. Conflicting values are replaced
+without a warning or a conflict error; they do not change port allocation or
+registry metadata. `env.PORT = "{port}"` is valid but optional. Environment
+templates are still validated and expanded before spawn, including `PORT`.
+BindPort cannot force an app to honor this environment value or rewrite its
+explicit port flags. Use `{port}` in configured `command` or `args`, or expand
+`$PORT` in a child shell, for apps that need a port flag.
+
 ## CLI Contract
 
 The canonical v1-candidate command/flag, exit, and machine-output policy is

@@ -201,6 +201,8 @@ pub fn spawn_child_with_hints(
     spawn_child_on_port(command, port, &[])
 }
 
+/// Spawns a wrapped command with `PORT` set to `port`, overriding inherited
+/// values and any `PORT` entries in `extra_env`.
 pub fn spawn_child_on_port(
     command: &[String],
     port: u16,
@@ -214,6 +216,8 @@ pub fn spawn_child_on_port(
     spawn_child_on_port_with_context(command, port, None, &extra_env)
 }
 
+/// Spawns a wrapped command in `cwd` with `PORT` set to `port`, overriding
+/// inherited values and any `PORT` entries in `extra_env`.
 pub fn spawn_child_on_port_with_context(
     command: &[String],
     port: u16,
@@ -228,6 +232,7 @@ pub fn spawn_child_on_port_with_context(
     let mut process = Command::new(program);
     process
         .args(args)
+        .envs(extra_env.iter().map(|(name, value)| (name, value)))
         .env(PORT_ENV_VAR, port.to_string())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -235,7 +240,6 @@ pub fn spawn_child_on_port_with_context(
     if let Some(cwd) = cwd {
         process.current_dir(cwd);
     }
-    process.envs(extra_env.iter().map(|(name, value)| (name, value)));
     prepare_child_signal_mask(&mut process, &signal_forwarding);
 
     let child = match process.spawn() {
