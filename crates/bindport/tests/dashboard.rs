@@ -2,6 +2,17 @@
 
 mod support;
 
+#[cfg(unix)]
+#[path = "dashboard/service_support.rs"]
+mod service_support;
+
+#[cfg(unix)]
+#[path = "dashboard/hooks.rs"]
+mod hooks;
+#[cfg(unix)]
+#[path = "dashboard/shutdown.rs"]
+mod shutdown;
+
 #[path = "dashboard/clean.rs"]
 mod clean;
 #[cfg(unix)]

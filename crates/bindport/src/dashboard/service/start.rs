@@ -26,6 +26,9 @@ pub(crate) fn start_dashboard_service(
         command.env(options.token_env_name(), token);
     }
 
+    #[cfg(unix)]
+    command.env(background::BACKGROUND_ENV, "1");
+
     let mut child = command.spawn()?;
     let pid = child.id();
     let process_start_time = process_start_time(pid);

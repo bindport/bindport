@@ -13,6 +13,7 @@ mod request;
 mod response;
 mod routing;
 mod server;
+mod shutdown;
 
 static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
