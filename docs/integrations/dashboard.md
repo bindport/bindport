@@ -49,6 +49,21 @@ is unavailable, PID reuse can still leave stale state that needs manual
 cleanup. Background dashboard stderr is written to `dashboard.log` in the
 same state directory, and startup failures include the first logged error.
 
+`start`, `status`, and `stop` serialize their state access with an operating-system
+lock on `dashboard.lock` in that directory. Concurrent starts wait for the first
+starter to finish and then report its running PID and URL instead of spawning
+another server. The lock covers startup through the state write, and stop
+through the termination signal and state removal. It is scoped to the state
+directory, not the project or registry path.
+
+Leave `dashboard.lock` in place. Its presence does not mean the dashboard is
+running; the operating system releases the lock when the lifecycle command
+exits or is killed. A waiting command can remain blocked while another lifecycle
+command is still running. This coordination does not cover separately launched
+foreground `serve` processes or older binaries that do not use the lock. It
+also does not recover an unrecorded child if a starter is killed after spawning
+it but before writing the state file.
+
 ## Port Selection
 
 The dashboard binds to `127.0.0.1:27080` by default. If that port is already in

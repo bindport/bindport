@@ -4,8 +4,13 @@ mod support;
 
 #[path = "dashboard/clean.rs"]
 mod clean;
+#[cfg(unix)]
+#[path = "dashboard/lifecycle.rs"]
+mod lifecycle;
 #[path = "dashboard/options.rs"]
 mod options;
+#[path = "dashboard/ports.rs"]
+mod ports;
 #[path = "dashboard/registration.rs"]
 mod registration;
 #[path = "dashboard/routing.rs"]
