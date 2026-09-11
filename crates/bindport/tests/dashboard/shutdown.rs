@@ -87,8 +87,8 @@ fn foreground_terminal_ctrl_c_records_stopped() {
                 &mut master,
                 &mut slave,
                 std::ptr::null_mut(),
-                std::ptr::null(),
-                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
             )
         },
         0
@@ -113,7 +113,7 @@ fn foreground_terminal_ctrl_c_records_stopped() {
     // reports errors before exec. The slave is already installed as stdin.
     unsafe {
         command.pre_exec(|| {
-            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY, 0) == -1 {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())
