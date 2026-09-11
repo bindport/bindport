@@ -15,6 +15,7 @@ mod health;
 mod leases;
 mod outputs;
 mod registry;
+mod reservation_preflight;
 mod scheduling;
 mod service;
 mod status;

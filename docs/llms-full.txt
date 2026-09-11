@@ -25,7 +25,14 @@ BindPort does not bind `80` or `443`, install certificates, mutate DNS, edit
   `--env` because no child is spawned.
 - `bindport reserve --all` idempotently prepares every named service in the
   discovered project and current worktree without starting children or owning
-  sockets. All new reservations commit together or not at all.
+  sockets. All new reservations commit together or not at all. Blocking auto-output
+  preflight checks existing routes plus all planned reserved routes before inserts;
+  failure inserts no new reservations and runs no batch rendering or hooks. Earlier
+  stale-lease housekeeping is not rolled back. Fully reused batches skip preflight,
+  auto-rendering, and start hooks; use `bindport render` for output-only changes.
+  Batches that create reservations emit one start event. Post-commit render failures
+  still warn without undoing reservations; filesystem and registry updates are not
+  atomic.
 - `bindport release [service|port]` releases a reserved port.
 - `bindport status [--json]` reads registry state.
 - `bindport list [--json]` groups registry services by project.
