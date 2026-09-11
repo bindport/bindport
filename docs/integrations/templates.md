@@ -497,9 +497,19 @@ code by default. Set `on_failure = "block"` on an output when startup should
 fail if BindPort cannot validate the required output plan before spawning the
 child process. The blocking check renders the pending route in memory and
 verifies template lookup, target rendering, path safety, target collisions, and
-existing DB-owned file hashes. Post-spawn, exit, and cleanup render failures are
-still warnings because BindPort does not roll back already-running processes or
-completed lifecycle cleanup.
+existing DB-owned file hashes. `reserve --all` checks the combined snapshot of
+existing routes and all planned reserved routes before inserting new reservations.
+A blocking preflight failure inserts no new reservations and does not write batch
+outputs or run batch hooks; earlier stale-lease housekeeping is not rolled back.
+Outputs with `auto_render = false` or `on_failure = "warn"` do not block reservations.
+A batch that reuses every service skips preflight, auto-rendering, and start hooks;
+use `bindport render` to apply output changes in that case.
+
+Preflight does not make filesystem and registry updates atomic: concurrent
+changes or later I/O errors can still cause rendering to fail after reservation.
+Post-reservation, post-spawn, exit, and cleanup render failures remain warnings;
+BindPort does not roll back committed reservations, already-running processes,
+or completed lifecycle cleanup.
 
 `bindport status --json` exposes top-level output summaries plus per-service
 output status from the same registry records. The legacy `proxy` field is a

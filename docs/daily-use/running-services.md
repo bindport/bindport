@@ -138,6 +138,17 @@ bindport run web
 bindport run api
 ```
 
+Before inserting new batch reservations, BindPort preflights auto-render outputs
+with `on_failure = "block"` against existing routes plus all planned reserved
+routes. A preflight failure inserts no new reservations and does not render
+outputs or run hooks for the batch. Existing stale-lease reconciliation and
+range-pressure pruning can still happen first.
+
+If every service is already active or reserved, `reserve --all` reuses it without
+output preflight, auto-rendering, or start hooks. A batch that creates reservations
+emits one start event, even when it also reuses existing services. Use
+`bindport render` to apply output changes when no new reservation is needed.
+
 The exact syntax is `{services.<name>.<field>}`. Allowed fields are `port`,
 `host`, `url`, `hostname`, `route_url`, and `health_url`, and the syntax is
 available only in configured service `env`, `command`, and `args`. Lookup uses

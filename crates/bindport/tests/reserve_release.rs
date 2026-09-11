@@ -2,6 +2,9 @@
 
 mod support;
 
+#[path = "reserve_release/batch.rs"]
+mod batch;
+
 use support::*;
 
 #[test]
