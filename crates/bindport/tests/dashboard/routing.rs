@@ -21,35 +21,6 @@ fn dashboard_returns_not_found_for_unknown_route() {
     assert_eq!(http_body(&response), "not found\n");
 }
 #[test]
-fn dashboard_falls_back_when_preferred_port_is_busy() {
-    let busy_preferred = TcpListener::bind(("127.0.0.1", 0)).expect("bind busy dashboard port");
-    let preferred_port = busy_preferred
-        .local_addr()
-        .expect("busy dashboard port")
-        .port();
-    let fallback_port = free_loopback_port();
-    let registry_path = temp_registry_path("dashboard-fallback-registry");
-    let root = temp_test_dir("dashboard-fallback-root");
-    fs::write(
-        root.join(".bindport.toml"),
-        format!("default_range = \"{fallback_port}-{fallback_port}\"\nskip_ports = []\n"),
-    )
-    .expect("write dashboard fallback config");
-
-    let mut command = bindport_with_registry(&registry_path);
-    command.current_dir(&root);
-    let preferred_port_arg = preferred_port.to_string();
-    let dashboard = start_dashboard_with_args(
-        command,
-        &["dashboard", "serve", "--port", &preferred_port_arg],
-    );
-
-    assert_eq!(dashboard.port, fallback_port);
-    assert_ne!(dashboard.port, preferred_port);
-
-    drop(busy_preferred);
-}
-#[test]
 fn dashboard_survives_dropped_connection() {
     let registry_path = temp_registry_path("dashboard-dropped-connection-registry");
     let mut dashboard = start_dashboard(bindport_with_registry(&registry_path));

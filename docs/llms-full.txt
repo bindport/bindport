@@ -227,6 +227,15 @@ reserved, stopped, and stale registry state; route URLs; output status; health
 status; and hook trust visibility. It can clean stopped and stale entries but
 cannot approve hooks.
 
+Background `dashboard start`, `status`, and `stop` share an operating-system
+lock on `dashboard.lock` in the BindPort state directory. Concurrent starts
+wait and reuse the recorded running instance. The lock covers startup through
+state recording and stop through signaling and state removal. It is scoped to
+the state directory, not the project or registry. Leave the lock file in place;
+the operating system releases the lock when the lifecycle command exits or is
+killed. Foreground `serve` and older binaries are not coordinated by this lock.
+It does not recover a child whose starter dies before recording its state.
+
 ## Security And Privacy
 
 The canonical contract is `docs/operations/security.md`. BindPort is not a

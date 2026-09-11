@@ -102,8 +102,11 @@ Other state under the BindPort state directory includes:
 - `hooks-trust.json`, containing trust subjects, decisions, full hook
   definitions/argv, target fingerprints, hashes, and timestamps;
 - `dashboard.state`, containing the background dashboard PID, URL, and Linux
-  process-start value when available; and
-- `dashboard.log`, containing background dashboard stderr.
+  process-start value when available;
+- `dashboard.log`, containing background dashboard stderr; and
+- `dashboard.lock`, a persistent file whose operating-system lock serializes
+  background `dashboard start`, `status`, and `stop`. BindPort stores no data in
+  this file.
 
 Those files are local state, not encrypted secret storage. Their creation uses
 the user's state directory and normal filesystem protections; only the registry
