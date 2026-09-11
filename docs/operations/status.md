@@ -26,6 +26,13 @@ loopback HTTP health probe, so status/list/open/dashboard reads are not pure
 byte-for-byte database reads. Use cleanup commands when the history is no
 longer useful.
 
+Each supported HTTP health probe has one 300 ms networking budget shared by
+connection setup, request writes, and response reads. Partial progress does not
+restart the budget. A timeout reports `failing`, even if part of a success status
+arrived. This is a per-probe deadline, not a 300 ms limit for the entire snapshot;
+multiple probes and other registry work can take longer. OS scheduling can also
+delay when a timeout is observed.
+
 ## Human Status
 
 Run:

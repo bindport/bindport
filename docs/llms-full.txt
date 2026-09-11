@@ -264,8 +264,12 @@ encryption is promised.
 
 The installed runtime has no telemetry or update check. BindPort performs
 loopback port probes, loopback-only HTTP health probes during status reads, the
-configured dashboard listener, and explicit browser launching. Wrapped
-children, approved hooks, browsers, package managers, and release tooling are
+configured dashboard listener, and explicit browser launching. Each HTTP health
+probe shares one 300 ms networking budget across connect, request writes, and
+response reads; partial progress does not restart it. Timeouts report failing,
+including after a partial success status. This budget is per probe, not per
+snapshot, and OS scheduling can delay observing expiry. Wrapped children,
+approved hooks, browsers, package managers, and release tooling are
 separate processes that may use broader networks.
 
 ## Agent Safety Rules

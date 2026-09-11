@@ -12,6 +12,7 @@ mod cleanup;
 mod contention;
 mod export;
 mod health;
+mod health_probe;
 mod leases;
 mod outputs;
 mod registry;
