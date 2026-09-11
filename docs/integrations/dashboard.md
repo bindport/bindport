@@ -22,7 +22,11 @@ The command prints the URL before serving requests:
 dashboard: http://127.0.0.1:27080
 ```
 
-Stop it with `Ctrl-C`.
+On Unix, `Ctrl-C` (SIGINT) and SIGTERM stop the accept loop and let the
+process attempt to record its registered run as stopped before exiting
+successfully. Registry write failures produce warnings.
+SIGKILL and other abrupt exits cannot run that cleanup and can leave stale
+registry state. Shutdown does not wait for in-flight requests or hooks.
 
 Pass `--register-service` when you want the dashboard process itself to appear
 in `bindport status` and `/api/status`:
@@ -46,8 +50,12 @@ checks recorded process start data and command shape through `/proc` before
 signaling it. On macOS, it uses PID liveness plus best-effort command inspection
 through `ps`, but cannot compare Linux-style process start data. If inspection
 is unavailable, PID reuse can still leave stale state that needs manual
-cleanup. Background dashboard stderr is written to `dashboard.log` in the
-same state directory, and startup failures include the first logged error.
+cleanup. `stop` returns after sending SIGTERM and removing its state file;
+it does not wait for the server's registry cleanup to finish. Background
+dashboard stderr and post-startup stdout, including trusted hook output, are
+written to `dashboard.log` in the same state directory. Startup failures include
+the first logged error. Foreground `serve` and ordinary CLI hooks keep their
+normal stdout and stderr destinations, including shell redirection.
 
 `start`, `status`, and `stop` serialize their state access with an operating-system
 lock on `dashboard.lock` in that directory. Concurrent starts wait for the first

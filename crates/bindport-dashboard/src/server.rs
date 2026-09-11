@@ -1,5 +1,8 @@
 use super::*;
 
+mod connection;
+pub(crate) use connection::*;
+
 pub struct DashboardServer {
     listener: TcpListener,
     options: DashboardOptions,
@@ -30,19 +33,9 @@ impl DashboardServer {
     }
 
     pub fn serve(self) -> Result<(), DashboardError> {
-        let options = self.options;
         for stream in self.listener.incoming() {
             match stream {
-                Ok(stream) => {
-                    let options = options.clone();
-                    thread::spawn(move || {
-                        if let Err(error) = handle_connection(stream, &options)
-                            && !is_routine_client_error(&error)
-                        {
-                            eprintln!("dashboard: request error: {error}");
-                        }
-                    });
-                }
+                Ok(stream) => self.spawn_connection(stream),
                 Err(error) => {
                     eprintln!("dashboard: accept error: {error}");
                 }
@@ -50,6 +43,40 @@ impl DashboardServer {
         }
 
         Ok(())
+    }
+
+    /// Stops accepting connections when `should_stop` returns true, polling
+    /// after a 25 ms sleep while idle. Does not wait for existing request threads.
+    pub fn serve_until(self, should_stop: impl Fn() -> bool) -> io::Result<()> {
+        self.listener.set_nonblocking(true)?;
+        while !should_stop() {
+            match self.listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false)?;
+                    self.spawn_connection(stream);
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    eprintln!("dashboard: accept error: {error}");
+                    thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn spawn_connection(&self, stream: TcpStream) {
+        let options = self.options.clone();
+        thread::spawn(move || {
+            if let Err(error) = handle_connection(stream, &options)
+                && !is_routine_client_error(&error)
+            {
+                eprintln!("dashboard: request error: {error}");
+            }
+        });
     }
 }
 
@@ -93,47 +120,4 @@ pub(crate) fn fallback_ports(options: &DashboardOptions) -> impl Iterator<Item =
 
         (!options.skip_ports.contains(&port)).then_some(port)
     })
-}
-
-pub(crate) fn handle_connection(
-    mut stream: TcpStream,
-    options: &DashboardOptions,
-) -> io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    let request = match read_request(&stream) {
-        Ok(Some(request)) => request,
-        Ok(None) => return Ok(()),
-        Err(error) if is_routine_client_error(&error) => return Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-            let response = if error.to_string().contains("too large") {
-                HttpResponse::request_too_large()
-            } else {
-                HttpResponse::bad_request()
-            };
-            write_response(&mut stream, response)?;
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    };
-    let response = response_for_request(&request, options);
-
-    write_response(&mut stream, response)
-}
-
-pub(crate) fn write_response(stream: &mut TcpStream, response: HttpResponse) -> io::Result<()> {
-    stream.write_all(&response.into_bytes())?;
-    stream.flush()
-}
-
-pub(crate) fn is_routine_client_error(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::BrokenPipe
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::TimedOut
-            | io::ErrorKind::UnexpectedEof
-            | io::ErrorKind::WouldBlock
-    )
 }

@@ -103,7 +103,8 @@ Other state under the BindPort state directory includes:
   definitions/argv, target fingerprints, hashes, and timestamps;
 - `dashboard.state`, containing the background dashboard PID, URL, and Linux
   process-start value when available;
-- `dashboard.log`, containing background dashboard stderr; and
+- `dashboard.log`, containing background dashboard stderr and post-startup
+  stdout, including trusted hook output; and
 - `dashboard.lock`, a persistent file whose operating-system lock serializes
   background `dashboard start`, `status`, and `stop`. BindPort stores no data in
   this file.

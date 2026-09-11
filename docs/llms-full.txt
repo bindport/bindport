@@ -235,6 +235,15 @@ the state directory, not the project or registry. Leave the lock file in place;
 the operating system releases the lock when the lifecycle command exits or is
 killed. Foreground `serve` and older binaries are not coordinated by this lock.
 It does not recover a child whose starter dies before recording its state.
+Background dashboard stderr and post-startup stdout, including trusted hook
+output, go to `dashboard.log`. Foreground `serve` and ordinary CLI hooks keep
+normal stdout/stderr destinations, including shell redirection.
+On Unix, SIGTERM and SIGINT (including foreground Ctrl-C) stop the accept loop
+and attempt to record a registered run as stopped before a successful exit;
+registry write failures produce warnings. SIGKILL or
+other abrupt exits can leave stale state. `dashboard stop` returns after
+signaling and removing state, without waiting for registry cleanup. Shutdown
+does not wait for in-flight requests or hooks.
 
 ## Security And Privacy
 
