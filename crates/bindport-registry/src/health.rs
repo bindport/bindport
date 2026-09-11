@@ -1,5 +1,9 @@
 use super::*;
 
+mod probe;
+
+pub(crate) use probe::probe_http_target;
+
 pub(crate) fn health_status(state: &str, health_url: Option<&str>, run_age_ms: i64) -> String {
     if state != "active" {
         return String::from("unknown");
@@ -129,64 +133,4 @@ pub(crate) fn loopback_socket_addr(host: &str, port: u16) -> Option<SocketAddr> 
     let lower = normalized.to_ascii_lowercase();
     (lower == "localhost" || lower.ends_with(".localhost"))
         .then_some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
-}
-
-pub(crate) fn probe_http_target(target: &HttpHealthTarget) -> io::Result<u16> {
-    let mut stream = TcpStream::connect_timeout(&target.address, HEALTH_CHECK_TIMEOUT)?;
-    stream.set_read_timeout(Some(HEALTH_CHECK_TIMEOUT))?;
-    stream.set_write_timeout(Some(HEALTH_CHECK_TIMEOUT))?;
-    write!(
-        stream,
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        target.path, target.authority
-    )?;
-
-    let mut response = Vec::new();
-    let mut buffer = [0_u8; 128];
-    while response.len() < 1024 {
-        match stream.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(bytes) => {
-                response.extend_from_slice(&buffer[..bytes]);
-                if response.contains(&b'\n') {
-                    break;
-                }
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) && !response.is_empty() =>
-            {
-                break;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    if response.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "empty health response",
-        ));
-    }
-
-    let response = std::str::from_utf8(&response)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let status = response
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "missing HTTP status in `{}`",
-                    response.lines().next().unwrap_or_default()
-                ),
-            )
-        })?;
-
-    Ok(status)
 }

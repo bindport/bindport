@@ -211,7 +211,8 @@ check. It does perform these local network operations:
 - optional HTTP health probes when a registry snapshot is built for status,
   list, open, rendering, or the dashboard, limited to loopback IPs, `localhost`,
   and `*.localhost`, with no DNS lookup, HTTPS, redirect following, or
-  non-loopback destination;
+  non-loopback destination. Each probe shares one 300 ms deadline across connect,
+  request writes, and response reads; trickling bytes does not renew that budget;
 - the dashboard HTTP listener on its configured IPv4 address; and
 - browser launching when explicitly requested.
 
