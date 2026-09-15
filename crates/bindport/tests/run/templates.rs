@@ -6,15 +6,16 @@ use crate::support::*;
 fn run_cli_templates_override_service_config() {
     let registry_path = temp_registry_path("cli-template-registry");
     let root = temp_test_dir("cli-template-root");
-    let port = free_loopback_port();
+    let (mut range_guards, range_start, range_end) = guarded_port_range();
     fs::write(
         root.join(".bindport.toml"),
         format!(
-            "project = \"template-project\"\ndefault_range = \"{port}-{port}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"config.{{project}}.localhost\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"config\"\n"
+            "project = \"template-project\"\ndefault_range = \"{range_start}-{range_end}\"\nskip_ports = []\n[[services]]\nname = \"web\"\nhostname = \"config.{{project}}.localhost\"\nenv.NEXT_PUBLIC_BINDPORT_URL = \"config\"\n"
         ),
     )
     .expect("write service config");
 
+    range_guards.truncate(1);
     let output = bindport_with_registry(&registry_path)
         .current_dir(&root)
         .args([
@@ -45,6 +46,8 @@ fn run_cli_templates_override_service_config() {
         .expect("run bindport status");
     let status = serde_json::from_slice::<Value>(&status_output.stdout).expect("status json");
 
+    let assigned_port = status["services"][0]["port"].as_u64().expect("port");
+    assert!((u64::from(range_start + 1)..=u64::from(range_end)).contains(&assigned_port));
     assert_eq!(status["services"][0]["hostname"], "cli-web.localhost");
     assert_eq!(
         status["services"][0]["route_url"],
