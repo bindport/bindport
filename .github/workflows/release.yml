@@ -105,7 +105,7 @@ jobs:
           fi
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.asset_name }}
           path: dist/*
@@ -125,7 +125,7 @@ jobs:
           persist-credentials: false
 
       - name: Install mise
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
           version: 2026.9.2
           sha256: 2950f8e1c59f3d9716bc3ee7d9242de94f9ab4054d97e65e12f2e67867c5f8fd
@@ -214,7 +214,7 @@ jobs:
         run: git diff --exit-code
 
       - name: Download release artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
