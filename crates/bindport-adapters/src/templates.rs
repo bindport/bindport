@@ -115,7 +115,7 @@ pub fn render_template<S: serde::Serialize>(
     environment.add_filter("dotenv", dotenv_escape);
     environment.add_filter("truncate_with_hash", truncate_with_hash);
 
-    let rendered = environment.render_str(template, context)?;
+    let rendered = environment.render_str(template, minijinja::value::Serde(context))?;
     if rendered.len() > MAX_RENDERED_TEMPLATE_BYTES {
         return Err(TemplateError::OutputTooLarge {
             bytes: rendered.len(),
