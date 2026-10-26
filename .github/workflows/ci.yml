@@ -25,7 +25,7 @@ jobs:
           persist-credentials: false
 
       - name: Install mise
-        uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           version: 2026.9.2
           sha256: 2950f8e1c59f3d9716bc3ee7d9242de94f9ab4054d97e65e12f2e67867c5f8fd
